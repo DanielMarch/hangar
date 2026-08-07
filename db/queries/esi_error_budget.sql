@@ -24,3 +24,20 @@ UPDATE app.esi_error_budget
 
 -- name: SetErrorBudgetPaused :exec
 UPDATE app.esi_error_budget SET paused = $1, updated_at = now() WHERE id = 1;
+
+-- name: RecordErrorAgainstBudget :one
+-- 01_ARCHITECTURE.md §5.7: 100 non-2XX/3XX responses per FIXED 60-second
+-- window, installation-wide. A single atomic UPDATE (not a
+-- read-then-branch-then-write from Go) so two replicas recording an error
+-- at the same instant can never both observe a stale window_start and
+-- double-reset it: whichever row version a transaction sees, the CASE
+-- either rolls the window over or increments it, and Postgres's per-row
+-- MVCC serialises the two outcomes.
+UPDATE app.esi_error_budget
+   SET window_start = CASE WHEN now() - window_start >= sqlc.arg(error_window)::interval
+                            THEN now() ELSE window_start END,
+       error_count   = CASE WHEN now() - window_start >= sqlc.arg(error_window)::interval
+                            THEN 1 ELSE error_count + 1 END,
+       updated_at    = now()
+ WHERE id = 1
+RETURNING *;

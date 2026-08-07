@@ -24,6 +24,35 @@ type Config struct {
 	Redis  RedisConfig
 	Crypto CryptoConfig
 	SSO    SSOConfig
+	ESI    ESIConfig
+}
+
+// ESIConfig governs Phase 3/4's outbound gateway: the conditional-cache
+// floor, the two rate-limit governors, and how long an in-flight request is
+// allowed to hold a predictive reservation open (01_ARCHITECTURE.md §5.5,
+// §5.7).
+type ESIConfig struct {
+	// RequestTimeout bounds a single outbound ESI call. It is also the
+	// deadline stamped on a Governor 1 predictive reservation at issue
+	// time (§5.5): a request that never returns has its reservation
+	// expire — and be charged the worst case — at this deadline, never
+	// held open indefinitely.
+	RequestTimeout time.Duration
+	// TTLFloor is the minimum poll interval enforced regardless of what
+	// the spec declares (§6.2), and the snooze duration for a headerless
+	// 429 that carries no Retry-After (§5.5's edge case).
+	TTLFloor time.Duration
+	// ErrorLimitWindow is Governor 2's fixed window (§5.7): 100
+	// non-2XX/3XX responses per this duration, installation-wide.
+	ErrorLimitWindow time.Duration
+	// ErrorLimitMax is the window's error budget (100 per the spec).
+	ErrorLimitMax int
+	// ErrorLimitPauseAt / ErrorLimitResumeAt are the hysteresis pair:
+	// pause proactively when remaining budget falls to this value,
+	// resume only once it climbs back to the (higher) resume threshold —
+	// otherwise the installation oscillates in and out of pause.
+	ErrorLimitPauseAt  int
+	ErrorLimitResumeAt int
 }
 
 // DatabaseConfig is PostgreSQL 18 connection configuration (SRS §3.1).
@@ -116,6 +145,13 @@ func applyDefaults(v *viper.Viper) {
 	v.SetDefault("sso_jwks_url", "https://login.eveonline.com/oauth/jwks")
 	v.SetDefault("sso_issuers", "login.eveonline.com,https://login.eveonline.com")
 	v.SetDefault("sso_audience", "EVE Online")
+
+	v.SetDefault("esi_request_timeout", "30s")
+	v.SetDefault("esi_ttl_floor", "300s")
+	v.SetDefault("esi_error_limit_window", "60s")
+	v.SetDefault("esi_error_limit_max", 100)
+	v.SetDefault("esi_error_limit_pause_at", 20)
+	v.SetDefault("esi_error_limit_resume_at", 60)
 }
 
 func splitCSV(s string) []string {
@@ -181,6 +217,14 @@ func Load(v *viper.Viper) (*Config, error) {
 			JWKSURL:      v.GetString("sso_jwks_url"),
 			Issuers:      splitCSV(v.GetString("sso_issuers")),
 			Audience:     v.GetString("sso_audience"),
+		},
+		ESI: ESIConfig{
+			RequestTimeout:     v.GetDuration("esi_request_timeout"),
+			TTLFloor:           v.GetDuration("esi_ttl_floor"),
+			ErrorLimitWindow:   v.GetDuration("esi_error_limit_window"),
+			ErrorLimitMax:      v.GetInt("esi_error_limit_max"),
+			ErrorLimitPauseAt:  v.GetInt("esi_error_limit_pause_at"),
+			ErrorLimitResumeAt: v.GetInt("esi_error_limit_resume_at"),
 		},
 	}
 
