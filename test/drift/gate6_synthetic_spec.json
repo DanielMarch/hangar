@@ -1,0 +1,100 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "EVE Swagger Interface (Gate 6 — spec-drift resilience fixture)",
+    "version": "1.0.0",
+    "description": "04_RELEASE_GATES.md §6.1. Built from testdata/esi/openapi.minimal.json (itself derived from the real snapshot captured at internal/esi/catalogue/embedded/openapi.snapshot.json) plus four injected synthetic operations, one per Gate 6 condition: (a) /synthetic/future-route — a post-pin route; (b) /synthetic/widgets/{widget_id} — a uuid path identifier; (c) /synthetic/scope-grammar — a novel scope grammar matching neither live convention; (d) /synthetic/cache-mode — an unrecognised x-cache-mode value. Authored once, before the gate runs, and never edited in response to a failure (§6.2) — ingesting this file must require ZERO source changes to internal/esi/catalogue."
+  },
+  "servers": [{ "url": "https://esi.evetech.net" }],
+  "paths": {
+    "/corporation/{corporation_id}/mining/extractions": {
+      "get": {
+        "description": "Extraction timers for all moon chunks being extracted by refineries belonging to a corporation.",
+        "operationId": "GetCorporationCorporationIdMiningExtractions",
+        "parameters": [
+          { "in": "path", "name": "corporation_id", "required": true, "description": "The ID of the corporation", "schema": { "$ref": "#/components/schemas/CorporationID" } },
+          { "$ref": "#/components/parameters/CompatibilityDate" }
+        ],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "type": "object" } } } } } },
+        "security": [{ "OAuth2": ["esi-industry.read_corporation_mining.v1"] }],
+        "tags": ["Industry"],
+        "x-cache-age": 1800,
+        "x-compatibility-date": "2020-01-01",
+        "x-rate-limit": { "group": "corp-industry", "max-tokens": 600, "window-size": "15m" },
+        "x-required-roles": ["Station_Manager"],
+        "x-server-cache-mode": "ttl-based"
+      }
+    },
+
+    "/synthetic/future-route": {
+      "get": {
+        "description": "Gate 6 condition (a): a route whose x-compatibility-date is 30 days past the app pin (2026-08-04 + 30d = 2026-09-03). Expected: row created, blocked_by_pin = true, excluded from the scheduling query, surfaced on /admin/esi/catalogue/blocked with a diff.",
+        "operationId": "GetSyntheticFutureRoute",
+        "parameters": [{ "$ref": "#/components/parameters/CompatibilityDate" }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } } },
+        "tags": ["Synthetic"],
+        "x-cache-age": 60,
+        "x-compatibility-date": "2026-09-03",
+        "x-server-cache-mode": "ttl-based"
+      }
+    },
+
+    "/synthetic/widgets/{widget_id}": {
+      "get": {
+        "description": "Gate 6 condition (b): a uuid path identifier. Expected: identifier_types records \"uuid\"; the projected column is uuid, never bigint, never text; hangar admin verify-identifier-types passes with zero code changes.",
+        "operationId": "GetSyntheticWidgetsWidgetId",
+        "parameters": [
+          { "in": "path", "name": "widget_id", "required": true, "description": "type: string, format: uuid — the Gate 6 fixture", "schema": { "type": "string", "format": "uuid" } },
+          { "$ref": "#/components/parameters/CompatibilityDate" }
+        ],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } } },
+        "tags": ["Synthetic"],
+        "x-cache-age": 60,
+        "x-compatibility-date": "2020-01-01",
+        "x-server-cache-mode": "ttl-based"
+      }
+    },
+
+    "/synthetic/scope-grammar": {
+      "get": {
+        "description": "Gate 6 condition (c): a security requirement using a scope string deliberately matching neither ESI's real 'esi-*.*.v1' grammar nor any other assumed pattern. Expected: stored verbatim as a text primary key in app.esi_scope; surfaced on /admin/scopes/unknown; no regex, split or prefix check rejects it.",
+        "operationId": "GetSyntheticScopeGrammar",
+        "parameters": [{ "$ref": "#/components/parameters/CompatibilityDate" }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } } },
+        "security": [{ "OAuth2": ["esi::synthetic~widget/read@v3"] }],
+        "tags": ["Synthetic"],
+        "x-cache-age": 60,
+        "x-compatibility-date": "2020-01-01",
+        "x-server-cache-mode": "ttl-based"
+      }
+    },
+
+    "/synthetic/cache-mode": {
+      "get": {
+        "description": "Gate 6 condition (d): an unrecognised x-cache-mode/x-server-cache-mode value. Expected: value recorded verbatim in app.open_vocabulary; scheduling behaves as ttl-based; the route is NOT rejected.",
+        "operationId": "GetSyntheticCacheMode",
+        "parameters": [{ "$ref": "#/components/parameters/CompatibilityDate" }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } } },
+        "tags": ["Synthetic"],
+        "x-cache-age": 60,
+        "x-cache-mode": "quantum-entangled",
+        "x-compatibility-date": "2020-01-01",
+        "x-server-cache-mode": "quantum-entangled"
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "CompatibilityDate": {
+        "description": "The compatibility date for the request.",
+        "in": "header",
+        "name": "X-Compatibility-Date",
+        "required": true,
+        "schema": { "type": "string", "format": "date" }
+      }
+    },
+    "schemas": {
+      "CorporationID": { "type": "integer", "format": "int64", "examples": [98777771] }
+    }
+  }
+}

@@ -301,6 +301,12 @@ type Querier interface {
 	ListRecentSyncRuns(ctx context.Context, subscriptionID uuid.UUID, pageSize int32) ([]AppSyncRun, error)
 	ListRoleGrants(ctx context.Context, roleID uuid.UUID) ([]AppRoleGrant, error)
 	ListRoles(ctx context.Context) ([]AppRole, error)
+	// Phase 2's "excluded from scheduling" contract: a blocked-by-pin or
+	// retired route must never appear here, however it does appear in
+	// ListEsiRoutes/ListBlockedEsiRoutes for administrator visibility
+	// (/admin/esi/catalogue/blocked). Phase 6's claim query is expected to
+	// join sync_subscription against this, not against ListEsiRoutes.
+	ListSchedulableEsiRoutes(ctx context.Context) ([]AppEsiRoute, error)
 	ListSecurityLogForUser(ctx context.Context, userID uuid.NullUUID, pageSize int32) ([]AppSecurityLog, error)
 	ListSovereigntyCampaigns(ctx context.Context) ([]AppSovereigntyCampaign, error)
 	ListSovereigntySystems(ctx context.Context) ([]AppSovereigntySystem, error)

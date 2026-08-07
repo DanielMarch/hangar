@@ -260,6 +260,55 @@ func (q *Queries) ListEsiRoutes(ctx context.Context) ([]AppEsiRoute, error) {
 	return items, nil
 }
 
+const listSchedulableEsiRoutes = `-- name: ListSchedulableEsiRoutes :many
+SELECT route_id, operation_id, method, upstream_path, cache_age, cache_mode, rate_limit_group, rate_limit_max, rate_limit_window, pagination_style, compatibility_date, blocked_by_pin, spec_fragment, identifier_types, first_seen_at, retired_at, updated_at FROM app.esi_route
+ WHERE NOT blocked_by_pin AND retired_at IS NULL
+ ORDER BY upstream_path
+`
+
+// Phase 2's "excluded from scheduling" contract: a blocked-by-pin or
+// retired route must never appear here, however it does appear in
+// ListEsiRoutes/ListBlockedEsiRoutes for administrator visibility
+// (/admin/esi/catalogue/blocked). Phase 6's claim query is expected to
+// join sync_subscription against this, not against ListEsiRoutes.
+func (q *Queries) ListSchedulableEsiRoutes(ctx context.Context) ([]AppEsiRoute, error) {
+	rows, err := q.db.Query(ctx, listSchedulableEsiRoutes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppEsiRoute
+	for rows.Next() {
+		var i AppEsiRoute
+		if err := rows.Scan(
+			&i.RouteID,
+			&i.OperationID,
+			&i.Method,
+			&i.UpstreamPath,
+			&i.CacheAge,
+			&i.CacheMode,
+			&i.RateLimitGroup,
+			&i.RateLimitMax,
+			&i.RateLimitWindow,
+			&i.PaginationStyle,
+			&i.CompatibilityDate,
+			&i.BlockedByPin,
+			&i.SpecFragment,
+			&i.IdentifierTypes,
+			&i.FirstSeenAt,
+			&i.RetiredAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const recordEsiPinAdvance = `-- name: RecordEsiPinAdvance :one
 INSERT INTO app.esi_pin_history (old_pin, new_pin, actor, route_diff)
 VALUES ($1, $2, $3, $4)

@@ -43,6 +43,16 @@ SELECT * FROM app.esi_route WHERE retired_at IS NULL ORDER BY upstream_path;
 -- name: ListBlockedEsiRoutes :many
 SELECT * FROM app.esi_route WHERE blocked_by_pin ORDER BY upstream_path;
 
+-- name: ListSchedulableEsiRoutes :many
+-- Phase 2's "excluded from scheduling" contract: a blocked-by-pin or
+-- retired route must never appear here, however it does appear in
+-- ListEsiRoutes/ListBlockedEsiRoutes for administrator visibility
+-- (/admin/esi/catalogue/blocked). Phase 6's claim query is expected to
+-- join sync_subscription against this, not against ListEsiRoutes.
+SELECT * FROM app.esi_route
+ WHERE NOT blocked_by_pin AND retired_at IS NULL
+ ORDER BY upstream_path;
+
 -- name: RetireEsiRoute :exec
 UPDATE app.esi_route SET retired_at = now(), updated_at = now() WHERE route_id = $1;
 

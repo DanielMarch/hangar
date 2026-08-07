@@ -1,0 +1,149 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "EVE Swagger Interface (test fixture)",
+    "version": "1.0.0",
+    "description": "A trimmed OpenAPI 3.1 fixture built from real ESI structures captured at compatibility date 2026-08-04 (see internal/esi/catalogue/embedded/openapi.snapshot.json for the full document). Field shapes — the six vendor extensions, $ref-based identifier parameters, the singular /corporation/... mining paths — are reproduced verbatim from the live spec; most operations and schemas are trimmed for test speed."
+  },
+  "servers": [{ "url": "https://esi.evetech.net" }],
+  "paths": {
+    "/corporation/{corporation_id}/mining/extractions": {
+      "get": {
+        "description": "Extraction timers for all moon chunks being extracted by refineries belonging to a corporation.",
+        "operationId": "GetCorporationCorporationIdMiningExtractions",
+        "parameters": [
+          { "in": "path", "name": "corporation_id", "required": true, "description": "The ID of the corporation", "schema": { "$ref": "#/components/schemas/CorporationID" } },
+          { "in": "query", "name": "page", "schema": { "type": "integer", "format": "int32", "minimum": 1 } },
+          { "$ref": "#/components/parameters/CompatibilityDate" }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "type": "object" } } } } },
+          "default": { "description": "Error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        },
+        "security": [{ "OAuth2": ["esi-industry.read_corporation_mining.v1"] }],
+        "tags": ["Industry"],
+        "x-cache-age": 1800,
+        "x-compatibility-date": "2020-01-01",
+        "x-rate-limit": { "group": "corp-industry", "max-tokens": 600, "window-size": "15m" },
+        "x-required-roles": ["Station_Manager"],
+        "x-server-cache-mode": "ttl-based"
+      }
+    },
+    "/corporation/{corporation_id}/mining/observers": {
+      "get": {
+        "description": "Paginated record of all entities capable of observing and recording mining for a corporation.",
+        "operationId": "GetCorporationCorporationIdMiningObservers",
+        "parameters": [
+          { "in": "path", "name": "corporation_id", "required": true, "schema": { "$ref": "#/components/schemas/CorporationID" } },
+          { "$ref": "#/components/parameters/CompatibilityDate" }
+        ],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "type": "object" } } } } } },
+        "security": [{ "OAuth2": ["esi-industry.read_corporation_mining.v1"] }],
+        "tags": ["Industry"],
+        "x-cache-age": 3600,
+        "x-compatibility-date": "2020-01-01",
+        "x-rate-limit": { "group": "corp-industry", "max-tokens": 600, "window-size": "15m" },
+        "x-required-roles": ["Station_Manager"],
+        "x-server-cache-mode": "ttl-based"
+      }
+    },
+    "/corporation/{corporation_id}/mining/observers/{observer_id}": {
+      "get": {
+        "description": "Paginated record of all mining seen by an observer.",
+        "operationId": "GetCorporationCorporationIdMiningObserversObserverId",
+        "parameters": [
+          { "in": "path", "name": "corporation_id", "required": true, "schema": { "$ref": "#/components/schemas/CorporationID" } },
+          { "in": "path", "name": "observer_id", "required": true, "schema": { "type": "integer", "format": "int64" } },
+          { "$ref": "#/components/parameters/CompatibilityDate" }
+        ],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "type": "object" } } } } } },
+        "security": [{ "OAuth2": ["esi-industry.read_corporation_mining.v1"] }],
+        "tags": ["Industry"],
+        "x-cache-age": 3600,
+        "x-compatibility-date": "2020-01-01",
+        "x-rate-limit": { "group": "corp-industry", "max-tokens": 600, "window-size": "15m" },
+        "x-required-roles": ["Station_Manager"],
+        "x-server-cache-mode": "ttl-based"
+      }
+    },
+    "/alliances/{alliance_id}": {
+      "get": {
+        "description": "Public information about an alliance.",
+        "operationId": "GetAlliancesAllianceId",
+        "parameters": [
+          { "in": "path", "name": "alliance_id", "required": true, "schema": { "type": "integer", "format": "int64" } },
+          { "$ref": "#/components/parameters/CompatibilityDate" }
+        ],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } } },
+        "tags": ["Alliance"],
+        "x-cache-age": 3600,
+        "x-compatibility-date": "2020-01-01",
+        "x-server-cache-mode": "ttl-based"
+      }
+    },
+    "/characters/{character_id}/access-lists": {
+      "get": {
+        "description": "Event-based cache mode fixture — no x-rate-limit declared (Governor 2 only).",
+        "operationId": "GetCharactersAccessListsListing",
+        "parameters": [
+          { "in": "path", "name": "character_id", "required": true, "schema": { "type": "integer", "format": "int64" } },
+          { "$ref": "#/components/parameters/CompatibilityDate" }
+        ],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "type": "object" } } } } } },
+        "security": [{ "OAuth2": ["esi-characters.read_access_lists.v1"] }],
+        "tags": ["Character"],
+        "x-cache-age": 300,
+        "x-cache-mode": "event-based",
+        "x-compatibility-date": "2026-05-19",
+        "x-server-cache-mode": "event-based"
+      }
+    },
+    "/corporations/{corporation_id}/projects/{project_id}": {
+      "get": {
+        "description": "A single corporation project — the UUID path identifier fixture.",
+        "operationId": "GetCorporationsCorporationIdProjectsProjectId",
+        "parameters": [
+          { "in": "path", "name": "corporation_id", "required": true, "schema": { "$ref": "#/components/schemas/CorporationID" } },
+          { "in": "path", "name": "project_id", "required": true, "description": "The ID of the project", "schema": { "$ref": "#/components/schemas/UUID" } },
+          { "$ref": "#/components/parameters/CompatibilityDate" }
+        ],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } } },
+        "security": [{ "OAuth2": ["esi-corporations.read_projects.v1"] }],
+        "tags": ["Corporation Projects"],
+        "x-cache-age": 300,
+        "x-compatibility-date": "2026-07-21",
+        "x-pagination": "cursor",
+        "x-server-cache-mode": "ttl-based"
+      }
+    },
+    "/markets/prices": {
+      "get": {
+        "description": "A list of prices — cursor pagination fixture, no auth.",
+        "operationId": "GetMarketsPrices",
+        "parameters": [{ "$ref": "#/components/parameters/CompatibilityDate" }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "type": "object" } } } } } },
+        "tags": ["Market"],
+        "x-cache-age": 3600,
+        "x-compatibility-date": "2020-01-01",
+        "x-pagination": "cursor",
+        "x-server-cache-mode": "ttl-based"
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "CompatibilityDate": {
+        "description": "The compatibility date for the request.",
+        "in": "header",
+        "name": "X-Compatibility-Date",
+        "required": true,
+        "schema": { "type": "string", "format": "date" }
+      }
+    },
+    "schemas": {
+      "CorporationID": { "type": "integer", "format": "int64", "examples": [98777771] },
+      "UUID": { "type": "string", "format": "uuid", "examples": ["3868eaed-8278-4cb7-9709-7d7de9c20dc7"] },
+      "Error": { "type": "object", "properties": { "error": { "type": "string" } } }
+    }
+  }
+}

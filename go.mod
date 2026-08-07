@@ -19,7 +19,6 @@ module github.com/hangar-project/hangar
 go 1.26
 
 require (
-
 	// ---- Misc ----
 	github.com/google/uuid v1.6.0 // Principle 13 — uuid identifiers are first-class
 
@@ -34,7 +33,7 @@ require (
 	github.com/riverqueue/river v0.43.0 // CONTRACTUAL PIN
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.43.0
 	github.com/riverqueue/river/rivertype v0.43.0 // indirect
-	github.com/shopspring/decimal v1.4.0 // indirect; NUMERIC(30,2) arithmetic — Principle 9
+	github.com/shopspring/decimal v1.4.0 // NUMERIC(30,2) arithmetic — Principle 9
 
 	// ---- CLI + configuration (SRS §3.2 cmd/hangar, internal/config) ----
 	github.com/spf13/cobra v1.10.2
@@ -67,6 +66,8 @@ tool (
 
 require github.com/sqlc-dev/sqlc v1.30.0 // indirect
 
+require github.com/pb33f/libopenapi v0.38.7
+
 require (
 	cel.dev/expr v0.25.2 // indirect
 	dario.cat/mergo v1.0.2 // indirect
@@ -77,7 +78,9 @@ require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
+	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/coder/websocket v1.8.12 // indirect
@@ -139,6 +142,8 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/paulmach/orb v0.11.1 // indirect
+	github.com/pb33f/jsonpath v0.8.2 // indirect
+	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
 	github.com/pganalyze/pg_query_go/v6 v6.1.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
@@ -192,6 +197,7 @@ require (
 	go.uber.org/zap v1.27.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
+	go.yaml.in/yaml/v4 v4.0.0-rc.6 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
 	golang.org/x/net v0.57.0 // indirect
