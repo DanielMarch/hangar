@@ -1,0 +1,31 @@
+# Project HANGAR — normalize line endings.
+#
+# The Makefile is executed by bash (SHELL := /usr/bin/env bash) and shell
+# scripts are executed directly; CRLF in either breaks them at the first
+# `#!` or inline `-c` invocation. Force LF for everything text, regardless
+# of the platform core.autocrlf setting.
+
+* text=auto eol=lf
+
+*.go            text eol=lf
+*.mod           text eol=lf
+*.sum           text eol=lf
+*.sh            text eol=lf
+*.bash          text eol=lf
+Makefile        text eol=lf
+*.mk            text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.json          text eol=lf
+*.ts            text eol=lf
+*.tsx           text eol=lf
+*.css           text eol=lf
+*.html          text eol=lf
+*.md            text eol=lf
+
+*.bat           text eol=crlf
+*.ps1           text eol=crlf
+
+*.png binary
+*.jpg binary
+*.ico binary
