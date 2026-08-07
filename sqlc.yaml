@@ -21,6 +21,21 @@ sql:
     # database available, so only the connection-free rules below are listed in
     # `rules:`. The `sqlc/db-prepare` rule needs a live server and therefore runs
     # from `make test-integration`, which has a Testcontainers PostgreSQL 18.
+    #
+    # PHASE 1a FIX: this `rules:` key did not exist before — the two rules
+    # under the top-level `rules:` section were defined but never referenced,
+    # so `sqlc vet` matched nothing (silently, since db/queries was empty
+    # until this phase). `no-offset` is a hard prohibition (Principle: OFFSET
+    # banned outright, §17 invariant 10) and belongs here. `flag-delete` is
+    # deliberately NOT listed: sqlc vet has no warning/advisory severity, only
+    # pass/fail, and 02_DATABASE_SCHEMA.md §3.6 asks it to "surface each [DELETE]
+    # for review", not fail the build on every legitimate one (several exist
+    # in this phase's queries — expired sessions, expired cache rows, stale
+    # replicas — each with a comment explaining why a soft delete doesn't
+    # apply). A reviewer can add `flag-delete` to this list locally to audit
+    # DELETE usage; it should not be wired into `make ci`.
+    rules:
+      - no-offset
     gen:
       go:
         package: "gen"
@@ -80,11 +95,21 @@ rules:
   # deliberately absent here and is applied by the integration suite instead.
   #
   # Principle: OFFSET is prohibited (SRS §6). Keyset cursors only.
+  #
+  # PHASE 1a FIX: both rules below originally used a single-quoted CEL
+  # string literal for the regex ('(?i)\boffset\b', '(?i)^\s*delete\s+from').
+  # CEL string literals only recognise a fixed escape set (\n, \t, \\, \', …)
+  # — \s and \b are not among them, so `sqlc vet` failed to even parse the
+  # rule with "token recognition error at '\'" the moment db/queries had
+  # content to vet against (Phase 0 shipped these rules unreachable, since
+  # `make lint` skips `sqlc vet` entirely while db/queries is empty). CEL's
+  # raw-string prefix (`r'...'`) turns off escape processing so \s and \b
+  # reach RE2 literally; that is the fix, not a looser pattern.
   - name: no-offset
     message: "OFFSET is prohibited (SRS §6). Use a keyset cursor."
-    rule: "query.sql.matches('(?i)\\boffset\\b')"
+    rule: "query.sql.matches(r'(?i)\\boffset\\b')"
   # SRS §5.1: destructive DML is banned in migrations. Application DELETEs are
   # allowed only where a soft-delete is impossible; flag them for review.
   - name: flag-delete
     message: "DELETE detected — confirm a soft-delete is genuinely impossible here."
-    rule: "query.sql.matches('(?i)^\\s*delete\\s+from')"
+    rule: "query.sql.matches(r'(?i)^\\s*delete\\s+from')"

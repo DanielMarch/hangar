@@ -1,0 +1,125 @@
+-- app.user, and the identity-adjacent tables that don't warrant their own
+-- query file yet: app.session, app.api_token, app.api_token_access_log,
+-- app.share_link, app.security_log, app.setting (02_DATABASE_SCHEMA.md §4.1
+-- #5-#10). app.character / app.character_token live in character_token.sql.
+
+-- name: CreateUser :one
+INSERT INTO app.user (display_name)
+VALUES ($1)
+RETURNING *;
+
+-- name: GetUser :one
+SELECT * FROM app.user WHERE user_id = $1;
+
+-- name: GetUserByMainCharacterID :one
+SELECT * FROM app.user WHERE main_character_id = $1;
+
+-- name: SetUserMainCharacter :exec
+UPDATE app.user SET main_character_id = $2, updated_at = now() WHERE user_id = $1;
+
+-- name: TouchUserLastLogin :exec
+UPDATE app.user SET last_login_at = now(), updated_at = now() WHERE user_id = $1;
+
+-- name: SetUserActive :exec
+UPDATE app.user SET is_active = $2, updated_at = now() WHERE user_id = $1;
+
+-- name: ListUsersPage :many
+-- Keyset pagination — OFFSET is prohibited (sqlc no-offset rule).
+SELECT * FROM app.user
+ WHERE user_id > sqlc.arg(after_user_id)
+ ORDER BY user_id
+ LIMIT sqlc.arg(page_size);
+
+-- name: HasInvalidCharacterToken :one
+-- Strict Mode's per-user probe (02_DATABASE_SCHEMA.md §4.1): true if any of
+-- this user's characters holds an invalid token. The partial index on
+-- app.character_token(valid) WHERE NOT valid is what keeps this a
+-- millisecond query at scale.
+SELECT EXISTS (
+    SELECT 1 FROM app.character c
+    JOIN app.character_token t USING (character_id)
+   WHERE c.user_id = $1 AND NOT t.valid
+) AS has_invalid_token;
+
+-- ---- sessions ----
+
+-- name: CreateSession :one
+INSERT INTO app.session (user_id, pkce_verifier, state, ip_address, user_agent, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING *;
+
+-- name: GetSession :one
+SELECT * FROM app.session WHERE session_id = $1 AND expires_at > now();
+
+-- name: DeleteExpiredSessions :exec
+-- Flagged by sqlc's flag-delete rule for review: a session past its
+-- expires_at carries no data worth a soft delete, unlike the ESI-synced
+-- projections §5.1 requires soft deletes for.
+DELETE FROM app.session WHERE expires_at <= now();
+
+-- ---- third-party API tokens ----
+
+-- name: CreateApiToken :one
+INSERT INTO app.api_token (user_id, name, hashed_secret, permissions, expires_at)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING *;
+
+-- name: GetApiTokenByHash :one
+SELECT * FROM app.api_token
+ WHERE hashed_secret = $1 AND revoked_at IS NULL
+   AND (expires_at IS NULL OR expires_at > now());
+
+-- name: RevokeApiToken :exec
+UPDATE app.api_token SET revoked_at = now() WHERE token_id = $1;
+
+-- name: TouchApiTokenLastUsed :exec
+UPDATE app.api_token SET last_used_at = now() WHERE token_id = $1;
+
+-- name: RecordApiTokenAccess :exec
+INSERT INTO app.api_token_access_log (token_id, route, status, ip_address)
+VALUES ($1, $2, $3, $4);
+
+-- name: ListApiTokenAccessLog :many
+SELECT * FROM app.api_token_access_log
+ WHERE token_id = $1
+ ORDER BY at DESC
+ LIMIT sqlc.arg(page_size);
+
+-- ---- share links ----
+
+-- name: CreateShareLink :one
+INSERT INTO app.share_link (user_id, view, params, expires_at)
+VALUES ($1, $2, $3, $4)
+RETURNING *;
+
+-- name: GetShareLink :one
+SELECT * FROM app.share_link
+ WHERE link_id = $1 AND revoked_at IS NULL
+   AND (expires_at IS NULL OR expires_at > now());
+
+-- name: RevokeShareLink :exec
+UPDATE app.share_link SET revoked_at = now() WHERE link_id = $1;
+
+-- ---- security log (append-only) ----
+
+-- name: RecordSecurityLogEntry :exec
+INSERT INTO app.security_log (user_id, action, target, ip_address, detail)
+VALUES ($1, $2, $3, $4, $5);
+
+-- name: ListSecurityLogForUser :many
+SELECT * FROM app.security_log
+ WHERE user_id = $1
+ ORDER BY at DESC
+ LIMIT sqlc.arg(page_size);
+
+-- ---- settings ----
+
+-- name: GetSetting :one
+SELECT * FROM app.setting WHERE key = $1;
+
+-- name: UpsertSetting :exec
+INSERT INTO app.setting (key, value, updated_by)
+VALUES ($1, $2, $3)
+ON CONFLICT (key) DO UPDATE
+   SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()
+ WHERE app.setting.value IS DISTINCT FROM EXCLUDED.value;
