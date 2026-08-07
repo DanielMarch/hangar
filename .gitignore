@@ -13,6 +13,8 @@ coverage.out
 coverage.html
 *.test
 *.prof
+/hangar
+/hangar.exe
 
 # ── SPA ──────────────────────────────────────────────────────────────────────
 web/node_modules/

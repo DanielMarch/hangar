@@ -10,5 +10,6 @@ func newAdminCmd() *cobra.Command {
 		Short: "Administrative and diagnostic subcommands",
 	}
 	cmd.AddCommand(newAdminVerifyIdentifierTypesCmd())
+	cmd.AddCommand(newAdminBootstrapTokenCmd())
 	return cmd
 }

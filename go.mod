@@ -68,6 +68,7 @@ require github.com/sqlc-dev/sqlc v1.30.0 // indirect
 
 require (
 	github.com/dgraph-io/ristretto/v2 v2.4.2
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/pb33f/libopenapi v0.38.7
 	github.com/redis/go-redis/v9 v9.22.0
 )

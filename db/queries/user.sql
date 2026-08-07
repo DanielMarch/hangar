@@ -23,6 +23,9 @@ UPDATE app.user SET last_login_at = now(), updated_at = now() WHERE user_id = $1
 -- name: SetUserActive :exec
 UPDATE app.user SET is_active = $2, updated_at = now() WHERE user_id = $1;
 
+-- name: SetUserAdmin :exec
+UPDATE app.user SET is_admin = $2, updated_at = now() WHERE user_id = $1;
+
 -- name: ListUsersPage :many
 -- Keyset pagination — OFFSET is prohibited (sqlc no-offset rule).
 SELECT * FROM app.user
@@ -50,6 +53,22 @@ RETURNING *;
 
 -- name: GetSession :one
 SELECT * FROM app.session WHERE session_id = $1 AND expires_at > now();
+
+-- name: CompleteSessionLogin :exec
+-- Attaches the resolved user to a pre-auth session and clears
+-- pkce_verifier/state in the same statement: `state` is single-use
+-- (01_ARCHITECTURE.md §7.1), so a session can never be replayed through
+-- the callback path a second time even if the cookie is stolen after the
+-- fact — GetSession still finds the row (for the browser's ongoing
+-- session), but there is no verifier/state left to consume.
+UPDATE app.session
+   SET user_id = $2, pkce_verifier = NULL, state = NULL
+ WHERE session_id = $1;
+
+-- name: DeleteSession :exec
+-- Explicit logout. Flagged by sqlc's flag-delete rule for review: a
+-- terminated session carries no data worth retaining.
+DELETE FROM app.session WHERE session_id = $1;
 
 -- name: DeleteExpiredSessions :exec
 -- Flagged by sqlc's flag-delete rule for review: a session past its

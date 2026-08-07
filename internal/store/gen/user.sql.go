@@ -14,6 +14,23 @@ import (
 	"github.com/google/uuid"
 )
 
+const completeSessionLogin = `-- name: CompleteSessionLogin :exec
+UPDATE app.session
+   SET user_id = $2, pkce_verifier = NULL, state = NULL
+ WHERE session_id = $1
+`
+
+// Attaches the resolved user to a pre-auth session and clears
+// pkce_verifier/state in the same statement: `state` is single-use
+// (01_ARCHITECTURE.md §7.1), so a session can never be replayed through
+// the callback path a second time even if the cookie is stolen after the
+// fact — GetSession still finds the row (for the browser's ongoing
+// session), but there is no verifier/state left to consume.
+func (q *Queries) CompleteSessionLogin(ctx context.Context, sessionID uuid.UUID, userID uuid.NullUUID) error {
+	_, err := q.db.Exec(ctx, completeSessionLogin, sessionID, userID)
+	return err
+}
+
 const createApiToken = `-- name: CreateApiToken :one
 
 INSERT INTO app.api_token (user_id, name, hashed_secret, permissions, expires_at)
@@ -164,6 +181,17 @@ DELETE FROM app.session WHERE expires_at <= now()
 // projections §5.1 requires soft deletes for.
 func (q *Queries) DeleteExpiredSessions(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, deleteExpiredSessions)
+	return err
+}
+
+const deleteSession = `-- name: DeleteSession :exec
+DELETE FROM app.session WHERE session_id = $1
+`
+
+// Explicit logout. Flagged by sqlc's flag-delete rule for review: a
+// terminated session carries no data worth retaining.
+func (q *Queries) DeleteSession(ctx context.Context, sessionID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteSession, sessionID)
 	return err
 }
 
@@ -486,6 +514,15 @@ UPDATE app.user SET is_active = $2, updated_at = now() WHERE user_id = $1
 
 func (q *Queries) SetUserActive(ctx context.Context, userID uuid.UUID, isActive bool) error {
 	_, err := q.db.Exec(ctx, setUserActive, userID, isActive)
+	return err
+}
+
+const setUserAdmin = `-- name: SetUserAdmin :exec
+UPDATE app.user SET is_admin = $2, updated_at = now() WHERE user_id = $1
+`
+
+func (q *Queries) SetUserAdmin(ctx context.Context, userID uuid.UUID, isAdmin bool) error {
+	_, err := q.db.Exec(ctx, setUserAdmin, userID, isAdmin)
 	return err
 }
 

@@ -50,6 +50,13 @@ type Querier interface {
 	ClaimUndispatchedOutboxEvents(ctx context.Context, claimSize int32) ([]AppOutboxEvent, error)
 	CompleteProvisioningAudit(ctx context.Context, auditID uuid.UUID, outcome *string, error *string) error
 	CompleteSdeImport(ctx context.Context, arg CompleteSdeImportParams) error
+	// Attaches the resolved user to a pre-auth session and clears
+	// pkce_verifier/state in the same statement: `state` is single-use
+	// (01_ARCHITECTURE.md §7.1), so a session can never be replayed through
+	// the callback path a second time even if the cookie is stolen after the
+	// fact — GetSession still finds the row (for the browser's ongoing
+	// session), but there is no verifier/state left to consume.
+	CompleteSessionLogin(ctx context.Context, sessionID uuid.UUID, userID uuid.NullUUID) error
 	CountAlertTypesByDomain(ctx context.Context) ([]CountAlertTypesByDomainRow, error)
 	// Cheap operational visibility into L2 size — useful for the admin
 	// observability surface (Phase 18) without needing a full table scan tool.
@@ -113,6 +120,9 @@ type Querier interface {
 	// is projected into market_order_history by the sync engine before this
 	// runs, so removing it from the open-orders table is not a data-loss delete.
 	DeleteMarketOrdersNotIn(ctx context.Context, ownerKind string, ownerID int64, keepOrderIds []int64) error
+	// Explicit logout. Flagged by sqlc's flag-delete rule for review: a
+	// terminated session carries no data worth retaining.
+	DeleteSession(ctx context.Context, sessionID uuid.UUID) error
 	// A campaign that concluded simply vanishes from the live feed; there is no
 	// "resolved" flag upstream to soft-delete against.
 	DeleteSovereigntyCampaignsNotIn(ctx context.Context, keepCampaignIds []int64) error
@@ -436,6 +446,7 @@ type Querier interface {
 	SetSyncNoCacheOptIn(ctx context.Context, subscriptionID uuid.UUID, optInNoCache bool) error
 	SetSyncSubscriptionEnabled(ctx context.Context, subscriptionID uuid.UUID, enabled bool) error
 	SetUserActive(ctx context.Context, userID uuid.UUID, isActive bool) error
+	SetUserAdmin(ctx context.Context, userID uuid.UUID, isAdmin bool) error
 	SetUserMainCharacter(ctx context.Context, userID uuid.UUID, mainCharacterID *int64) error
 	// Re-stamps consumed_at to the RESPONSE timestamp (defect B9) and records
 	// the observed cost by status (2XX=2, 3XX=1, 4XX=5, 429=0, 5XX/transport=0/5
