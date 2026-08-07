@@ -1,0 +1,90 @@
+# Project HANGAR — sqlc configuration (SRS §3.1, Principle 10).
+#
+# Principle 9 is enforced HERE, not by convention: every NUMERIC column is
+# overridden to shopspring/decimal. If an override is missing, sqlc emits
+# pgtype.Numeric (acceptable) or float64 (a Principle 9 violation) — the
+# `make check-money` reflection test is the backstop.
+#
+# Principle 13 is enforced by `hangar admin verify-identifier-types`, which
+# compares every generated identifier field against the ingested OpenAPI schema.
+# bigint <-> uuid coercion must fail the build, not be silently overridden here.
+
+version: "2"
+
+sql:
+  - name: app
+    engine: postgresql
+    schema: "db/migrations"
+    queries: "db/queries"
+    strict_function_checks: true
+    # No `database:` block on purpose. `sqlc vet` runs in `make lint` with no
+    # database available, so only the connection-free rules below are listed in
+    # `rules:`. The `sqlc/db-prepare` rule needs a live server and therefore runs
+    # from `make test-integration`, which has a Testcontainers PostgreSQL 18.
+    gen:
+      go:
+        package: "gen"
+        out: "internal/store/gen"
+        sql_package: "pgx/v5"
+        emit_pointers_for_null_types: true
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_json_tags: false          # DTOs live in internal/api/dto, never on store types
+        emit_result_struct_pointers: false
+        emit_params_struct_pointers: false
+        emit_enum_valid_method: false  # Principle 14: no Go enums for external vocabularies
+        emit_all_enum_values: false
+        query_parameter_limit: 3
+        omit_unused_structs: false
+        overrides:
+          # ── Principle 9: money is exact, never float ──
+          - db_type: "pg_catalog.numeric"
+            go_type: "github.com/shopspring/decimal.Decimal"
+          - db_type: "pg_catalog.numeric"
+            nullable: true
+            go_type:
+              type: "NullDecimal"
+              import: "github.com/shopspring/decimal"
+
+          # ── Principle 13: uuid identifiers are uuid.UUID, never string/int64 ──
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"
+          - db_type: "uuid"
+            nullable: true
+            go_type:
+              type: "NullUUID"
+              import: "github.com/google/uuid"
+
+          # ── time ──
+          - db_type: "timestamptz"
+            go_type: "time.Time"
+          - db_type: "timestamptz"
+            nullable: true
+            go_type:
+              type: "Time"
+              pointer: true
+              import: "time"
+
+          # ── JSONB payloads (unparseable notification YAML, spec fragments,
+          #    generic alert render data) stay as raw bytes: Principle 14 forbids
+          #    validating shapes we do not control. ──
+          - db_type: "jsonb"
+            go_type: "encoding/json.RawMessage"
+
+          # ── intervals (route TTLs, coalescing windows) ──
+          - db_type: "pg_catalog.interval"
+            go_type: "time.Duration"
+
+rules:
+  # Connection-free rules only — see the note above `gen:`. `sqlc/db-prepare` is
+  # deliberately absent here and is applied by the integration suite instead.
+  #
+  # Principle: OFFSET is prohibited (SRS §6). Keyset cursors only.
+  - name: no-offset
+    message: "OFFSET is prohibited (SRS §6). Use a keyset cursor."
+    rule: "query.sql.matches('(?i)\\boffset\\b')"
+  # SRS §5.1: destructive DML is banned in migrations. Application DELETEs are
+  # allowed only where a soft-delete is impossible; flag them for review.
+  - name: flag-delete
+    message: "DELETE detected — confirm a soft-delete is genuinely impossible here."
+    rule: "query.sql.matches('(?i)^\\s*delete\\s+from')"

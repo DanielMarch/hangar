@@ -1,0 +1,146 @@
+# Project HANGAR — turnkey deployment stack (SRS v3.0 §9.1).
+#
+# Gate 5 (Deployment Usability) requires a blank environment to reach a running
+# installation in THREE commands with NO source compilation:
+#
+#   1) curl -fsSLO https://raw.githubusercontent.com/hangar-project/hangar/main/docker-compose.yml
+#   2) curl -fsSL  https://raw.githubusercontent.com/hangar-project/hangar/main/install.sh | sh
+#   3) docker compose up -d
+#
+# The `hangar` service therefore PULLS a pre-built image. There is deliberately
+# no `build:` key on it — adding one would fail Gate 5.
+#
+# Principle 7 (two-service deployment): the default profile is exactly `postgres`
+# + `hangar`. Redis is behind the `cache` profile and must never be required.
+
+name: hangar
+
+x-hangar-env: &hangar-env
+  HANGAR_DB_URL: postgres://${POSTGRES_USER:-hangar}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-hangar}?sslmode=disable
+  HANGAR_HTTP_ADDR: 0.0.0.0:8080
+
+services:
+  # ───────────────────────────────────────────────────────────────────────────
+  # PostgreSQL 18 — the only mandatory dependency.
+  # ───────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:18-alpine
+    container_name: hangar-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hangar}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-hangar}
+      # Deterministic collation so index ordering is stable across host locales.
+      POSTGRES_INITDB_ARGS: "--locale-provider=builtin --builtin-locale=C.UTF-8 --encoding=UTF8"
+    command:
+      # Sized for a ~5000-character installation (Gate 1). Administrators with
+      # larger installs should raise shared_buffers to ~25% of host RAM.
+      - postgres
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=1536MB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - max_connections=200
+      # River's notifier uses LISTEN/NOTIFY; keep the queue responsive.
+      - -c
+      - max_wal_size=2GB
+      # PG18 asynchronous I/O. `worker` is the portable default; `io_uring` is
+      # faster on Linux >= 5.19 hosts but is not available everywhere.
+      - -c
+      - io_method=worker
+      - -c
+      - track_io_timing=on
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hangar} -d ${POSTGRES_DB:-hangar}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks: [hangar]
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Migrations. Runs River's migrator into the `river` schema, then Goose into
+  # `app`/`sde`, then exits. `hangar` waits on completed_successfully.
+  # ───────────────────────────────────────────────────────────────────────────
+  migrate:
+    image: ghcr.io/hangar-project/hangar:${HANGAR_VERSION:-latest}
+    container_name: hangar-migrate
+    restart: "no"
+    command: ["migrate", "up"]
+    env_file: [.env]
+    environment: *hangar-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [hangar]
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # The single Go binary. `serve` runs the HTTP API + embedded SPA, an in-process
+  # River worker pool, and the leader-elected sync planner. Split them by
+  # overriding `command` with `work` / `schedule` when scaling out.
+  #
+  # Scaling out needs no rate-limit configuration: the ESI consumption ledger is
+  # cluster-shared through Postgres, and every process heartbeats into
+  # app.esi_replica so the in-process fast path is used only while exactly one
+  # replica is live. See docs/01_ARCHITECTURE.md §5.6.
+  # ───────────────────────────────────────────────────────────────────────────
+  hangar:
+    image: ghcr.io/hangar-project/hangar:${HANGAR_VERSION:-latest}
+    container_name: hangar
+    restart: unless-stopped
+    command: ["serve"]
+    env_file: [.env]
+    environment: *hangar-env
+    ports:
+      - "${HANGAR_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/hangar", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+    networks: [hangar]
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # OPTIONAL (Principle 7). Enable with: docker compose --profile cache up -d
+  # Replaces the Postgres UNLOGGED L2 conditional cache only. HANGAR must remain
+  # fully correct when this is absent or cold.
+  # ───────────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:8-alpine
+    container_name: hangar-redis
+    profiles: [cache]
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [hangar]
+
+volumes:
+  postgres-data:
+    name: hangar-postgres-data
+
+networks:
+  hangar:
+    name: hangar

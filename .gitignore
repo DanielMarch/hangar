@@ -1,0 +1,43 @@
+# ── secrets ──────────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+master.key
+
+# ── Go ───────────────────────────────────────────────────────────────────────
+/bin/
+/dist/
+coverage.out
+coverage.html
+*.test
+*.prof
+
+# ── SPA ──────────────────────────────────────────────────────────────────────
+web/node_modules/
+web/dist/
+web/.vite/
+web/stats.html
+web/playwright-report/
+web/test-results/
+
+# ── generated, but COMMITTED on purpose ──────────────────────────────────────
+# internal/store/gen/, docs/openapi.json and web/src/api/schema.d.ts are
+# generated AND tracked: Principle 10 requires CI to diff them so a schema drift
+# is a build failure rather than a runtime surprise. Do not add them here.
+
+# ── local data ───────────────────────────────────────────────────────────────
+/data/
+/tmp/
+*.sqlite
+*.jsonl
+*.jsonl.bz2
+!testdata/**/*.jsonl
+
+# ── editors / OS ─────────────────────────────────────────────────────────────
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
