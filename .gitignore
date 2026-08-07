@@ -16,7 +16,14 @@ coverage.html
 
 # ── SPA ──────────────────────────────────────────────────────────────────────
 web/node_modules/
-web/dist/
+# web/dist/ holds the Vite build output, which embed.FS needs present at Go
+# build time (see web/embed.go). Ignore everything real `pnpm run build`
+# produces, but keep the tracked .gitkeep placeholder so a fresh checkout can
+# `go build`/`go test` before Node ever runs. A real local build empties this
+# directory (vite emptyOutDir) and will show .gitkeep as locally deleted —
+# expected, not a problem: CI/Docker builds from a fresh checkout each time.
+web/dist/*
+!web/dist/.gitkeep
 web/.vite/
 web/stats.html
 web/playwright-report/

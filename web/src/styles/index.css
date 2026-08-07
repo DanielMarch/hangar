@@ -1,0 +1,27 @@
+/*
+ * Project HANGAR — the ONE sanctioned stylesheet under web/src/ (SRS v3.1
+ * §8.1, ADR 0010). Tailwind 4 is CSS-first configured and requires exactly
+ * this: an `@import` and an `@theme` token block. `make check-css` fails the
+ * build if a second .css file appears anywhere under web/src/.
+ *
+ * Component-level styling is Tailwind utility classes plus shadcn/ui
+ * (vendored Radix primitives), never a second stylesheet, never CSS modules.
+ */
+@import "tailwindcss";
+
+@theme {
+  --color-background: oklch(1 0 0);
+  --color-foreground: oklch(0.145 0 0);
+  --color-muted-foreground: oklch(0.556 0 0);
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-background: oklch(0.145 0 0);
+    --color-foreground: oklch(0.985 0 0);
+    --color-muted-foreground: oklch(0.708 0 0);
+  }
+}

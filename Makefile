@@ -115,7 +115,7 @@ web-ci:
 
 # ── invariant gates (see docs/04_RELEASE_GATES.md) ────────────────────────────
 # Each guards on the phase artefact that makes it meaningful.
-.PHONY: check-money check-identifiers check-alert-sources check-locales check-css check-no-ice
+.PHONY: check-money check-identifiers check-alert-sources check-locales check-css check-no-ice check-static-binary
 
 check-money:         ## Principle 9 (Phase 1b) — reflection proof of zero float64 on money paths
 	@if [ -d internal/domain ] && [ -n "$$(ls -A internal/domain 2>/dev/null)" ]; then \
@@ -148,9 +148,12 @@ check-no-ice:        ## §4.3/§9.2 — no ZeroC Ice or cgo dependency may enter
 	  echo "ZeroC Ice must not be linked into the binary — it requires cgo and breaks the static builds of SRS §9.2. Use the out-of-process bridge."; exit 1; \
 	else echo "check-no-ice: ok"; fi
 
+check-static-binary: ## §9.2 (Phase 0) — TestStaticBinaryHasNoDynamicLinks: linux/amd64, linux/arm64, windows/amd64
+	go test -tags=staticbinary -run TestStaticBinaryHasNoDynamicLinks -timeout=5m ./test/staticbinary/...
+
 # ── composite ────────────────────────────────────────────────────────────────
 .PHONY: ci ci-strict
-ci: verify-generated lint test web-ci check-money check-identifiers check-alert-sources check-locales check-css check-no-ice ## Phase 0 exit criterion; strengthens automatically as phases land
+ci: verify-generated lint test web-ci check-money check-identifiers check-alert-sources check-locales check-css check-no-ice check-static-binary ## Phase 0 exit criterion; strengthens automatically as phases land
 
 ci-strict: ## Same, but a skipped check is a failure. CI uses this from Phase 15 and on every release tag.
 	$(MAKE) ci STRICT=1

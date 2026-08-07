@@ -1,0 +1,27 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Project HANGAR API",
+    "version": "0.0.0-phase0",
+    "description": "Phase 0 stub. This is a minimal valid OpenAPI 3.1 document committed as a generated-but-committed artefact (docs/01_ARCHITECTURE.md Principle 10): the Dockerfile's SPA build stage copies it, and `pnpm run api:types` consumes it, so no image can build and no SPA type-checks before either exists. `hangar openapi --out docs/openapi.json` (Phase 15) regenerates it from the Huma router and replaces this stub entirely."
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "healthz",
+        "summary": "Liveness probe",
+        "responses": {
+          "200": {
+            "description": "The process is running.",
+            "content": {
+              "text/plain": {
+                "schema": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {}
+}

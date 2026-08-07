@@ -33,6 +33,12 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-hangar}
       # Deterministic collation so index ordering is stable across host locales.
       POSTGRES_INITDB_ARGS: "--locale-provider=builtin --builtin-locale=C.UTF-8 --encoding=UTF8"
+      # PG18's docker-library image refuses to initialise directly at the
+      # volume mount root ("in 18+, these images store data in a
+      # pg_ctlcluster-compatible, major-version-specific subdirectory" —
+      # https://github.com/docker-library/postgres/pull/1259). PGDATA must be
+      # a subdirectory of the mount, not the mount itself.
+      PGDATA: /var/lib/postgresql/data/pgdata
     command:
       # Sized for a ~5000-character installation (Gate 1). Administrators with
       # larger installs should raise shared_buffers to ~25% of host RAM.
