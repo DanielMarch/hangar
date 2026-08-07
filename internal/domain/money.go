@@ -23,6 +23,11 @@ var moneyTokens = map[string]bool{
 	"reward":     true,
 	"collateral": true,
 	"buyout":     true,
+	// Phase 1b additions: real ISK columns encountered in the Tier-2 schema
+	// that the §3.1 vocabulary's illustrative list didn't spell out by name.
+	"escrow": true, // market_order.escrow — ISK held against a buy order
+	"cost":   true, // industry_job.cost — ISK installation cost
+	"payout": true, // insurance_price.payout — ISK insurance payout
 }
 
 // notMoneyFields is an explicit denylist for names that would otherwise

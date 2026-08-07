@@ -87,17 +87,30 @@ func newMigratedContainer(t *testing.T) (*pgxpool.Pool, *sql.DB) {
 func TestGooseUpDownIdempotent(t *testing.T) {
 	_, sqlDB := newMigratedContainer(t)
 
+	var before int
+	require.NoError(t, sqlDB.QueryRow(
+		`SELECT count(*) FROM information_schema.tables WHERE table_schema = 'app'`,
+	).Scan(&before))
+
 	require.NoError(t, goose.DownTo(sqlDB, "migrations", 0))
 	require.NoError(t, goose.Up(sqlDB, "migrations"))
 
-	var n int
+	// The exact total (51 platform + 78 domain + 5 default partitions) is
+	// asserted by TestAllDomainTablesPresent, which runs on this file's own
+	// freshly-migrated database; here the point is idempotency — up, down,
+	// up again must land on exactly the same table count it started with,
+	// not some fixed constant that only held before Phase 1b existed.
+	var after int
 	require.NoError(t, sqlDB.QueryRow(
 		`SELECT count(*) FROM information_schema.tables WHERE table_schema = 'app'`,
-	).Scan(&n))
-	require.Equal(t, len(expectedPlatformTables), n, "table count after up-down-up must match the 51-table platform tier")
+	).Scan(&after))
+	require.Equal(t, before, after, "table count after up-down-up must match the count after the first up")
 }
 
-// TestAllPlatformTablesPresent — all 51 tables of 02_… §4 exist.
+// TestAllPlatformTablesPresent — all 51 tables of 02_… §4 exist. This
+// checks presence only (a subset of the full app schema, which by Phase 1b
+// also contains the 78 domain-projection tables) — the exact combined
+// total is TestAllDomainTablesPresent's job (db/migrations_domain_integration_test.go).
 func TestAllPlatformTablesPresent(t *testing.T) {
 	_, sqlDB := newMigratedContainer(t)
 
@@ -118,7 +131,6 @@ func TestAllPlatformTablesPresent(t *testing.T) {
 			t.Errorf("expected table app.%s not found", want)
 		}
 	}
-	require.Len(t, got, len(expectedPlatformTables), "unexpected extra or missing tables in app schema: %v", got)
 }
 
 // TestLedgerTablesUnloggedAndCascade — both ledger tables are UNLOGGED;
