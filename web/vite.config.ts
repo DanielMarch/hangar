@@ -13,6 +13,19 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      // 01_ARCHITECTURE.md §13 / SRS v3.1 §4.6 (defect B7): the UI-locale ->
+      // ESI-language table has exactly one source file. web/src/lib/locales.ts
+      // imports it through this alias rather than a hand-maintained TS copy —
+      // the two would drift, and the drift would only surface as an ESI
+      // cache-key rejection in production.
+      "@i18n/locales.json": fileURLToPath(new URL("../internal/i18n/locales.json", import.meta.url)),
+    },
+  },
+  server: {
+    fs: {
+      // Permits the dev server to read internal/i18n/locales.json, which
+      // lives outside web/ (Vite's default fs.allow root).
+      allow: [".."],
     },
   },
   build: {

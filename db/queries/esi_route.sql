@@ -1,6 +1,7 @@
 -- app.esi_route, app.esi_route_scope, app.esi_route_role, app.esi_pin_history
--- (02_DATABASE_SCHEMA.md §4.3 #21, #23-#25). app.esi_cache_entry is here too
--- (#26) since it belongs to the gateway rather than any named query file.
+-- (02_DATABASE_SCHEMA.md §4.3 #21, #23-#25). app.esi_cache_entry's queries
+-- (#26) moved to db/queries/esi_cache.sql in Phase 3, once the conditional
+-- cache gained its own consumer (internal/esi/cache) worth naming a file after.
 
 -- name: UpsertEsiRoute :one
 INSERT INTO app.esi_route AS t (
@@ -79,24 +80,3 @@ RETURNING *;
 
 -- name: ListEsiPinHistory :many
 SELECT * FROM app.esi_pin_history ORDER BY advanced_at DESC LIMIT sqlc.arg(page_size);
-
--- ---- conditional cache (UNLOGGED, never authoritative) ----
-
--- name: GetEsiCacheEntry :one
-SELECT * FROM app.esi_cache_entry WHERE cache_key = $1 AND expires_at > now();
-
--- name: UpsertEsiCacheEntry :exec
-INSERT INTO app.esi_cache_entry (cache_key, etag, last_modified, body, status, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (cache_key) DO UPDATE
-   SET etag          = EXCLUDED.etag,
-       last_modified = EXCLUDED.last_modified,
-       body          = EXCLUDED.body,
-       status        = EXCLUDED.status,
-       expires_at    = EXCLUDED.expires_at,
-       stored_at     = now();
-
--- name: DeleteExpiredEsiCacheEntries :exec
--- Flagged by sqlc's flag-delete rule for review: this is a cache, never a
--- source of truth (§4.3), so an expired row has nothing worth a soft delete.
-DELETE FROM app.esi_cache_entry WHERE expires_at <= now();

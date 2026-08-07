@@ -8,7 +8,6 @@ package gen
 import (
 	"context"
 	"encoding/json"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -34,38 +33,6 @@ ON CONFLICT DO NOTHING
 func (q *Queries) AddEsiRouteScope(ctx context.Context, routeID uuid.UUID, scope string) error {
 	_, err := q.db.Exec(ctx, addEsiRouteScope, routeID, scope)
 	return err
-}
-
-const deleteExpiredEsiCacheEntries = `-- name: DeleteExpiredEsiCacheEntries :exec
-DELETE FROM app.esi_cache_entry WHERE expires_at <= now()
-`
-
-// Flagged by sqlc's flag-delete rule for review: this is a cache, never a
-// source of truth (§4.3), so an expired row has nothing worth a soft delete.
-func (q *Queries) DeleteExpiredEsiCacheEntries(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, deleteExpiredEsiCacheEntries)
-	return err
-}
-
-const getEsiCacheEntry = `-- name: GetEsiCacheEntry :one
-
-SELECT cache_key, etag, last_modified, body, status, expires_at, stored_at FROM app.esi_cache_entry WHERE cache_key = $1 AND expires_at > now()
-`
-
-// ---- conditional cache (UNLOGGED, never authoritative) ----
-func (q *Queries) GetEsiCacheEntry(ctx context.Context, cacheKey []byte) (AppEsiCacheEntry, error) {
-	row := q.db.QueryRow(ctx, getEsiCacheEntry, cacheKey)
-	var i AppEsiCacheEntry
-	err := row.Scan(
-		&i.CacheKey,
-		&i.Etag,
-		&i.LastModified,
-		&i.Body,
-		&i.Status,
-		&i.ExpiresAt,
-		&i.StoredAt,
-	)
-	return i, err
 }
 
 const getEsiRouteByOperationID = `-- name: GetEsiRouteByOperationID :one
@@ -350,39 +317,6 @@ func (q *Queries) RetireEsiRoute(ctx context.Context, routeID uuid.UUID) error {
 	return err
 }
 
-const upsertEsiCacheEntry = `-- name: UpsertEsiCacheEntry :exec
-INSERT INTO app.esi_cache_entry (cache_key, etag, last_modified, body, status, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (cache_key) DO UPDATE
-   SET etag          = EXCLUDED.etag,
-       last_modified = EXCLUDED.last_modified,
-       body          = EXCLUDED.body,
-       status        = EXCLUDED.status,
-       expires_at    = EXCLUDED.expires_at,
-       stored_at     = now()
-`
-
-type UpsertEsiCacheEntryParams struct {
-	CacheKey     []byte
-	Etag         *string
-	LastModified *time.Time
-	Body         []byte
-	Status       int16
-	ExpiresAt    time.Time
-}
-
-func (q *Queries) UpsertEsiCacheEntry(ctx context.Context, arg UpsertEsiCacheEntryParams) error {
-	_, err := q.db.Exec(ctx, upsertEsiCacheEntry,
-		arg.CacheKey,
-		arg.Etag,
-		arg.LastModified,
-		arg.Body,
-		arg.Status,
-		arg.ExpiresAt,
-	)
-	return err
-}
-
 const upsertEsiRoute = `-- name: UpsertEsiRoute :one
 
 INSERT INTO app.esi_route AS t (
@@ -434,8 +368,9 @@ type UpsertEsiRouteParams struct {
 }
 
 // app.esi_route, app.esi_route_scope, app.esi_route_role, app.esi_pin_history
-// (02_DATABASE_SCHEMA.md §4.3 #21, #23-#25). app.esi_cache_entry is here too
-// (#26) since it belongs to the gateway rather than any named query file.
+// (02_DATABASE_SCHEMA.md §4.3 #21, #23-#25). app.esi_cache_entry's queries
+// (#26) moved to db/queries/esi_cache.sql in Phase 3, once the conditional
+// cache gained its own consumer (internal/esi/cache) worth naming a file after.
 func (q *Queries) UpsertEsiRoute(ctx context.Context, arg UpsertEsiRouteParams) (AppEsiRoute, error) {
 	row := q.db.QueryRow(ctx, upsertEsiRoute,
 		arg.OperationID,

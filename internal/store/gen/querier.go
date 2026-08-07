@@ -51,6 +51,9 @@ type Querier interface {
 	CompleteProvisioningAudit(ctx context.Context, auditID uuid.UUID, outcome *string, error *string) error
 	CompleteSdeImport(ctx context.Context, arg CompleteSdeImportParams) error
 	CountAlertTypesByDomain(ctx context.Context) ([]CountAlertTypesByDomainRow, error)
+	// Cheap operational visibility into L2 size — useful for the admin
+	// observability surface (Phase 18) without needing a full table scan tool.
+	CountEsiCacheEntries(ctx context.Context) (int64, error)
 	// The solo/clustered predicate itself: exactly one live row ⇒ solo, two or
 	// more ⇒ clustered. sqlc.arg(live_threshold) is a negative interval, e.g.
 	// '-30 seconds', added to now().
@@ -97,6 +100,9 @@ type Querier interface {
 	DeleteCorporationMembersNotIn(ctx context.Context, corporationID int64, keepCharacterIds []int64) error
 	// Flagged by sqlc's flag-delete rule for review: this is a cache, never a
 	// source of truth (§4.3), so an expired row has nothing worth a soft delete.
+	// Intended as a periodic housekeeping sweep (a later phase's River job);
+	// L2 reads already filter on expires_at > now() on their own, so this is
+	// disk reclamation, not a correctness dependency.
 	DeleteExpiredEsiCacheEntries(ctx context.Context) error
 	// Flagged by sqlc's flag-delete rule for review: a session past its
 	// expires_at carries no data worth a soft delete, unlike the ESI-synced
@@ -149,7 +155,9 @@ type Querier interface {
 	// one-second in-process cache by the caller; every non-2XX/3XX response
 	// writes here.
 	GetErrorBudget(ctx context.Context) (AppEsiErrorBudget, error)
-	// ---- conditional cache (UNLOGGED, never authoritative) ----
+	// app.esi_cache_entry (02_DATABASE_SCHEMA.md §4.3 #26) — the Postgres L2
+	// tier of internal/esi/cache. UNLOGGED, never authoritative: a miss here
+	// costs one revalidation round, never a request failure.
 	GetEsiCacheEntry(ctx context.Context, cacheKey []byte) (AppEsiCacheEntry, error)
 	GetEsiRouteByOperationID(ctx context.Context, operationID string) (AppEsiRoute, error)
 	GetEsiScope(ctx context.Context, scope string) (AppEsiScope, error)
@@ -480,8 +488,9 @@ type Querier interface {
 	UpsertCorporationTitle(ctx context.Context, corporationID int64, titleID int64, name string) (AppCorporationTitle, error)
 	UpsertEsiCacheEntry(ctx context.Context, arg UpsertEsiCacheEntryParams) error
 	// app.esi_route, app.esi_route_scope, app.esi_route_role, app.esi_pin_history
-	// (02_DATABASE_SCHEMA.md §4.3 #21, #23-#25). app.esi_cache_entry is here too
-	// (#26) since it belongs to the gateway rather than any named query file.
+	// (02_DATABASE_SCHEMA.md §4.3 #21, #23-#25). app.esi_cache_entry's queries
+	// (#26) moved to db/queries/esi_cache.sql in Phase 3, once the conditional
+	// cache gained its own consumer (internal/esi/cache) worth naming a file after.
 	UpsertEsiRoute(ctx context.Context, arg UpsertEsiRouteParams) (AppEsiRoute, error)
 	// scope is opaque and never parsed (SRS v3.1 §4.5). Any string ESI hands
 	// back in a security block is recorded, first-seen-wins.

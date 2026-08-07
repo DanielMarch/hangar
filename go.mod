@@ -42,7 +42,7 @@ require (
 	go.opentelemetry.io/otel v1.45.0
 	go.opentelemetry.io/otel/sdk v1.45.0
 	go.opentelemetry.io/otel/trace v1.45.0
-	golang.org/x/sync v0.22.0 // indirect; errgroup: bounded page fan-out (§4.1.4)
+	golang.org/x/sync v0.22.0 // errgroup: bounded page fan-out (§4.1.4)
 	google.golang.org/grpc v1.83.0 // indirect; Mumble MurmurRPC driver
 	google.golang.org/protobuf v1.36.11 // indirect; Mumble MurmurRPC driver
 	gopkg.in/yaml.v3 v3.0.1 // indirect; CCP notification YAML, generic fallback
@@ -66,7 +66,11 @@ tool (
 
 require github.com/sqlc-dev/sqlc v1.30.0 // indirect
 
-require github.com/pb33f/libopenapi v0.38.7
+require (
+	github.com/dgraph-io/ristretto/v2 v2.4.2
+	github.com/pb33f/libopenapi v0.38.7
+	github.com/redis/go-redis/v9 v9.22.0
+)
 
 require (
 	cel.dev/expr v0.25.2 // indirect

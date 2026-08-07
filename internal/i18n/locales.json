@@ -1,0 +1,13 @@
+{
+  "locales": [
+    { "ui": "en", "esi": "en" },
+    { "ui": "de", "esi": "de" },
+    { "ui": "fr", "esi": "fr" },
+    { "ui": "ja", "esi": "ja" },
+    { "ui": "ko", "esi": "ko" },
+    { "ui": "ru", "esi": "ru" },
+    { "ui": "zh-CN", "esi": "zh", "note": "region subtag stripped" },
+    { "ui": "af", "esi": "en", "note": "no ESI equivalent — falls back" },
+    { "ui": "ro", "esi": "en", "note": "no ESI equivalent — falls back" }
+  ]
+}
