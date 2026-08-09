@@ -3,6 +3,7 @@ package planner
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -25,6 +26,14 @@ const advisoryLockName = "hangar.planner"
 // connection couldn't offer this — the pool could hand that same backend
 // to an unrelated caller the moment it's returned.
 type Leader struct {
+	// mu guards conn. *pgx.Conn is explicitly not safe for concurrent use
+	// by multiple goroutines — production's Planner.Run is a strictly
+	// sequential loop that never calls StillHeld/Release concurrently
+	// with itself, but StillHeld is exported precisely so other callers
+	// (a health/status endpoint, a test exercising the claim path from
+	// several goroutines at once) can observe leadership too, and doing
+	// so must not corrupt the one connection leadership lives on.
+	mu   sync.Mutex
 	conn *pgx.Conn
 }
 
@@ -59,7 +68,12 @@ func TryAcquireLeader(ctx context.Context, connString string) (*Leader, bool, er
 // transaction (§6.1's edge case: losing leadership mid-loop must abort the
 // in-flight claim, not complete it).
 func (l *Leader) StillHeld(ctx context.Context) bool {
-	if l == nil || l.conn == nil {
+	if l == nil {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.conn == nil {
 		return false
 	}
 	return l.conn.Ping(ctx) == nil
@@ -70,7 +84,12 @@ func (l *Leader) StillHeld(ctx context.Context) bool {
 // separate pg_advisory_unlock call is needed or more correct). Safe to
 // call on a nil Leader or more than once.
 func (l *Leader) Release(ctx context.Context) error {
-	if l == nil || l.conn == nil {
+	if l == nil {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.conn == nil {
 		return nil
 	}
 	err := l.conn.Close(ctx)
