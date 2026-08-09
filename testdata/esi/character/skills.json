@@ -1,0 +1,18 @@
+{
+  "skills": [
+    {
+      "active_skill_level": 5,
+      "skill_id": 3300,
+      "skillpoints_in_skill": 1280000,
+      "trained_skill_level": 5
+    },
+    {
+      "active_skill_level": 4,
+      "skill_id": 3301,
+      "skillpoints_in_skill": 362039,
+      "trained_skill_level": 4
+    }
+  ],
+  "total_sp": 45280450,
+  "unallocated_sp": 60000
+}

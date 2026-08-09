@@ -38,6 +38,12 @@ RETURNING *;
 -- name: GetEsiRouteByOperationID :one
 SELECT * FROM app.esi_route WHERE operation_id = $1;
 
+-- name: GetEsiRouteByID :one
+-- Phase 6's app.sync_subscription.route_id and the KindSyncRoute River job
+-- payload (internal/sync/planner.SyncJobArgs) both carry route_id, not
+-- operation_id — the worker (Phase 7+) re-reads the route by this key.
+SELECT * FROM app.esi_route WHERE route_id = $1;
+
 -- name: ListEsiRoutes :many
 SELECT * FROM app.esi_route WHERE retired_at IS NULL ORDER BY upstream_path;
 

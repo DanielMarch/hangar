@@ -6,8 +6,15 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/hangar-project/hangar/internal/crypto"
+	"github.com/hangar-project/hangar/internal/store"
+	"github.com/hangar-project/hangar/internal/sync"
+	"github.com/hangar-project/hangar/internal/sync/planner"
+	"github.com/hangar-project/hangar/internal/sync/worker"
 	"github.com/hangar-project/hangar/internal/telemetry"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/spf13/cobra"
 )
 
@@ -21,13 +28,14 @@ func newWorkCmd() *cobra.Command {
 	}
 }
 
-// runWork boots a worker-role process. No River workers are registered yet —
-// job kinds land with the phases that define them. Phase 6 defines the
-// "sync_route" kind (internal/sync/planner.KindSyncRoute) and enqueues it,
-// but registering a Worker for it is Phase 7+'s job: working it means
-// calling the ESI gateway and upserting domain rows, which is what the
-// route-handler phases add. Phase 0's job here is the heartbeat and the
-// shape of the command, not the job registry.
+// runWork boots a worker-role process: the heartbeat plus Phase 6/7's
+// River worker pool. Phase 6 defined and enqueues the "sync_route" kind
+// (internal/sync/planner.KindSyncRoute); Phase 7 is the first phase to
+// register a Worker for it — internal/sync/worker.CharacterWorker, which
+// dispatches character-scoped subscriptions to internal/sync/handlers.
+// Corp/alliance dispatch (entity_kind != "character") is Phase 8/9's; a
+// job for one of those kinds fails loudly (CharacterWorker.Work returns an
+// error for it) rather than being silently dropped.
 func runWork(ctx context.Context) error {
 	cfg, err := loadConfig()
 	if err != nil {
@@ -48,9 +56,39 @@ func runWork(ctx context.Context) error {
 	}
 	defer pool.Close()
 
-	hb := telemetry.NewReplicaHeartbeat(pool, telemetry.RoleWork, version, logger)
+	s := store.New(pool)
 
-	logger.Info("hangar work: no job kinds registered yet; heartbeating only until a later phase adds a River client here")
+	keyring, err := crypto.NewKeyring(cfg.Crypto)
+	if err != nil {
+		return err
+	}
+	gateway, err := buildGateway(cfg, pool, s, logger)
+	if err != nil {
+		return err
+	}
+	refresher := buildRefresher(cfg, pool, keyring)
+
+	workers := river.NewWorkers()
+	river.AddWorker(workers, &worker.CharacterWorker{
+		Pool:    pool,
+		Gateway: gateway,
+		Tokens:  refresher,
+		Policy:  sync.PolicyConfig{TTLFloor: cfg.ESI.TTLFloor, BackoffCap: cfg.Sync.BackoffCap},
+	})
+
+	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
+		Queues:  map[string]river.QueueConfig{planner.QueueSync: {MaxWorkers: 20}},
+		Workers: workers,
+	})
+	if err != nil {
+		return err
+	}
+	if err := riverClient.Start(ctx); err != nil {
+		return err
+	}
+	defer func() { _ = riverClient.Stop(context.Background()) }()
+
+	hb := telemetry.NewReplicaHeartbeat(pool, telemetry.RoleWork, version, logger)
 
 	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()

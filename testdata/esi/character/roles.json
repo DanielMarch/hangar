@@ -1,0 +1,6 @@
+{
+  "roles": ["Director", "Personnel_Manager"],
+  "roles_at_base": [],
+  "roles_at_hq": ["Station_Manager"],
+  "roles_at_other": []
+}

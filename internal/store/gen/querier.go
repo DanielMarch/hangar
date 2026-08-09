@@ -113,12 +113,36 @@ type Querier interface {
 	// app.webhook_endpoint, app.outbox_event, app.webhook_delivery
 	// (02_DATABASE_SCHEMA.md §4.6 #44-#46).
 	CreateWebhookEndpoint(ctx context.Context, arg CreateWebhookEndpointParams) (AppWebhookEndpoint, error)
+	// Phase 7 addition: Phase 1b's stub had no prune query for agent research.
+	DeleteCharacterAgentResearchNotIn(ctx context.Context, characterID int64, keepAgentIds []int64) error
+	// Phase 7 addition: clones is a full-state list like implants/skills, but
+	// Phase 1b's stub had no prune query for it (ListCharacterClones/
+	// UpsertCharacterClone only) — a jump clone can be destroyed, which never
+	// shows up again in the response, so without this a destroyed clone would
+	// linger forever.
+	DeleteCharacterClonesNotIn(ctx context.Context, characterID int64, keepJumpCloneIds []int64) error
 	DeleteCharacterFittingsNotIn(ctx context.Context, characterID int64, keepFittingIds []int64) error
-	DeleteCharacterImplantsNotIn(ctx context.Context, characterID int64, keepTypeIds []int32) error
+	// PHASE 7 FIX: cast was ::int[] (int32) against a type_id column Phase 1b
+	// had migrated as `integer` — the live spec declares type_id int64
+	// (db/migrations/00030_phase7_character_fixups.sql widened the column to
+	// bigint; this cast has to widen with it or every call fails to bind).
+	DeleteCharacterImplantsNotIn(ctx context.Context, characterID int64, keepTypeIds []int64) error
+	// Phase 7 addition: Phase 1b's stub had no prune query for loyalty points.
+	DeleteCharacterLoyaltyPointsNotIn(ctx context.Context, characterID int64, keepCorporationIds []int64) error
+	// Phase 7 addition: clears only the character-endpoint-owned subset
+	// (grantable = false) before re-inserting the fresh set each sync; Phase
+	// 8's grantable = true rows, from the corp-level endpoint, are untouched.
+	DeleteCharacterOwnedRoles(ctx context.Context, characterID int64) error
 	// The skill queue shrinks as CCP returns fewer entries; queue positions
 	// beyond the freshly-synced length are stale and never re-appear, so a
 	// soft delete would leave phantom future entries in the UI forever.
 	DeleteCharacterSkillqueueBeyond(ctx context.Context, characterID int64, queuePosition int32) error
+	// Phase 7 addition: skills is a full-state list (a skill can vanish via
+	// skill extraction) but Phase 1b's stub had no prune query for it.
+	DeleteCharacterSkillsNotIn(ctx context.Context, characterID int64, keepSkillIds []int64) error
+	// Phase 7 addition: Phase 1b's stub had no prune query for titles.
+	DeleteCharacterTitlesNotIn(ctx context.Context, characterID int64, keepTitleIds []int64) error
+	DeleteContactLabelsNotIn(ctx context.Context, ownerKind string, ownerID int64, keepLabelIds []int64) error
 	DeleteContactsNotIn(ctx context.Context, ownerKind string, ownerID int64, keepContactIds []int64) error
 	DeleteCorporationMembersNotIn(ctx context.Context, corporationID int64, keepCharacterIds []int64) error
 	// Flagged by sqlc's flag-delete rule for review: this is a cache, never a
@@ -145,6 +169,7 @@ type Querier interface {
 	// Flagged by sqlc's flag-delete rule for review: a replica past the
 	// liveness threshold is dead by definition, not a soft-deletable entity.
 	DeleteStaleReplicas(ctx context.Context, liveThreshold time.Duration) error
+	DeleteStandingsNotIn(ctx context.Context, ownerKind string, ownerID int64, keepFromIds []int64) error
 	DeregisterReplica(ctx context.Context, replicaID uuid.UUID) error
 	ElectActingCharacter(ctx context.Context, subscriptionID uuid.UUID, actingCharacterID *int64) error
 	EnqueueAlertDelivery(ctx context.Context, eventID uuid.UUID, channelID uuid.UUID) (AppAlertDelivery, error)
@@ -195,6 +220,10 @@ type Querier interface {
 	// tier of internal/esi/cache. UNLOGGED, never authoritative: a miss here
 	// costs one revalidation round, never a request failure.
 	GetEsiCacheEntry(ctx context.Context, cacheKey []byte) (AppEsiCacheEntry, error)
+	// Phase 6's app.sync_subscription.route_id and the KindSyncRoute River job
+	// payload (internal/sync/planner.SyncJobArgs) both carry route_id, not
+	// operation_id — the worker (Phase 7+) re-reads the route by this key.
+	GetEsiRouteByID(ctx context.Context, routeID uuid.UUID) (AppEsiRoute, error)
 	GetEsiRouteByOperationID(ctx context.Context, operationID string) (AppEsiRoute, error)
 	GetEsiScope(ctx context.Context, scope string) (AppEsiScope, error)
 	GetKillmail(ctx context.Context, ownerKind string, ownerID int64, killmailID int64) (AppKillmail, error)
@@ -444,7 +473,11 @@ type Querier interface {
 	// character_implant carries no mutable columns beyond its key, so there is
 	// nothing for a DO UPDATE to guard with IS DISTINCT FROM — DO NOTHING is the
 	// correct upsert shape here, same reasoning as the killmail child tables.
-	ReplaceCharacterImplant(ctx context.Context, characterID int64, typeID int32) (AppCharacterImplant, error)
+	ReplaceCharacterImplant(ctx context.Context, characterID int64, typeID int64) (AppCharacterImplant, error)
+	// GET /characters/{character_id}/roles has no "grantable" concept at all
+	// — every row this query writes has grantable = false (the corp-level
+	// roles endpoint, Phase 8, is what ever writes grantable = true, through
+	// this same table).
 	ReplaceCharacterRole(ctx context.Context, arg ReplaceCharacterRoleParams) (AppCharacterRole, error)
 	ReplaceCharacterSkillqueue(ctx context.Context, arg ReplaceCharacterSkillqueueParams) (AppCharacterSkillqueue, error)
 	ReplaceCharacterTitle(ctx context.Context, characterID int64, titleID int64, name string) (AppCharacterTitle, error)
@@ -485,6 +518,29 @@ type Querier interface {
 	// ---- sync_run ----
 	StartSyncRun(ctx context.Context, subscriptionID uuid.UUID) (AppSyncRun, error)
 	SumLedgerEntryCost(ctx context.Context, rateLimitGroup string, userKey string) (int64, error)
+	// app.character_skill, character_skillqueue, character_attributes,
+	// character_clone, character_implant, character_jump_fatigue,
+	// character_loyalty_point, character_agent_research, character_title,
+	// character_role, character_location (02_DATABASE_SCHEMA.md §5.2).
+	//
+	// PHASE 7 NOTE: this file's queries were stubbed in Phase 1b, ahead of the
+	// route handlers that would call them. Phase 7 fills the one real gap —
+	// there was no query for GET /characters/{character_id} itself, the
+	// character-sheet enrichment beyond Phase 5's minimal SSO-callback row
+	// (SyncCharacterSheet, below) — and replaces UpsertCharacterLocation with
+	// three narrower upserts, because /location, /online and /ship are three
+	// separate ESI endpoints that never carry all eleven of that single
+	// query's columns at once; the original single-call shape assumed one
+	// source for the whole row, which isn't how the live spec is shaped.
+	// Every other query here is unchanged from Phase 1b.
+	// Deliberately excludes user_id and owner_hash — those are Phase 5's SSO
+	// identity fields, never touched by the sheet sync. character_title_id and
+	// achievement_score are the 2026-08-04 pin's genuinely new columns
+	// (db/migrations/00030_phase7_character_fixups.sql); `title` holds ESI's
+	// corporation_title (a name, not an id — see internal/sync/handlers/
+	// character_identity.go for why the roadmap's "renamed to
+	// corporation_title_id" summary doesn't match the live spec).
+	SyncCharacterSheet(ctx context.Context, arg SyncCharacterSheetParams) (AppCharacter, error)
 	TouchApiTokenLastUsed(ctx context.Context, tokenID uuid.UUID) error
 	TouchUserLastLogin(ctx context.Context, userID uuid.UUID) error
 	UpsertAlliance(ctx context.Context, arg UpsertAllianceParams) (AppAlliance, error)
@@ -507,16 +563,21 @@ type Querier interface {
 	UpsertCharacterFittingItem(ctx context.Context, arg UpsertCharacterFittingItemParams) (AppCharacterFittingItem, error)
 	UpsertCharacterIntelEdge(ctx context.Context, arg UpsertCharacterIntelEdgeParams) (AppCharacterIntelEdge, error)
 	UpsertCharacterJumpFatigue(ctx context.Context, arg UpsertCharacterJumpFatigueParams) (AppCharacterJumpFatigue, error)
-	UpsertCharacterLocation(ctx context.Context, arg UpsertCharacterLocationParams) (AppCharacterLocation, error)
+	// character_location: one row, three ESI endpoints (location/online/ship),
+	// each owning a disjoint column subset — see this file's header note for
+	// why Phase 1b's single 11-column UpsertCharacterLocation doesn't fit.
+	// Each upsert below leaves the OTHER endpoints' columns alone on the
+	// UPDATE branch; the INSERT branch's placeholder for the other endpoints'
+	// NOT NULL solar_system_id (0) is corrected the first time
+	// UpsertCharacterLocationOnly runs, whatever order the three land in.
+	UpsertCharacterLocationOnly(ctx context.Context, arg UpsertCharacterLocationOnlyParams) (AppCharacterLocation, error)
 	UpsertCharacterLoyaltyPoint(ctx context.Context, characterID int64, corporationID int64, loyaltyPoints int64) (AppCharacterLoyaltyPoint, error)
 	// app.character_notification, app.notification_contact
 	// (02_DATABASE_SCHEMA.md §5.2). character_notification is partitioned by
 	// sent_at; the partition key rides along in the ON CONFLICT target.
 	UpsertCharacterNotification(ctx context.Context, arg UpsertCharacterNotificationParams) (AppCharacterNotification, error)
-	// app.character_skill, character_skillqueue, character_attributes,
-	// character_clone, character_implant, character_jump_fatigue,
-	// character_loyalty_point, character_agent_research, character_title,
-	// character_role, character_location (02_DATABASE_SCHEMA.md §5.2).
+	UpsertCharacterOnlineOnly(ctx context.Context, arg UpsertCharacterOnlineOnlyParams) (AppCharacterLocation, error)
+	UpsertCharacterShipOnly(ctx context.Context, arg UpsertCharacterShipOnlyParams) (AppCharacterLocation, error)
 	UpsertCharacterSkill(ctx context.Context, arg UpsertCharacterSkillParams) (AppCharacterSkill, error)
 	// ---- character_token ----
 	UpsertCharacterToken(ctx context.Context, arg UpsertCharacterTokenParams) error
@@ -627,6 +688,16 @@ type Querier interface {
 	UpsertMarketOrder(ctx context.Context, arg UpsertMarketOrderParams) (AppMarketOrder, error)
 	UpsertMarketOrderHistory(ctx context.Context, arg UpsertMarketOrderHistoryParams) (AppMarketOrderHistory, error)
 	UpsertMarketPrice(ctx context.Context, typeID int32, adjustedPrice decimal.NullDecimal, averagePrice decimal.NullDecimal) (AppMarketPrice, error)
+	// PHASE 7 FIX: two different endpoints populate this row over time —
+	// Phase 7's /characters/{id}/medals (title/description only, no
+	// created_at/creator_id) and Phase 8's /corporations/{id}/medals
+	// (definition endpoint, has all four). The original ON CONFLICT DO UPDATE
+	// only ever touched title/description, which was fine for either caller
+	// alone, but meant Phase 8 syncing real created_at/creator_id onto a row
+	// Phase 7 already created could never actually persist them — the SET
+	// clause never mentioned those two columns at all. COALESCE(EXCLUDED, t.)
+	// lets either caller supply real values without a NULL from the OTHER
+	// caller ever clobbering what's already stored.
 	UpsertMedal(ctx context.Context, arg UpsertMedalParams) (AppMedal, error)
 	UpsertMiningExtraction(ctx context.Context, arg UpsertMiningExtractionParams) (AppMiningExtraction, error)
 	UpsertMiningLedgerEntry(ctx context.Context, arg UpsertMiningLedgerEntryParams) (AppMiningLedger, error)

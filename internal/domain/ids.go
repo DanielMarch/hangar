@@ -60,6 +60,12 @@ var KnownUUIDIdentifiers = map[IdentifierKey]IdentifierType{
 	{"military_campaign", "campaign_id"}:                      IdentifierUUID, // post-v1.0
 	{"military_campaign_objective", "objective_id"}:           IdentifierUUID, // post-v1.0
 	{"mercenary_tactical_operation", "tactical_operation_id"}: IdentifierUUID, // post-v1.0
+	// Phase 7: GET /characters/{character_id}'s character_title_id is a
+	// UUID-keyed "cosmetic title" reference — nothing to do with
+	// corporation titles (character_title.title_id, a separate bigint
+	// concept from a different endpoint) despite the shared "_id" suffix.
+	// See db/migrations/00030_phase7_character_fixups.sql.
+	{"character", "character_title_id"}: IdentifierUUID,
 }
 
 // InternalUUIDIdentifiers names "%_id"-suffixed columns that are `uuid` by

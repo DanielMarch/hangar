@@ -35,6 +35,38 @@ func (q *Queries) AddEsiRouteScope(ctx context.Context, routeID uuid.UUID, scope
 	return err
 }
 
+const getEsiRouteByID = `-- name: GetEsiRouteByID :one
+SELECT route_id, operation_id, method, upstream_path, cache_age, cache_mode, rate_limit_group, rate_limit_max, rate_limit_window, pagination_style, compatibility_date, blocked_by_pin, spec_fragment, identifier_types, first_seen_at, retired_at, updated_at FROM app.esi_route WHERE route_id = $1
+`
+
+// Phase 6's app.sync_subscription.route_id and the KindSyncRoute River job
+// payload (internal/sync/planner.SyncJobArgs) both carry route_id, not
+// operation_id — the worker (Phase 7+) re-reads the route by this key.
+func (q *Queries) GetEsiRouteByID(ctx context.Context, routeID uuid.UUID) (AppEsiRoute, error) {
+	row := q.db.QueryRow(ctx, getEsiRouteByID, routeID)
+	var i AppEsiRoute
+	err := row.Scan(
+		&i.RouteID,
+		&i.OperationID,
+		&i.Method,
+		&i.UpstreamPath,
+		&i.CacheAge,
+		&i.CacheMode,
+		&i.RateLimitGroup,
+		&i.RateLimitMax,
+		&i.RateLimitWindow,
+		&i.PaginationStyle,
+		&i.CompatibilityDate,
+		&i.BlockedByPin,
+		&i.SpecFragment,
+		&i.IdentifierTypes,
+		&i.FirstSeenAt,
+		&i.RetiredAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getEsiRouteByOperationID = `-- name: GetEsiRouteByOperationID :one
 SELECT route_id, operation_id, method, upstream_path, cache_age, cache_mode, rate_limit_group, rate_limit_max, rate_limit_window, pagination_style, compatibility_date, blocked_by_pin, spec_fragment, identifier_types, first_seen_at, retired_at, updated_at FROM app.esi_route WHERE operation_id = $1
 `

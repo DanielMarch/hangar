@@ -167,30 +167,32 @@ type AppCalendarEventDetail struct {
 }
 
 type AppCharacter struct {
-	CharacterID    int64
-	UserID         uuid.NullUUID
-	Name           string
-	CorporationID  *int64
-	AllianceID     *int64
-	FactionID      *int32
-	SecurityStatus *float64
-	Birthday       *time.Time
-	Gender         *string
-	RaceID         *int32
-	BloodlineID    *int32
-	AncestryID     *int32
-	Description    *string
-	Title          *string
-	OwnerHash      string
-	DeletedAt      *time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	CharacterID      int64
+	UserID           uuid.NullUUID
+	Name             string
+	CorporationID    *int64
+	AllianceID       *int64
+	FactionID        *int32
+	SecurityStatus   *float64
+	Birthday         *time.Time
+	Gender           *string
+	RaceID           *int32
+	BloodlineID      *int32
+	AncestryID       *int32
+	Description      *string
+	Title            *string
+	OwnerHash        string
+	DeletedAt        *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	CharacterTitleID uuid.NullUUID
+	AchievementScore int64
 }
 
 type AppCharacterAgentResearch struct {
 	CharacterID     int64
 	AgentID         int64
-	SkillTypeID     int32
+	SkillTypeID     int64
 	StartedAt       time.Time
 	PointsPerDay    float64
 	RemainderPoints float64
@@ -216,7 +218,7 @@ type AppCharacterClone struct {
 	LocationID            int64
 	LocationType          string
 	Name                  *string
-	Implants              []int32
+	Implants              []int64
 	IsHomeClone           bool
 	LastCloneJumpDate     *time.Time
 	LastStationChangeDate *time.Time
@@ -251,7 +253,7 @@ type AppCharacterFittingItem struct {
 
 type AppCharacterImplant struct {
 	CharacterID int64
-	TypeID      int32
+	TypeID      int64
 	UpdatedAt   time.Time
 }
 
@@ -274,7 +276,7 @@ type AppCharacterJumpFatigue struct {
 
 type AppCharacterLocation struct {
 	CharacterID   int64
-	SolarSystemID int32
+	SolarSystemID int64
 	StationID     *int64
 	StructureID   *int64
 	IsOnline      *bool
@@ -282,7 +284,7 @@ type AppCharacterLocation struct {
 	LastLogout    *time.Time
 	Logins        *int64
 	ShipItemID    *int64
-	ShipTypeID    *int32
+	ShipTypeID    *int64
 	ShipName      *string
 	UpdatedAt     time.Time
 }
@@ -336,7 +338,7 @@ type AppCharacterRole struct {
 
 type AppCharacterSkill struct {
 	CharacterID  int64
-	SkillID      int32
+	SkillID      int64
 	ActiveLevel  int16
 	TrainedLevel int16
 	Skillpoints  int64
@@ -346,7 +348,7 @@ type AppCharacterSkill struct {
 type AppCharacterSkillqueue struct {
 	CharacterID     int64
 	QueuePosition   int32
-	SkillID         int32
+	SkillID         int64
 	FinishedLevel   int16
 	TrainingStartSp *int64
 	LevelStartSp    *int64

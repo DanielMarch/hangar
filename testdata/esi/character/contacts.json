@@ -1,0 +1,15 @@
+[
+  {
+    "contact_id": 2112625428,
+    "contact_type": "character",
+    "is_blocked": false,
+    "is_watched": true,
+    "label_ids": [1, 2],
+    "standing": 10.0
+  },
+  {
+    "contact_id": 98777771,
+    "contact_type": "corporation",
+    "standing": -5.0
+  }
+]

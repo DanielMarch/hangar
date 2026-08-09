@@ -1,0 +1,23 @@
+{
+  "home_location": {
+    "location_id": 60003760,
+    "location_type": "station"
+  },
+  "jump_clones": [
+    {
+      "implants": [19540, 19551],
+      "jump_clone_id": 12345,
+      "location_id": 60003760,
+      "location_type": "station",
+      "name": "Home Clone"
+    },
+    {
+      "implants": [],
+      "jump_clone_id": 12346,
+      "location_id": 1035466617946,
+      "location_type": "structure"
+    }
+  ],
+  "last_clone_jump_date": "2026-07-01T12:00:00Z",
+  "last_station_change_date": "2026-01-15T09:30:00Z"
+}

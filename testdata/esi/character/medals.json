@@ -1,0 +1,15 @@
+[
+  {
+    "corporation_id": 98777771,
+    "date": "2026-02-14T00:00:00Z",
+    "description": "Awarded for exceptional fleet leadership.",
+    "graphics": [
+      {"color": -1, "graphic": "medalRibbon01_01", "layer": 0, "part": 1}
+    ],
+    "issuer_id": 2112625428,
+    "medal_id": 1,
+    "reason": "Outstanding performance in Fleet Ops.",
+    "status": "public",
+    "title": "Distinguished Service Medal"
+  }
+]

@@ -8,15 +8,70 @@ package gen
 import (
 	"context"
 	"time"
+
+	"github.com/google/uuid"
 )
+
+const deleteCharacterAgentResearchNotIn = `-- name: DeleteCharacterAgentResearchNotIn :exec
+DELETE FROM app.character_agent_research
+ WHERE character_id = $1 AND NOT (agent_id = ANY($2::bigint[]))
+`
+
+// Phase 7 addition: Phase 1b's stub had no prune query for agent research.
+func (q *Queries) DeleteCharacterAgentResearchNotIn(ctx context.Context, characterID int64, keepAgentIds []int64) error {
+	_, err := q.db.Exec(ctx, deleteCharacterAgentResearchNotIn, characterID, keepAgentIds)
+	return err
+}
+
+const deleteCharacterClonesNotIn = `-- name: DeleteCharacterClonesNotIn :exec
+DELETE FROM app.character_clone
+ WHERE character_id = $1 AND NOT (jump_clone_id = ANY($2::bigint[]))
+`
+
+// Phase 7 addition: clones is a full-state list like implants/skills, but
+// Phase 1b's stub had no prune query for it (ListCharacterClones/
+// UpsertCharacterClone only) — a jump clone can be destroyed, which never
+// shows up again in the response, so without this a destroyed clone would
+// linger forever.
+func (q *Queries) DeleteCharacterClonesNotIn(ctx context.Context, characterID int64, keepJumpCloneIds []int64) error {
+	_, err := q.db.Exec(ctx, deleteCharacterClonesNotIn, characterID, keepJumpCloneIds)
+	return err
+}
 
 const deleteCharacterImplantsNotIn = `-- name: DeleteCharacterImplantsNotIn :exec
 DELETE FROM app.character_implant
- WHERE character_id = $1 AND NOT (type_id = ANY($2::int[]))
+ WHERE character_id = $1 AND NOT (type_id = ANY($2::bigint[]))
 `
 
-func (q *Queries) DeleteCharacterImplantsNotIn(ctx context.Context, characterID int64, keepTypeIds []int32) error {
+// PHASE 7 FIX: cast was ::int[] (int32) against a type_id column Phase 1b
+// had migrated as `integer` — the live spec declares type_id int64
+// (db/migrations/00030_phase7_character_fixups.sql widened the column to
+// bigint; this cast has to widen with it or every call fails to bind).
+func (q *Queries) DeleteCharacterImplantsNotIn(ctx context.Context, characterID int64, keepTypeIds []int64) error {
 	_, err := q.db.Exec(ctx, deleteCharacterImplantsNotIn, characterID, keepTypeIds)
+	return err
+}
+
+const deleteCharacterLoyaltyPointsNotIn = `-- name: DeleteCharacterLoyaltyPointsNotIn :exec
+DELETE FROM app.character_loyalty_point
+ WHERE character_id = $1 AND NOT (corporation_id = ANY($2::bigint[]))
+`
+
+// Phase 7 addition: Phase 1b's stub had no prune query for loyalty points.
+func (q *Queries) DeleteCharacterLoyaltyPointsNotIn(ctx context.Context, characterID int64, keepCorporationIds []int64) error {
+	_, err := q.db.Exec(ctx, deleteCharacterLoyaltyPointsNotIn, characterID, keepCorporationIds)
+	return err
+}
+
+const deleteCharacterOwnedRoles = `-- name: DeleteCharacterOwnedRoles :exec
+DELETE FROM app.character_role WHERE character_id = $1 AND NOT grantable
+`
+
+// Phase 7 addition: clears only the character-endpoint-owned subset
+// (grantable = false) before re-inserting the fresh set each sync; Phase
+// 8's grantable = true rows, from the corp-level endpoint, are untouched.
+func (q *Queries) DeleteCharacterOwnedRoles(ctx context.Context, characterID int64) error {
+	_, err := q.db.Exec(ctx, deleteCharacterOwnedRoles, characterID)
 	return err
 }
 
@@ -29,6 +84,29 @@ DELETE FROM app.character_skillqueue WHERE character_id = $1 AND queue_position 
 // soft delete would leave phantom future entries in the UI forever.
 func (q *Queries) DeleteCharacterSkillqueueBeyond(ctx context.Context, characterID int64, queuePosition int32) error {
 	_, err := q.db.Exec(ctx, deleteCharacterSkillqueueBeyond, characterID, queuePosition)
+	return err
+}
+
+const deleteCharacterSkillsNotIn = `-- name: DeleteCharacterSkillsNotIn :exec
+DELETE FROM app.character_skill
+ WHERE character_id = $1 AND NOT (skill_id = ANY($2::bigint[]))
+`
+
+// Phase 7 addition: skills is a full-state list (a skill can vanish via
+// skill extraction) but Phase 1b's stub had no prune query for it.
+func (q *Queries) DeleteCharacterSkillsNotIn(ctx context.Context, characterID int64, keepSkillIds []int64) error {
+	_, err := q.db.Exec(ctx, deleteCharacterSkillsNotIn, characterID, keepSkillIds)
+	return err
+}
+
+const deleteCharacterTitlesNotIn = `-- name: DeleteCharacterTitlesNotIn :exec
+DELETE FROM app.character_title
+ WHERE character_id = $1 AND NOT (title_id = ANY($2::bigint[]))
+`
+
+// Phase 7 addition: Phase 1b's stub had no prune query for titles.
+func (q *Queries) DeleteCharacterTitlesNotIn(ctx context.Context, characterID int64, keepTitleIds []int64) error {
+	_, err := q.db.Exec(ctx, deleteCharacterTitlesNotIn, characterID, keepTitleIds)
 	return err
 }
 
@@ -296,7 +374,7 @@ RETURNING character_id, type_id, updated_at
 // character_implant carries no mutable columns beyond its key, so there is
 // nothing for a DO UPDATE to guard with IS DISTINCT FROM — DO NOTHING is the
 // correct upsert shape here, same reasoning as the killmail child tables.
-func (q *Queries) ReplaceCharacterImplant(ctx context.Context, characterID int64, typeID int32) (AppCharacterImplant, error) {
+func (q *Queries) ReplaceCharacterImplant(ctx context.Context, characterID int64, typeID int64) (AppCharacterImplant, error) {
 	row := q.db.QueryRow(ctx, replaceCharacterImplant, characterID, typeID)
 	var i AppCharacterImplant
 	err := row.Scan(&i.CharacterID, &i.TypeID, &i.UpdatedAt)
@@ -305,7 +383,7 @@ func (q *Queries) ReplaceCharacterImplant(ctx context.Context, characterID int64
 
 const replaceCharacterRole = `-- name: ReplaceCharacterRole :one
 INSERT INTO app.character_role (character_id, role, grantable, at_hq, at_base, at_other)
-VALUES ($1,$2,$3,$4,$5,$6)
+VALUES ($1,$2,false,$3,$4,$5)
 ON CONFLICT (character_id, role, grantable, at_hq, at_base, at_other) DO NOTHING
 RETURNING character_id, role, grantable, at_hq, at_base, at_other
 `
@@ -313,17 +391,19 @@ RETURNING character_id, role, grantable, at_hq, at_base, at_other
 type ReplaceCharacterRoleParams struct {
 	CharacterID int64
 	Role        string
-	Grantable   bool
 	AtHq        bool
 	AtBase      bool
 	AtOther     bool
 }
 
+// GET /characters/{character_id}/roles has no "grantable" concept at all
+// — every row this query writes has grantable = false (the corp-level
+// roles endpoint, Phase 8, is what ever writes grantable = true, through
+// this same table).
 func (q *Queries) ReplaceCharacterRole(ctx context.Context, arg ReplaceCharacterRoleParams) (AppCharacterRole, error) {
 	row := q.db.QueryRow(ctx, replaceCharacterRole,
 		arg.CharacterID,
 		arg.Role,
-		arg.Grantable,
 		arg.AtHq,
 		arg.AtBase,
 		arg.AtOther,
@@ -361,7 +441,7 @@ RETURNING character_id, queue_position, skill_id, finished_level, training_start
 type ReplaceCharacterSkillqueueParams struct {
 	CharacterID     int64
 	QueuePosition   int32
-	SkillID         int32
+	SkillID         int64
 	FinishedLevel   int16
 	TrainingStartSp *int64
 	LevelStartSp    *int64
@@ -412,6 +492,110 @@ func (q *Queries) ReplaceCharacterTitle(ctx context.Context, characterID int64, 
 	return i, err
 }
 
+const syncCharacterSheet = `-- name: SyncCharacterSheet :one
+
+UPDATE app.character AS t
+   SET corporation_id     = $2,
+       alliance_id        = $3,
+       faction_id         = $4,
+       security_status    = $5,
+       birthday           = $6,
+       gender             = $7,
+       race_id            = $8,
+       bloodline_id       = $9,
+       description        = $10,
+       title              = $11,
+       character_title_id = $12,
+       achievement_score  = $13,
+       updated_at         = now()
+ WHERE t.character_id = $1
+   AND (t.corporation_id, t.alliance_id, t.faction_id, t.security_status, t.birthday,
+        t.gender, t.race_id, t.bloodline_id, t.description, t.title, t.character_title_id, t.achievement_score)
+      IS DISTINCT FROM
+       ($2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+RETURNING character_id, user_id, name, corporation_id, alliance_id, faction_id, security_status, birthday, gender, race_id, bloodline_id, ancestry_id, description, title, owner_hash, deleted_at, created_at, updated_at, character_title_id, achievement_score
+`
+
+type SyncCharacterSheetParams struct {
+	CharacterID      int64
+	CorporationID    *int64
+	AllianceID       *int64
+	FactionID        *int32
+	SecurityStatus   *float64
+	Birthday         *time.Time
+	Gender           *string
+	RaceID           *int32
+	BloodlineID      *int32
+	Description      *string
+	Title            *string
+	CharacterTitleID uuid.NullUUID
+	AchievementScore int64
+}
+
+// app.character_skill, character_skillqueue, character_attributes,
+// character_clone, character_implant, character_jump_fatigue,
+// character_loyalty_point, character_agent_research, character_title,
+// character_role, character_location (02_DATABASE_SCHEMA.md §5.2).
+//
+// PHASE 7 NOTE: this file's queries were stubbed in Phase 1b, ahead of the
+// route handlers that would call them. Phase 7 fills the one real gap —
+// there was no query for GET /characters/{character_id} itself, the
+// character-sheet enrichment beyond Phase 5's minimal SSO-callback row
+// (SyncCharacterSheet, below) — and replaces UpsertCharacterLocation with
+// three narrower upserts, because /location, /online and /ship are three
+// separate ESI endpoints that never carry all eleven of that single
+// query's columns at once; the original single-call shape assumed one
+// source for the whole row, which isn't how the live spec is shaped.
+// Every other query here is unchanged from Phase 1b.
+// Deliberately excludes user_id and owner_hash — those are Phase 5's SSO
+// identity fields, never touched by the sheet sync. character_title_id and
+// achievement_score are the 2026-08-04 pin's genuinely new columns
+// (db/migrations/00030_phase7_character_fixups.sql); `title` holds ESI's
+// corporation_title (a name, not an id — see internal/sync/handlers/
+// character_identity.go for why the roadmap's "renamed to
+// corporation_title_id" summary doesn't match the live spec).
+func (q *Queries) SyncCharacterSheet(ctx context.Context, arg SyncCharacterSheetParams) (AppCharacter, error) {
+	row := q.db.QueryRow(ctx, syncCharacterSheet,
+		arg.CharacterID,
+		arg.CorporationID,
+		arg.AllianceID,
+		arg.FactionID,
+		arg.SecurityStatus,
+		arg.Birthday,
+		arg.Gender,
+		arg.RaceID,
+		arg.BloodlineID,
+		arg.Description,
+		arg.Title,
+		arg.CharacterTitleID,
+		arg.AchievementScore,
+	)
+	var i AppCharacter
+	err := row.Scan(
+		&i.CharacterID,
+		&i.UserID,
+		&i.Name,
+		&i.CorporationID,
+		&i.AllianceID,
+		&i.FactionID,
+		&i.SecurityStatus,
+		&i.Birthday,
+		&i.Gender,
+		&i.RaceID,
+		&i.BloodlineID,
+		&i.AncestryID,
+		&i.Description,
+		&i.Title,
+		&i.OwnerHash,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.CharacterTitleID,
+		&i.AchievementScore,
+	)
+	return i, err
+}
+
 const upsertCharacterAgentResearch = `-- name: UpsertCharacterAgentResearch :one
 INSERT INTO app.character_agent_research AS t (
     character_id, agent_id, skill_type_id, started_at, points_per_day, remainder_points
@@ -428,7 +612,7 @@ RETURNING character_id, agent_id, skill_type_id, started_at, points_per_day, rem
 type UpsertCharacterAgentResearchParams struct {
 	CharacterID     int64
 	AgentID         int64
-	SkillTypeID     int32
+	SkillTypeID     int64
 	StartedAt       time.Time
 	PointsPerDay    float64
 	RemainderPoints float64
@@ -539,7 +723,7 @@ type UpsertCharacterCloneParams struct {
 	LocationID            int64
 	LocationType          string
 	Name                  *string
-	Implants              []int32
+	Implants              []int64
 	IsHomeClone           bool
 	LastCloneJumpDate     *time.Time
 	LastStationChangeDate *time.Time
@@ -610,53 +794,40 @@ func (q *Queries) UpsertCharacterJumpFatigue(ctx context.Context, arg UpsertChar
 	return i, err
 }
 
-const upsertCharacterLocation = `-- name: UpsertCharacterLocation :one
-INSERT INTO app.character_location AS t (
-    character_id, solar_system_id, station_id, structure_id, is_online, last_login,
-    last_logout, logins, ship_item_id, ship_type_id, ship_name
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+const upsertCharacterLocationOnly = `-- name: UpsertCharacterLocationOnly :one
+
+INSERT INTO app.character_location AS t (character_id, solar_system_id, station_id, structure_id)
+VALUES ($1, $2, $3, $4)
 ON CONFLICT (character_id) DO UPDATE
-   SET solar_system_id = EXCLUDED.solar_system_id, station_id = EXCLUDED.station_id,
-       structure_id = EXCLUDED.structure_id, is_online = EXCLUDED.is_online,
-       last_login = EXCLUDED.last_login, last_logout = EXCLUDED.last_logout,
-       logins = EXCLUDED.logins, ship_item_id = EXCLUDED.ship_item_id,
-       ship_type_id = EXCLUDED.ship_type_id, ship_name = EXCLUDED.ship_name, updated_at = now()
- WHERE (t.solar_system_id, t.station_id, t.structure_id, t.is_online, t.last_login, t.last_logout,
-        t.logins, t.ship_item_id, t.ship_type_id, t.ship_name)
-    IS DISTINCT FROM
-       (EXCLUDED.solar_system_id, EXCLUDED.station_id, EXCLUDED.structure_id, EXCLUDED.is_online,
-        EXCLUDED.last_login, EXCLUDED.last_logout, EXCLUDED.logins, EXCLUDED.ship_item_id,
-        EXCLUDED.ship_type_id, EXCLUDED.ship_name)
+   SET solar_system_id = EXCLUDED.solar_system_id,
+       station_id      = EXCLUDED.station_id,
+       structure_id    = EXCLUDED.structure_id,
+       updated_at      = now()
+ WHERE (t.solar_system_id, t.station_id, t.structure_id)
+    IS DISTINCT FROM (EXCLUDED.solar_system_id, EXCLUDED.station_id, EXCLUDED.structure_id)
 RETURNING character_id, solar_system_id, station_id, structure_id, is_online, last_login, last_logout, logins, ship_item_id, ship_type_id, ship_name, updated_at
 `
 
-type UpsertCharacterLocationParams struct {
+type UpsertCharacterLocationOnlyParams struct {
 	CharacterID   int64
-	SolarSystemID int32
+	SolarSystemID int64
 	StationID     *int64
 	StructureID   *int64
-	IsOnline      *bool
-	LastLogin     *time.Time
-	LastLogout    *time.Time
-	Logins        *int64
-	ShipItemID    *int64
-	ShipTypeID    *int32
-	ShipName      *string
 }
 
-func (q *Queries) UpsertCharacterLocation(ctx context.Context, arg UpsertCharacterLocationParams) (AppCharacterLocation, error) {
-	row := q.db.QueryRow(ctx, upsertCharacterLocation,
+// character_location: one row, three ESI endpoints (location/online/ship),
+// each owning a disjoint column subset — see this file's header note for
+// why Phase 1b's single 11-column UpsertCharacterLocation doesn't fit.
+// Each upsert below leaves the OTHER endpoints' columns alone on the
+// UPDATE branch; the INSERT branch's placeholder for the other endpoints'
+// NOT NULL solar_system_id (0) is corrected the first time
+// UpsertCharacterLocationOnly runs, whatever order the three land in.
+func (q *Queries) UpsertCharacterLocationOnly(ctx context.Context, arg UpsertCharacterLocationOnlyParams) (AppCharacterLocation, error) {
+	row := q.db.QueryRow(ctx, upsertCharacterLocationOnly,
 		arg.CharacterID,
 		arg.SolarSystemID,
 		arg.StationID,
 		arg.StructureID,
-		arg.IsOnline,
-		arg.LastLogin,
-		arg.LastLogout,
-		arg.Logins,
-		arg.ShipItemID,
-		arg.ShipTypeID,
-		arg.ShipName,
 	)
 	var i AppCharacterLocation
 	err := row.Scan(
@@ -697,8 +868,100 @@ func (q *Queries) UpsertCharacterLoyaltyPoint(ctx context.Context, characterID i
 	return i, err
 }
 
-const upsertCharacterSkill = `-- name: UpsertCharacterSkill :one
+const upsertCharacterOnlineOnly = `-- name: UpsertCharacterOnlineOnly :one
+INSERT INTO app.character_location AS t (character_id, solar_system_id, is_online, last_login, last_logout, logins)
+VALUES ($1, 0, $2, $3, $4, $5)
+ON CONFLICT (character_id) DO UPDATE
+   SET is_online   = EXCLUDED.is_online,
+       last_login  = EXCLUDED.last_login,
+       last_logout = EXCLUDED.last_logout,
+       logins      = EXCLUDED.logins,
+       updated_at  = now()
+ WHERE (t.is_online, t.last_login, t.last_logout, t.logins)
+    IS DISTINCT FROM (EXCLUDED.is_online, EXCLUDED.last_login, EXCLUDED.last_logout, EXCLUDED.logins)
+RETURNING character_id, solar_system_id, station_id, structure_id, is_online, last_login, last_logout, logins, ship_item_id, ship_type_id, ship_name, updated_at
+`
 
+type UpsertCharacterOnlineOnlyParams struct {
+	CharacterID int64
+	IsOnline    *bool
+	LastLogin   *time.Time
+	LastLogout  *time.Time
+	Logins      *int64
+}
+
+func (q *Queries) UpsertCharacterOnlineOnly(ctx context.Context, arg UpsertCharacterOnlineOnlyParams) (AppCharacterLocation, error) {
+	row := q.db.QueryRow(ctx, upsertCharacterOnlineOnly,
+		arg.CharacterID,
+		arg.IsOnline,
+		arg.LastLogin,
+		arg.LastLogout,
+		arg.Logins,
+	)
+	var i AppCharacterLocation
+	err := row.Scan(
+		&i.CharacterID,
+		&i.SolarSystemID,
+		&i.StationID,
+		&i.StructureID,
+		&i.IsOnline,
+		&i.LastLogin,
+		&i.LastLogout,
+		&i.Logins,
+		&i.ShipItemID,
+		&i.ShipTypeID,
+		&i.ShipName,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertCharacterShipOnly = `-- name: UpsertCharacterShipOnly :one
+INSERT INTO app.character_location AS t (character_id, solar_system_id, ship_item_id, ship_type_id, ship_name)
+VALUES ($1, 0, $2, $3, $4)
+ON CONFLICT (character_id) DO UPDATE
+   SET ship_item_id = EXCLUDED.ship_item_id,
+       ship_type_id = EXCLUDED.ship_type_id,
+       ship_name    = EXCLUDED.ship_name,
+       updated_at   = now()
+ WHERE (t.ship_item_id, t.ship_type_id, t.ship_name)
+    IS DISTINCT FROM (EXCLUDED.ship_item_id, EXCLUDED.ship_type_id, EXCLUDED.ship_name)
+RETURNING character_id, solar_system_id, station_id, structure_id, is_online, last_login, last_logout, logins, ship_item_id, ship_type_id, ship_name, updated_at
+`
+
+type UpsertCharacterShipOnlyParams struct {
+	CharacterID int64
+	ShipItemID  *int64
+	ShipTypeID  *int64
+	ShipName    *string
+}
+
+func (q *Queries) UpsertCharacterShipOnly(ctx context.Context, arg UpsertCharacterShipOnlyParams) (AppCharacterLocation, error) {
+	row := q.db.QueryRow(ctx, upsertCharacterShipOnly,
+		arg.CharacterID,
+		arg.ShipItemID,
+		arg.ShipTypeID,
+		arg.ShipName,
+	)
+	var i AppCharacterLocation
+	err := row.Scan(
+		&i.CharacterID,
+		&i.SolarSystemID,
+		&i.StationID,
+		&i.StructureID,
+		&i.IsOnline,
+		&i.LastLogin,
+		&i.LastLogout,
+		&i.Logins,
+		&i.ShipItemID,
+		&i.ShipTypeID,
+		&i.ShipName,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertCharacterSkill = `-- name: UpsertCharacterSkill :one
 INSERT INTO app.character_skill AS t (character_id, skill_id, active_level, trained_level, skillpoints)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (character_id, skill_id) DO UPDATE
@@ -713,16 +976,12 @@ RETURNING character_id, skill_id, active_level, trained_level, skillpoints, upda
 
 type UpsertCharacterSkillParams struct {
 	CharacterID  int64
-	SkillID      int32
+	SkillID      int64
 	ActiveLevel  int16
 	TrainedLevel int16
 	Skillpoints  int64
 }
 
-// app.character_skill, character_skillqueue, character_attributes,
-// character_clone, character_implant, character_jump_fatigue,
-// character_loyalty_point, character_agent_research, character_title,
-// character_role, character_location (02_DATABASE_SCHEMA.md §5.2).
 func (q *Queries) UpsertCharacterSkill(ctx context.Context, arg UpsertCharacterSkillParams) (AppCharacterSkill, error) {
 	row := q.db.QueryRow(ctx, upsertCharacterSkill,
 		arg.CharacterID,

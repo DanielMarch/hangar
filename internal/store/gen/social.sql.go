@@ -10,6 +10,16 @@ import (
 	"time"
 )
 
+const deleteContactLabelsNotIn = `-- name: DeleteContactLabelsNotIn :exec
+DELETE FROM app.contact_label
+ WHERE owner_kind = $1 AND owner_id = $2 AND NOT (label_id = ANY($3::bigint[]))
+`
+
+func (q *Queries) DeleteContactLabelsNotIn(ctx context.Context, ownerKind string, ownerID int64, keepLabelIds []int64) error {
+	_, err := q.db.Exec(ctx, deleteContactLabelsNotIn, ownerKind, ownerID, keepLabelIds)
+	return err
+}
+
 const deleteContactsNotIn = `-- name: DeleteContactsNotIn :exec
 DELETE FROM app.contact
  WHERE owner_kind = $1 AND owner_id = $2 AND NOT (contact_id = ANY($3::bigint[]))
@@ -17,6 +27,16 @@ DELETE FROM app.contact
 
 func (q *Queries) DeleteContactsNotIn(ctx context.Context, ownerKind string, ownerID int64, keepContactIds []int64) error {
 	_, err := q.db.Exec(ctx, deleteContactsNotIn, ownerKind, ownerID, keepContactIds)
+	return err
+}
+
+const deleteStandingsNotIn = `-- name: DeleteStandingsNotIn :exec
+DELETE FROM app.standing
+ WHERE owner_kind = $1 AND owner_id = $2 AND NOT (from_id = ANY($3::bigint[]))
+`
+
+func (q *Queries) DeleteStandingsNotIn(ctx context.Context, ownerKind string, ownerID int64, keepFromIds []int64) error {
+	_, err := q.db.Exec(ctx, deleteStandingsNotIn, ownerKind, ownerID, keepFromIds)
 	return err
 }
 
@@ -338,8 +358,12 @@ const upsertMedal = `-- name: UpsertMedal :one
 INSERT INTO app.medal AS t (corporation_id, medal_id, title, description, created_at, creator_id)
 VALUES ($1,$2,$3,$4,$5,$6)
 ON CONFLICT (corporation_id, medal_id) DO UPDATE
-   SET title = EXCLUDED.title, description = EXCLUDED.description
+   SET title = EXCLUDED.title, description = EXCLUDED.description,
+       created_at = COALESCE(EXCLUDED.created_at, t.created_at),
+       creator_id = COALESCE(EXCLUDED.creator_id, t.creator_id)
  WHERE (t.title, t.description) IS DISTINCT FROM (EXCLUDED.title, EXCLUDED.description)
+    OR (EXCLUDED.created_at IS NOT NULL AND t.created_at IS NULL)
+    OR (EXCLUDED.creator_id IS NOT NULL AND t.creator_id IS NULL)
 RETURNING corporation_id, medal_id, title, description, created_at, creator_id
 `
 
@@ -352,6 +376,16 @@ type UpsertMedalParams struct {
 	CreatorID     *int64
 }
 
+// PHASE 7 FIX: two different endpoints populate this row over time —
+// Phase 7's /characters/{id}/medals (title/description only, no
+// created_at/creator_id) and Phase 8's /corporations/{id}/medals
+// (definition endpoint, has all four). The original ON CONFLICT DO UPDATE
+// only ever touched title/description, which was fine for either caller
+// alone, but meant Phase 8 syncing real created_at/creator_id onto a row
+// Phase 7 already created could never actually persist them — the SET
+// clause never mentioned those two columns at all. COALESCE(EXCLUDED, t.)
+// lets either caller supply real values without a NULL from the OTHER
+// caller ever clobbering what's already stored.
 func (q *Queries) UpsertMedal(ctx context.Context, arg UpsertMedalParams) (AppMedal, error) {
 	row := q.db.QueryRow(ctx, upsertMedal,
 		arg.CorporationID,

@@ -1,0 +1,115 @@
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/hangar-project/hangar/internal/store"
+	"github.com/hangar-project/hangar/internal/store/gen"
+	"github.com/jackc/pgx/v5"
+)
+
+// CharacterSheetDTO is GET /characters/{character_id} on the 2026-08-04
+// pin (internal/esi/catalogue/embedded/openapi.snapshot.json,
+// CharactersCharacterIdGet — there is no top-level operationId name for
+// this one in the spec, it's keyed by path). Two fields the roadmap
+// summarised as "title_id renamed corporation_title_id" do not match what
+// the spec actually declares — see the field comments below and
+// db/migrations/00030_phase7_character_fixups.sql's header for the full
+// account.
+type CharacterSheetDTO struct {
+	AchievementScore int64     `json:"achievement_score"`
+	AllianceID       *int64    `json:"alliance_id,omitempty"`
+	Birthday         time.Time `json:"birthday"`
+	BloodlineID      int32     `json:"bloodline_id"`
+	// CharacterTitleID: "Character's equipped cosmetic title ID" —
+	// $ref: UUID. Not a corporation-title concept at all, and not a
+	// bigint despite the "_id" suffix (Principle 13's exact trap).
+	CharacterTitleID *uuid.UUID `json:"character_title_id,omitempty"`
+	CorporationID    int64      `json:"corporation_id"`
+	// CorporationTitle: "Character's corporation title" — a plain
+	// string (the title's display name), not an identifier. There is no
+	// `title_id` field anywhere in this response; the roadmap's "renamed
+	// to corporation_title_id" claim does not match the live spec.
+	CorporationTitle *string  `json:"corporation_title,omitempty"`
+	Description      *string  `json:"description,omitempty"`
+	FactionID        *int32   `json:"faction_id,omitempty"`
+	Gender           string   `json:"gender"`
+	Name             string   `json:"name"`
+	RaceID           int32    `json:"race_id"`
+	SecurityStatus   *float64 `json:"security_status,omitempty"`
+}
+
+// ParseCharacterSheet unmarshals a raw /characters/{id} response.
+func ParseCharacterSheet(body []byte) (CharacterSheetDTO, error) {
+	var dto CharacterSheetDTO
+	if err := json.Unmarshal(body, &dto); err != nil {
+		return CharacterSheetDTO{}, fmt.Errorf("handlers: parsing character sheet: %w", err)
+	}
+	return dto, nil
+}
+
+// SyncCharacterSheet upserts the enrichment fields GET /characters/{id}
+// carries beyond Phase 5's minimal SSO-callback row — deliberately never
+// touching user_id or owner_hash, which stay Phase 5's alone.
+//
+// app.character.corporation_id/alliance_id are foreign keys, and this is
+// the first phase that ever sets them (Phase 5's own SSO-callback upsert
+// leaves both untouched, precisely to avoid this) — a corporation or
+// alliance this installation has never seen before must get a stub row
+// first (name/ticker empty; the ON CONFLICT DO NOTHING these two queries
+// use, per their own doc comments, means an existing real row is never
+// overwritten by an empty placeholder). Phase 8/9 fill in the real
+// name/ticker.
+func SyncCharacterSheet(ctx context.Context, s *store.Store, characterID int64, dto CharacterSheetDTO) (SyncResult, error) {
+	if err := s.UpsertCorporationStub(ctx, dto.CorporationID, "", ""); err != nil {
+		return SyncResult{}, fmt.Errorf("handlers: stubbing corporation %d for character %d: %w", dto.CorporationID, characterID, err)
+	}
+	if dto.AllianceID != nil {
+		if err := s.UpsertAllianceStub(ctx, *dto.AllianceID, ""); err != nil {
+			return SyncResult{}, fmt.Errorf("handlers: stubbing alliance %d for character %d: %w", *dto.AllianceID, characterID, err)
+		}
+	}
+
+	var titleID uuid.NullUUID
+	if dto.CharacterTitleID != nil {
+		titleID = uuid.NullUUID{UUID: *dto.CharacterTitleID, Valid: true}
+	}
+	corporationID := dto.CorporationID
+
+	_, err := s.SyncCharacterSheet(ctx, gen.SyncCharacterSheetParams{
+		CharacterID:      characterID,
+		CorporationID:    &corporationID,
+		AllianceID:       dto.AllianceID,
+		FactionID:        dto.FactionID,
+		SecurityStatus:   dto.SecurityStatus,
+		Birthday:         nilIfZero(dto.Birthday),
+		Gender:           &dto.Gender,
+		RaceID:           &dto.RaceID,
+		BloodlineID:      &dto.BloodlineID,
+		Description:      dto.Description,
+		Title:            dto.CorporationTitle,
+		CharacterTitleID: titleID,
+		AchievementScore: dto.AchievementScore,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// SyncCharacterSheet's WHERE ... IS DISTINCT FROM guard
+			// suppressed the UPDATE — either genuinely unchanged data, or
+			// character_id doesn't exist yet at all. Disambiguate rather
+			// than silently treating the latter as "0 rows changed"
+			// (internal/esi/catalogue/sync.go's UpsertEsiRoute establishes
+			// this exact pattern).
+			if _, getErr := s.GetCharacter(ctx, characterID); getErr != nil {
+				return SyncResult{}, fmt.Errorf("handlers: character %d has no row to sync a sheet onto: %w", characterID, getErr)
+			}
+			return SyncResult{RowsAffected: 0}, nil
+		}
+		return SyncResult{}, fmt.Errorf("handlers: syncing character sheet: %w", err)
+	}
+	return SyncResult{RowsAffected: 1}, nil
+}

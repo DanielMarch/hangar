@@ -24,7 +24,7 @@ func (q *Queries) AddCharacterTokenScope(ctx context.Context, characterID int64,
 }
 
 const getCharacter = `-- name: GetCharacter :one
-SELECT character_id, user_id, name, corporation_id, alliance_id, faction_id, security_status, birthday, gender, race_id, bloodline_id, ancestry_id, description, title, owner_hash, deleted_at, created_at, updated_at FROM app.character WHERE character_id = $1 AND deleted_at IS NULL
+SELECT character_id, user_id, name, corporation_id, alliance_id, faction_id, security_status, birthday, gender, race_id, bloodline_id, ancestry_id, description, title, owner_hash, deleted_at, created_at, updated_at, character_title_id, achievement_score FROM app.character WHERE character_id = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) GetCharacter(ctx context.Context, characterID int64) (AppCharacter, error) {
@@ -49,6 +49,8 @@ func (q *Queries) GetCharacter(ctx context.Context, characterID int64) (AppChara
 		&i.DeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CharacterTitleID,
+		&i.AchievementScore,
 	)
 	return i, err
 }
@@ -113,7 +115,7 @@ func (q *Queries) ListCharacterTokenScopes(ctx context.Context, characterID int6
 }
 
 const listCharactersForUser = `-- name: ListCharactersForUser :many
-SELECT character_id, user_id, name, corporation_id, alliance_id, faction_id, security_status, birthday, gender, race_id, bloodline_id, ancestry_id, description, title, owner_hash, deleted_at, created_at, updated_at FROM app.character WHERE user_id = $1 AND deleted_at IS NULL ORDER BY character_id
+SELECT character_id, user_id, name, corporation_id, alliance_id, faction_id, security_status, birthday, gender, race_id, bloodline_id, ancestry_id, description, title, owner_hash, deleted_at, created_at, updated_at, character_title_id, achievement_score FROM app.character WHERE user_id = $1 AND deleted_at IS NULL ORDER BY character_id
 `
 
 func (q *Queries) ListCharactersForUser(ctx context.Context, userID uuid.NullUUID) ([]AppCharacter, error) {
@@ -144,6 +146,8 @@ func (q *Queries) ListCharactersForUser(ctx context.Context, userID uuid.NullUUI
 			&i.DeletedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CharacterTitleID,
+			&i.AchievementScore,
 		); err != nil {
 			return nil, err
 		}
@@ -256,7 +260,7 @@ ON CONFLICT (character_id) DO UPDATE
  WHERE (t.name, t.corporation_id, t.alliance_id, t.security_status, t.owner_hash, t.title)
     IS DISTINCT FROM
        (EXCLUDED.name, EXCLUDED.corporation_id, EXCLUDED.alliance_id, EXCLUDED.security_status, EXCLUDED.owner_hash, EXCLUDED.title)
-RETURNING character_id, user_id, name, corporation_id, alliance_id, faction_id, security_status, birthday, gender, race_id, bloodline_id, ancestry_id, description, title, owner_hash, deleted_at, created_at, updated_at
+RETURNING character_id, user_id, name, corporation_id, alliance_id, faction_id, security_status, birthday, gender, race_id, bloodline_id, ancestry_id, description, title, owner_hash, deleted_at, created_at, updated_at, character_title_id, achievement_score
 `
 
 type UpsertCharacterParams struct {
@@ -315,6 +319,8 @@ func (q *Queries) UpsertCharacter(ctx context.Context, arg UpsertCharacterParams
 		&i.DeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CharacterTitleID,
+		&i.AchievementScore,
 	)
 	return i, err
 }

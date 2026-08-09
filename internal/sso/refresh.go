@@ -155,3 +155,123 @@ func (r *Refresher) RefreshCharacterToken(ctx context.Context, characterID int64
 	}
 	return nil
 }
+
+// AccessToken is what EnsureAccessToken hands back — the bearer token
+// itself, never persisted anywhere (EVE SSO access tokens are short-lived,
+// ~20 minutes, and app.character_token deliberately has no column for
+// one), plus its expiry so a caller can reuse it for a following call
+// without asking again.
+type AccessToken struct {
+	Value     string
+	ExpiresAt time.Time
+}
+
+// EnsureAccessToken returns a currently-valid access token for
+// characterID — Phase 7's gateway client needs one to call ESI on a
+// character's behalf, and nothing in Phase 5 exposed one (RefreshCharacterToken
+// rotates the stored refresh token but never returns the access token the
+// exchange also produced).
+//
+// This intentionally does NOT share RefreshCharacterToken's "skip if
+// refreshed within MinRefreshInterval" coalescing (§7.3): that branch
+// exists so N concurrent refresh attempts collapse into one real SSO
+// round trip when none of them specifically needs the resulting access
+// token back — but EnsureAccessToken's entire reason for being called is
+// "I need a token right now", and skipping would leave it with nothing to
+// return. It stays correct under concurrency for the same reason
+// RefreshCharacterToken does: pg_advisory_xact_lock serialises callers for
+// the same character, and each one re-reads the current refresh token
+// after acquiring the lock, so it always exchanges whatever the latest
+// rotation left behind — never a stale, already-invalidated one. It is
+// simply less efficient than the coalesced path under a concurrent burst
+// for the same character, which the gateway's ~20-minute access-token
+// lifetime makes rare enough not to matter.
+//
+// The body below duplicates most of RefreshCharacterToken's steps rather
+// than refactoring them into a shared helper — deliberately, so this
+// addition carries zero risk to §7.3's already-verified coalescing
+// behaviour (TestConcurrentRefreshSerialisedByAdvisoryLock asserts exactly
+// one SSO exchange for 50 concurrent RefreshCharacterToken calls; that
+// test's continued, unchanged pass is Phase 7's regression guard that this
+// addition didn't disturb it).
+func (r *Refresher) EnsureAccessToken(ctx context.Context, characterID int64) (AccessToken, error) {
+	tx, err := r.Pool.Begin(ctx)
+	if err != nil {
+		return AccessToken{}, fmt.Errorf("sso: ensure access token: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }() // no-op once committed
+
+	lockKey := fmt.Sprintf("esi_refresh:%d", characterID)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, lockKey); err != nil {
+		return AccessToken{}, fmt.Errorf("sso: ensure access token: acquiring advisory lock: %w", err)
+	}
+
+	q := gen.New(tx)
+	token, err := q.GetCharacterToken(ctx, characterID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return AccessToken{}, ErrTokenNotFound
+		}
+		return AccessToken{}, fmt.Errorf("sso: ensure access token: reading token: %w", err)
+	}
+	if !token.Valid {
+		return AccessToken{}, fmt.Errorf("sso: ensure access token: token for character %d is marked invalid (%v)", characterID, token.InvalidReason)
+	}
+
+	plaintext, err := crypto.Open(r.Keyring, characterID, crypto.Sealed{
+		KeyVersion: int(token.KeyVersion), WrappedDEK: token.WrappedDek, Nonce: token.Nonce, Ciphertext: token.Ciphertext,
+	})
+	if err != nil {
+		return AccessToken{}, fmt.Errorf("sso: ensure access token: opening stored token: %w", err)
+	}
+
+	tokenResp, err := r.OAuth.RefreshToken(ctx, string(plaintext))
+	if err != nil {
+		if IsInvalidGrant(err) {
+			reason := "invalid_grant"
+			if invalidateErr := q.InvalidateCharacterToken(ctx, characterID, &reason); invalidateErr != nil {
+				return AccessToken{}, fmt.Errorf("sso: ensure access token: invalidating after invalid_grant: %w", invalidateErr)
+			}
+			if commitErr := tx.Commit(ctx); commitErr != nil {
+				return AccessToken{}, fmt.Errorf("sso: ensure access token: committing invalidation: %w", commitErr)
+			}
+			if r.OnInvalidGrant != nil {
+				r.OnInvalidGrant(ctx, characterID)
+			}
+			return AccessToken{}, err // the caller must not retry (§7.3)
+		}
+		return AccessToken{}, fmt.Errorf("sso: ensure access token: exchanging refresh_token: %w", err)
+	}
+
+	ownerHash := token.OwnerHash
+	if r.Verifier != nil {
+		if claims, verr := r.Verifier.Verify(ctx, tokenResp.AccessToken); verr == nil {
+			if claims.Owner != ownerHash && r.OnOwnerHashChanged != nil {
+				r.OnOwnerHashChanged(ctx, characterID)
+			}
+			ownerHash = claims.Owner
+		}
+	}
+
+	sealed, err := crypto.Seal(r.Keyring, characterID, []byte(tokenResp.RefreshToken))
+	if err != nil {
+		return AccessToken{}, fmt.Errorf("sso: ensure access token: sealing new token: %w", err)
+	}
+	expiresAt := time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
+	var accessExpiresAt *time.Time
+	if tokenResp.ExpiresIn > 0 {
+		accessExpiresAt = &expiresAt
+	}
+	if err := q.UpsertCharacterToken(ctx, gen.UpsertCharacterTokenParams{
+		CharacterID: characterID, KeyVersion: int32(sealed.KeyVersion),
+		WrappedDek: sealed.WrappedDEK, Nonce: sealed.Nonce, Ciphertext: sealed.Ciphertext,
+		AccessExpiresAt: accessExpiresAt, OwnerHash: ownerHash,
+	}); err != nil {
+		return AccessToken{}, fmt.Errorf("sso: ensure access token: persisting rotated token: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return AccessToken{}, fmt.Errorf("sso: ensure access token: commit: %w", err)
+	}
+	return AccessToken{Value: tokenResp.AccessToken, ExpiresAt: expiresAt}, nil
+}
