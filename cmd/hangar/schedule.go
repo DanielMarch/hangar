@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/hangar-project/hangar/internal/sync/planner"
 	"github.com/hangar-project/hangar/internal/telemetry"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
@@ -21,9 +22,9 @@ func newScheduleCmd() *cobra.Command {
 	}
 }
 
-// runSchedule boots a schedule-role process. The sync planner itself (leader
-// election, subscription scanning, route-catalogue-driven enqueue) is
-// Phase 4+ domain logic; Phase 0 establishes the command and its heartbeat.
+// runSchedule boots a schedule-role process: the heartbeat plus Phase 6's
+// leader-elected sync planner. Losing the planner's advisory lock to
+// another replica is normal, not an error — see internal/sync/planner.
 func runSchedule(ctx context.Context) error {
 	cfg, err := loadConfig()
 	if err != nil {
@@ -46,10 +47,19 @@ func runSchedule(ctx context.Context) error {
 
 	hb := telemetry.NewReplicaHeartbeat(pool, telemetry.RoleSchedule, version, logger)
 
-	logger.Info("hangar schedule: sync planner not implemented yet; heartbeating only")
-
 	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	stopPlanner, err := startPlanner(sigCtx, cfg.DB.URL.Reveal(), pool, planner.Config{
+		ClaimInterval:  cfg.Sync.PlannerInterval,
+		ClaimBatchSize: cfg.Sync.ClaimBatchSize,
+		ClaimLease:     cfg.Sync.ClaimLease,
+	}, logger)
+	if err != nil {
+		return err
+	}
+	defer stopPlanner()
+
 	hb.Run(sigCtx)
 	return nil
 }

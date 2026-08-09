@@ -13,19 +13,39 @@ import (
 )
 
 const claimDueSubscriptions = `-- name: ClaimDueSubscriptions :many
-SELECT subscription_id, entity_kind, entity_id, route_id, enabled, acting_character_id, next_due_at, last_success_at, last_status, etag, last_modified, cursor_after, consecutive_304, consecutive_403, snoozed_until, opt_in_no_cache FROM app.sync_subscription
- WHERE enabled
-   AND next_due_at <= now()
-   AND (snoozed_until IS NULL OR snoozed_until < now())
- ORDER BY next_due_at
+SELECT ss.subscription_id, ss.entity_kind, ss.entity_id, ss.route_id, ss.enabled, ss.acting_character_id, ss.next_due_at, ss.last_success_at, ss.last_status, ss.etag, ss.last_modified, ss.cursor_after, ss.consecutive_304, ss.consecutive_403, ss.snoozed_until, ss.opt_in_no_cache FROM app.sync_subscription ss
+ JOIN app.esi_route r ON r.route_id = ss.route_id
+ WHERE ss.enabled
+   AND NOT r.blocked_by_pin
+   AND r.retired_at IS NULL
+   AND ss.next_due_at <= now()
+   AND (ss.snoozed_until IS NULL OR ss.snoozed_until < now())
+ ORDER BY ss.next_due_at
  LIMIT $1
+ FOR UPDATE OF ss SKIP LOCKED
 `
 
-// The 5-second planner claim loop. §4.3's illustrative index predicate
-// couldn't include `now()` (not IMMUTABLE — see 00006_platform_esi_gateway.sql);
-// this query reproduces the intended filter in two steps instead: the
-// partial index on (next_due_at) WHERE enabled narrows to enabled rows past
-// due, and the snoozed_until check is then cheap over that small remainder.
+// The 5-second planner claim loop (Phase 6, internal/sync/planner/claim.go).
+// §4.3's illustrative index predicate couldn't include `now()` (not
+// IMMUTABLE — see 00006_platform_esi_gateway.sql); this query reproduces
+// the intended filter in two steps instead: the partial index on
+// (next_due_at) WHERE enabled narrows to enabled rows past due, and the
+// snoozed_until check is then cheap over that small remainder.
+//
+// blocked_by_pin and retired routes are excluded HERE, in the predicate —
+// never as a post-claim filter, or the planner burns its claim budget on
+// work it can't run (01_ARCHITECTURE.md §6.1 edge case). Likewise the
+// snoozed_until check: excluding it in the predicate, not after claiming,
+// is what keeps a 429-snoozed subscription from eating a claim slot every
+// 5s until it wakes up.
+//
+// FOR UPDATE OF ss SKIP LOCKED is the first line of defence against a
+// double claim when N planner instances race the same tick (only one can
+// ever hold leadership at a time per §6.1, but this makes the query safe
+// even if that invariant is ever relaxed); River's unique-job option on
+// (route_id, entity_kind, entity_id) is the second line, not the first.
+// Locking `esi_route` too would serialise unrelated claims against the
+// catalogue, so only `ss` is locked.
 func (q *Queries) ClaimDueSubscriptions(ctx context.Context, claimSize int32) ([]AppSyncSubscription, error) {
 	rows, err := q.db.Query(ctx, claimDueSubscriptions, claimSize)
 	if err != nil {
@@ -123,6 +143,24 @@ func (q *Queries) GetSyncSubscription(ctx context.Context, subscriptionID uuid.U
 		&i.OptInNoCache,
 	)
 	return i, err
+}
+
+const leaseSyncSubscriptions = `-- name: LeaseSyncSubscriptions :exec
+UPDATE app.sync_subscription
+   SET next_due_at = $1
+ WHERE subscription_id = ANY($2::uuid[])
+`
+
+// Advances next_due_at for just-claimed rows so the NEXT 5s tick doesn't
+// reclaim them before the in-flight attempt (a Phase 7+ worker) records its
+// real outcome via RecordSyncSuccess/RecordSync304/RecordSync403. Run in
+// the SAME transaction as ClaimDueSubscriptions and the River enqueue —
+// this is the claim transaction's own defence against duplicate enqueues
+// (01_ARCHITECTURE.md §6.1), independent of and prior to River's
+// unique-job option.
+func (q *Queries) LeaseSyncSubscriptions(ctx context.Context, leasedUntil time.Time, subscriptionIds []uuid.UUID) error {
+	_, err := q.db.Exec(ctx, leaseSyncSubscriptions, leasedUntil, subscriptionIds)
+	return err
 }
 
 const listRecentSyncRuns = `-- name: ListRecentSyncRuns :many

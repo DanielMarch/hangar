@@ -37,11 +37,27 @@ type Querier interface {
 	// Deny precedence: a deny anywhere wins regardless of allow count
 	// (02_DATABASE_SCHEMA.md §4.2, Phase 10 truth table).
 	CheckPermission(ctx context.Context, userID uuid.UUID, permission string) (*bool, error)
-	// The 5-second planner claim loop. §4.3's illustrative index predicate
-	// couldn't include `now()` (not IMMUTABLE — see 00006_platform_esi_gateway.sql);
-	// this query reproduces the intended filter in two steps instead: the
-	// partial index on (next_due_at) WHERE enabled narrows to enabled rows past
-	// due, and the snoozed_until check is then cheap over that small remainder.
+	// The 5-second planner claim loop (Phase 6, internal/sync/planner/claim.go).
+	// §4.3's illustrative index predicate couldn't include `now()` (not
+	// IMMUTABLE — see 00006_platform_esi_gateway.sql); this query reproduces
+	// the intended filter in two steps instead: the partial index on
+	// (next_due_at) WHERE enabled narrows to enabled rows past due, and the
+	// snoozed_until check is then cheap over that small remainder.
+	//
+	// blocked_by_pin and retired routes are excluded HERE, in the predicate —
+	// never as a post-claim filter, or the planner burns its claim budget on
+	// work it can't run (01_ARCHITECTURE.md §6.1 edge case). Likewise the
+	// snoozed_until check: excluding it in the predicate, not after claiming,
+	// is what keeps a 429-snoozed subscription from eating a claim slot every
+	// 5s until it wakes up.
+	//
+	// FOR UPDATE OF ss SKIP LOCKED is the first line of defence against a
+	// double claim when N planner instances race the same tick (only one can
+	// ever hold leadership at a time per §6.1, but this makes the query safe
+	// even if that invariant is ever relaxed); River's unique-job option on
+	// (route_id, entity_kind, entity_id) is the second line, not the first.
+	// Locking `esi_route` too would serialise unrelated claims against the
+	// catalogue, so only `ss` is locked.
 	ClaimDueSubscriptions(ctx context.Context, claimSize int32) ([]AppSyncSubscription, error)
 	ClaimPendingAlertDeliveries(ctx context.Context, claimSize int32) ([]AppAlertDelivery, error)
 	ClaimPendingWebhookDeliveries(ctx context.Context, claimSize int32) ([]AppWebhookDelivery, error)
@@ -250,6 +266,14 @@ type Querier interface {
 	InsertSyntheticLedgerEntry(ctx context.Context, rateLimitGroup string, userKey string, cost int16) error
 	InvalidateCharacterToken(ctx context.Context, characterID int64, invalidReason *string) error
 	IsSquadModerator(ctx context.Context, squadID uuid.UUID, userID uuid.UUID) (bool, error)
+	// Advances next_due_at for just-claimed rows so the NEXT 5s tick doesn't
+	// reclaim them before the in-flight attempt (a Phase 7+ worker) records its
+	// real outcome via RecordSyncSuccess/RecordSync304/RecordSync403. Run in
+	// the SAME transaction as ClaimDueSubscriptions and the River enqueue —
+	// this is the claim transaction's own defence against duplicate enqueues
+	// (01_ARCHITECTURE.md §6.1), independent of and prior to River's
+	// unique-job option.
+	LeaseSyncSubscriptions(ctx context.Context, leasedUntil time.Time, subscriptionIds []uuid.UUID) error
 	ListAlertChannels(ctx context.Context) ([]AppAlertChannel, error)
 	ListAlertRoutingRulesForType(ctx context.Context, alertType string) ([]AppAlertRoutingRule, error)
 	// app.alert_type, app.alert_channel, app.alert_routing_rule, app.alert_event,

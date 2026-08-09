@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hangar-project/hangar/internal/sync/planner"
 	"github.com/hangar-project/hangar/internal/telemetry"
 	webui "github.com/hangar-project/hangar/web"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -54,6 +55,20 @@ func runServe(ctx context.Context) error {
 	hbCtx, cancelHB := context.WithCancel(ctx)
 	defer cancelHB()
 	go hb.Run(hbCtx)
+
+	// §2 "Single-process default": `serve` runs the sync planner itself so
+	// a one-box installation never has to run `schedule` separately.
+	// Losing the planner's advisory lock to a co-running `schedule`
+	// replica is normal (internal/sync/planner), not an error.
+	stopPlanner, err := startPlanner(hbCtx, cfg.DB.URL.Reveal(), pool, planner.Config{
+		ClaimInterval:  cfg.Sync.PlannerInterval,
+		ClaimBatchSize: cfg.Sync.ClaimBatchSize,
+		ClaimLease:     cfg.Sync.ClaimLease,
+	}, logger)
+	if err != nil {
+		return err
+	}
+	defer stopPlanner()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {

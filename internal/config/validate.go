@@ -66,6 +66,11 @@ func Validate(cfg *Config) error {
 	default:
 		errs = append(errs, fmt.Errorf("HANGAR_LOG_LEVEL: invalid value %q (want debug|info|warn|error)", cfg.LogLevel))
 	}
+	switch cfg.Sync.Jitter {
+	case "full", "none":
+	default:
+		errs = append(errs, fmt.Errorf("HANGAR_SYNC_JITTER: invalid value %q (want full|none)", cfg.Sync.Jitter))
+	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("config: invalid configuration: %w", errors.Join(errs...))

@@ -25,6 +25,7 @@ type Config struct {
 	Crypto CryptoConfig
 	SSO    SSOConfig
 	ESI    ESIConfig
+	Sync   SyncConfig
 }
 
 // ESIConfig governs Phase 3/4's outbound gateway: the conditional-cache
@@ -53,6 +54,35 @@ type ESIConfig struct {
 	// otherwise the installation oscillates in and out of pause.
 	ErrorLimitPauseAt  int
 	ErrorLimitResumeAt int
+}
+
+// SyncConfig governs Phase 6's planner: leader-elected claim loop cadence,
+// claim batch size, the lease that protects a just-claimed subscription from
+// being reclaimed by the very next tick, and the adaptive-backoff cap
+// (01_ARCHITECTURE.md §6, .env.example "SYNC ENGINE").
+type SyncConfig struct {
+	// PlannerInterval is how often the leader claims due work (§6.1: 5s).
+	PlannerInterval time.Duration
+	// ClaimBatchSize bounds a single claim transaction's row count.
+	ClaimBatchSize int32
+	// ClaimLease is how long a just-claimed subscription's next_due_at is
+	// pushed out, so the claim transaction itself — not just River's
+	// unique-job option — is the first line of defence against
+	// re-claiming a row before its attempt finishes (§6.1).
+	ClaimLease time.Duration
+	// BackoffCap bounds the 1.5^n consecutive-304 backoff (§6.2) — maps
+	// onto internal/sync.PolicyConfig.BackoffCap, which (like Jitter
+	// above) a Phase 7+ worker consumes after an attempt completes; the
+	// claim loop itself never applies backoff.
+	BackoffCap time.Duration
+	// Jitter selects "full" (production) or "none" (deterministic tests
+	// only — HANGAR_SYNC_JITTER=none in .env.example). Phase 6 loads and
+	// validates this, but nothing consumes it yet: the claim loop itself
+	// never computes a next_due_at (internal/sync.PlanNextDueAt, which
+	// this maps onto), only a Phase 7+ worker does, after an attempt
+	// completes. Wiring "none" through to PlanNextDueAt's Rand parameter
+	// (e.g. a generator that always returns 0) is that phase's job.
+	Jitter string
 }
 
 // DatabaseConfig is PostgreSQL 18 connection configuration (SRS §3.1).
@@ -152,6 +182,12 @@ func applyDefaults(v *viper.Viper) {
 	v.SetDefault("esi_error_limit_max", 100)
 	v.SetDefault("esi_error_limit_pause_at", 20)
 	v.SetDefault("esi_error_limit_resume_at", 60)
+
+	v.SetDefault("sync_planner_interval", "5s")
+	v.SetDefault("sync_claim_batch_size", 500)
+	v.SetDefault("sync_claim_lease", "2m")
+	v.SetDefault("sync_backoff_cap", "24h")
+	v.SetDefault("sync_jitter", "full")
 }
 
 func splitCSV(s string) []string {
@@ -225,6 +261,13 @@ func Load(v *viper.Viper) (*Config, error) {
 			ErrorLimitMax:      v.GetInt("esi_error_limit_max"),
 			ErrorLimitPauseAt:  v.GetInt("esi_error_limit_pause_at"),
 			ErrorLimitResumeAt: v.GetInt("esi_error_limit_resume_at"),
+		},
+		Sync: SyncConfig{
+			PlannerInterval: v.GetDuration("sync_planner_interval"),
+			ClaimBatchSize:  int32(v.GetInt("sync_claim_batch_size")),
+			ClaimLease:      v.GetDuration("sync_claim_lease"),
+			BackoffCap:      v.GetDuration("sync_backoff_cap"),
+			Jitter:          v.GetString("sync_jitter"),
 		},
 	}
 

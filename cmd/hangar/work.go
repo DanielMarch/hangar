@@ -22,8 +22,11 @@ func newWorkCmd() *cobra.Command {
 }
 
 // runWork boots a worker-role process. No River workers are registered yet —
-// job kinds land with the phases that define them (sync jobs from Phase 4,
-// alert delivery from Phase 14, ...). Phase 0's job is the heartbeat and the
+// job kinds land with the phases that define them. Phase 6 defines the
+// "sync_route" kind (internal/sync/planner.KindSyncRoute) and enqueues it,
+// but registering a Worker for it is Phase 7+'s job: working it means
+// calling the ESI gateway and upserting domain rows, which is what the
+// route-handler phases add. Phase 0's job here is the heartbeat and the
 // shape of the command, not the job registry.
 func runWork(ctx context.Context) error {
 	cfg, err := loadConfig()
