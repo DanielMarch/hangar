@@ -74,6 +74,16 @@ func TestBenchmarkLedgerSolo1MOperationsMeetsBudget(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping 1M-operation timing test in -short mode")
 	}
+	if raceDetectorEnabled {
+		// The race detector's instrumentation overhead (routinely 5-10x)
+		// swamps this budget regardless of the ledger's own hot-path
+		// performance — measured 12.7s vs the 2s budget under `go test
+		// -race`, an artifact of instrumentation, not a regression. The
+		// correctness this test's workload exercises is still fully
+		// covered by every other (non-timing) test in this package
+		// running under -race; only the wall-clock assertion is skipped.
+		t.Skip("skipping wall-clock budget assertion under the race detector — see race_off.go")
+	}
 	clock := newFakeClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	ledger := NewLedgerSolo(clock)
 	ctx := context.Background()
