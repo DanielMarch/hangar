@@ -32,6 +32,11 @@ func RefreshUser(ctx context.Context, s *store.Store, userID uuid.UUID) error {
 			return fmt.Errorf("rbac: refreshing effective_permission for user %s permission %q: %w", userID, permission, err)
 		}
 	}
+	if PermissionsChangedHook != nil {
+		if err := PermissionsChangedHook(ctx, s, userID); err != nil {
+			return fmt.Errorf("rbac: permissions-changed hook for user %s: %w", userID, err)
+		}
+	}
 	return nil
 }
 

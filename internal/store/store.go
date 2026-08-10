@@ -24,3 +24,15 @@ type Store struct {
 func New(db gen.DBTX) *Store {
 	return &Store{Queries: gen.New(db), db: db}
 }
+
+// DBTX exposes the handle a Store was built on. Every gen.Queries method is
+// already reachable directly on Store; this exists for the rare caller that
+// needs the raw handle itself rather than a query result — e.g. River's
+// InsertTx(ctx, tx, args, opts), which needs the underlying pgx.Tx to
+// enqueue a job in the SAME transaction as a Store-mediated write
+// (internal/provisioning's urgent-revocation path, Phase 11). Inside
+// store.WithTx, a type assertion `s.DBTX().(pgx.Tx)` always succeeds — the
+// handle WithTx builds Store from is exactly the transaction it opened.
+func (s *Store) DBTX() gen.DBTX {
+	return s.db
+}

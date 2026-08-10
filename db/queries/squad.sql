@@ -23,6 +23,19 @@ DELETE FROM app.squad_member WHERE squad_id = $1 AND character_id = $2;
 -- name: ListSquadMembers :many
 SELECT * FROM app.squad_member WHERE squad_id = $1 ORDER BY joined_at;
 
+-- name: ListSquadsForUser :many
+-- Direct squad membership for a user, via any of their characters
+-- (app.squad_member is keyed by character_id, not user_id). Phase 11's
+-- entitlement engine reads this for the `squad` source_kind — a wholly
+-- separate provisioning mechanism from a squad's own app.squad_role RBAC
+-- grant (internal/rbac's squad-derived role path); this query answers
+-- "which squads is this user directly IN", never "which roles does squad
+-- membership grant".
+SELECT DISTINCT sm.squad_id
+  FROM app.squad_member sm
+  JOIN app.character c ON c.character_id = sm.character_id
+ WHERE c.user_id = $1;
+
 -- name: AddSquadModerator :exec
 INSERT INTO app.squad_moderator (squad_id, user_id)
 VALUES ($1, $2)

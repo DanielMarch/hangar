@@ -5,8 +5,12 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/hangar-project/hangar/internal/crypto"
+	"github.com/hangar-project/hangar/internal/provisioning"
+	"github.com/hangar-project/hangar/internal/rbac"
 	"github.com/hangar-project/hangar/internal/store"
 	"github.com/hangar-project/hangar/internal/sync"
 	"github.com/hangar-project/hangar/internal/sync/planner"
@@ -89,13 +93,60 @@ func runWork(ctx context.Context) error {
 		},
 	})
 
+	// Phase 11: access provisioning's own queues. provision-urgent gets a
+	// dedicated 32-worker pool per 01_ARCHITECTURE.md §9.2's budget table
+	// so a nightly provision-bulk reconcile can never starve a revocation
+	// — the two queues sharing a river.Client is fine (River schedules
+	// per-queue independently); it is sharing a WORKER POOL that's
+	// prohibited, and QueueConfig below gives each its own.
+	drivers := provisioning.NewDrivers() // real Discord/TeamSpeak/Mumble drivers register here in Phase 12/13
+	river.AddWorker(workers, &provisioning.UrgentWorker{Pool: pool, Drivers: drivers})
+	river.AddWorker(workers, &provisioning.BulkWorker{Pool: pool, Drivers: drivers})
+
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
-		Queues:  map[string]river.QueueConfig{planner.QueueSync: {MaxWorkers: 20}},
+		Queues: map[string]river.QueueConfig{
+			planner.QueueSync:        {MaxWorkers: 20},
+			provisioning.QueueUrgent: {MaxWorkers: 32},
+			provisioning.QueueBulk:   {MaxWorkers: 4},
+		},
 		Workers: workers,
 	})
 	if err != nil {
 		return err
 	}
+
+	// Wires internal/rbac's PermissionsChangedHook (internal/rbac/hook.go)
+	// to Phase 11's revocation path — an RBAC-triggered permission change
+	// (direct role grant/revoke, squad_role change, squad membership
+	// change, role deletion) now recomputes and, if it reduced any
+	// platform's entitlements, enqueues a provision-urgent job in the SAME
+	// transaction as the RBAC mutation. This is the wiring point, not
+	// internal/rbac itself, so internal/rbac compiles and tests with zero
+	// knowledge that internal/provisioning exists (roadmap: "a cleaner
+	// seam... avoids a new Phase 11 dependency inside a Phase 10
+	// package").
+	urgent := &provisioning.Urgent{River: riverClient}
+	rbac.PermissionsChangedHook = func(ctx context.Context, s *store.Store, userID uuid.UUID) error {
+		return urgent.HandleUserChangeTx(ctx, s, userID, time.Now(), "rbac_change")
+	}
+
+	// Token invalidation and owner-hash-change are §9.2's other two named
+	// triggers this process can observe directly — internal/sso.Refresher
+	// already exposes exactly these two hooks (Phase 5), previously unset.
+	// See internal/provisioning/urgent.go's HandleCharacterTokenChange doc
+	// comment for why this necessarily opens its own transaction rather
+	// than the SSO token write's.
+	refresher.OnInvalidGrant = func(ctx context.Context, characterID int64) {
+		if err := urgent.HandleCharacterTokenChange(ctx, pool, characterID, "token_invalidated"); err != nil {
+			logger.Error("provisioning: urgent revocation after token invalidation failed", "character_id", characterID, "error", err)
+		}
+	}
+	refresher.OnOwnerHashChanged = func(ctx context.Context, characterID int64) {
+		if err := urgent.HandleCharacterTokenChange(ctx, pool, characterID, "owner_hash_changed"); err != nil {
+			logger.Error("provisioning: urgent revocation after owner hash change failed", "character_id", characterID, "error", err)
+		}
+	}
+
 	if err := riverClient.Start(ctx); err != nil {
 		return err
 	}
