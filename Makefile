@@ -72,7 +72,14 @@ verify-generated: generate ## Principle 10 — generated output must be committe
 	   [ -e "$$p" ] && paths="$$paths $$p"; done; \
 	 if [ -z "$$paths" ]; then $(call skip,verify-generated,no generated artefacts exist yet); exit 0; fi; \
 	 git diff --exit-code -- $$paths \
-	   || { echo "generated files are stale; run 'make generate' and commit"; exit 1; }
+	   || { echo "generated files are stale; run 'make generate' and commit"; exit 1; }; \
+	 untracked="$$(git status --porcelain --untracked-files=all -- $$paths | awk '$$1 == "??" {print}')"; \
+	 if [ -n "$$untracked" ]; then \
+	   echo "generated files exist but are not committed (git diff --exit-code is blind to untracked paths):"; \
+	   echo "$$untracked"; \
+	   echo "run 'git add' and commit them — Phase 15 owns docs/openapi.json and web/src/api/schema.d.ts as generated-but-committed artefacts"; \
+	   exit 1; \
+	 fi
 
 # ── database ─────────────────────────────────────────────────────────────────
 .PHONY: migrate-up migrate-down

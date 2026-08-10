@@ -104,6 +104,18 @@ SELECT * FROM app.api_token_access_log
  ORDER BY at DESC
  LIMIT sqlc.arg(page_size);
 
+-- name: ListApiTokensForUser :many
+-- Phase 15 (internal/api/v1) addition: GET /api/v1/api-tokens needs a
+-- caller-scoped list, which did not exist before this phase — every
+-- other api_token query targets one already-known token_id/hash. Ordered
+-- by created_at DESC so the newest token (the one a user just minted) is
+-- first without needing a client-supplied cursor; the set per user is
+-- small enough that keyset pagination isn't warranted here (same
+-- reasoning as the SRS §6.2/§6.3 "naturally bounded per-owner" routes).
+SELECT * FROM app.api_token
+ WHERE user_id = $1
+ ORDER BY created_at DESC;
+
 -- ---- share links ----
 
 -- name: CreateShareLink :one
@@ -118,6 +130,13 @@ SELECT * FROM app.share_link
 
 -- name: RevokeShareLink :exec
 UPDATE app.share_link SET revoked_at = now() WHERE link_id = $1;
+
+-- name: ListShareLinksForUser :many
+-- Phase 15 addition, same rationale as ListApiTokensForUser above: GET
+-- /api/v1/me/share-links needs a caller-scoped list.
+SELECT * FROM app.share_link
+ WHERE user_id = $1
+ ORDER BY created_at DESC;
 
 -- ---- security log (append-only) ----
 

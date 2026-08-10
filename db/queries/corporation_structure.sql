@@ -53,6 +53,12 @@ RETURNING *;
 -- name: ListCorporationMemberTitles :many
 SELECT * FROM app.corporation_member_title WHERE corporation_id = $1 AND character_id = $2;
 
+-- name: ListAllCorporationMemberTitles :many
+-- Phase 15 addition (internal/api/v1): GET /corporations/{id}/members/titles
+-- is corp-wide (SRS §6.3), unlike ListCorporationMemberTitles above which is
+-- one member's row set — no query existed for the whole-corporation view.
+SELECT * FROM app.corporation_member_title WHERE corporation_id = $1;
+
 -- name: ReplaceCorporationRole :one
 INSERT INTO app.corporation_role (corporation_id, character_id, role, grantable, at_hq, at_base, at_other)
 VALUES ($1,$2,$3,$4,$5,$6,$7)
@@ -61,6 +67,11 @@ RETURNING *;
 
 -- name: ListCorporationRoles :many
 SELECT * FROM app.corporation_role WHERE corporation_id = $1 AND character_id = $2;
+
+-- name: ListAllCorporationRoles :many
+-- Phase 15 addition, same rationale as ListAllCorporationMemberTitles
+-- above: GET /corporations/{id}/roles is corp-wide.
+SELECT * FROM app.corporation_role WHERE corporation_id = $1;
 
 -- name: InsertCorporationRoleHistory :one
 INSERT INTO app.corporation_role_history (

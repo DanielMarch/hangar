@@ -132,6 +132,25 @@ func (q *Queries) GetCharacterAttributes(ctx context.Context, characterID int64)
 	return i, err
 }
 
+const getCharacterJumpFatigue = `-- name: GetCharacterJumpFatigue :one
+SELECT character_id, jump_fatigue_expire_date, last_jump_date, last_update_date, updated_at FROM app.character_jump_fatigue WHERE character_id = $1
+`
+
+// Phase 15 addition (internal/api/v1): GET /characters/{id}/fatigue needs a
+// read query — only the sync-side Upsert existed before this phase.
+func (q *Queries) GetCharacterJumpFatigue(ctx context.Context, characterID int64) (AppCharacterJumpFatigue, error) {
+	row := q.db.QueryRow(ctx, getCharacterJumpFatigue, characterID)
+	var i AppCharacterJumpFatigue
+	err := row.Scan(
+		&i.CharacterID,
+		&i.JumpFatigueExpireDate,
+		&i.LastJumpDate,
+		&i.LastUpdateDate,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getCharacterLocation = `-- name: GetCharacterLocation :one
 SELECT character_id, solar_system_id, station_id, structure_id, is_online, last_login, last_logout, logins, ship_item_id, ship_type_id, ship_name, updated_at FROM app.character_location WHERE character_id = $1
 `
@@ -154,6 +173,39 @@ func (q *Queries) GetCharacterLocation(ctx context.Context, characterID int64) (
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listCharacterAgentResearch = `-- name: ListCharacterAgentResearch :many
+SELECT character_id, agent_id, skill_type_id, started_at, points_per_day, remainder_points, updated_at FROM app.character_agent_research WHERE character_id = $1 ORDER BY agent_id
+`
+
+// Phase 15 addition, same rationale: GET /characters/{id}/agents_research.
+func (q *Queries) ListCharacterAgentResearch(ctx context.Context, characterID int64) ([]AppCharacterAgentResearch, error) {
+	rows, err := q.db.Query(ctx, listCharacterAgentResearch, characterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppCharacterAgentResearch
+	for rows.Next() {
+		var i AppCharacterAgentResearch
+		if err := rows.Scan(
+			&i.CharacterID,
+			&i.AgentID,
+			&i.SkillTypeID,
+			&i.StartedAt,
+			&i.PointsPerDay,
+			&i.RemainderPoints,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listCharacterClones = `-- name: ListCharacterClones :many

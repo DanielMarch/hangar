@@ -170,6 +170,15 @@ ON CONFLICT (character_id) DO UPDATE
     IS DISTINCT FROM (EXCLUDED.jump_fatigue_expire_date, EXCLUDED.last_jump_date, EXCLUDED.last_update_date)
 RETURNING *;
 
+-- name: GetCharacterJumpFatigue :one
+-- Phase 15 addition (internal/api/v1): GET /characters/{id}/fatigue needs a
+-- read query — only the sync-side Upsert existed before this phase.
+SELECT * FROM app.character_jump_fatigue WHERE character_id = $1;
+
+-- name: ListCharacterAgentResearch :many
+-- Phase 15 addition, same rationale: GET /characters/{id}/agents_research.
+SELECT * FROM app.character_agent_research WHERE character_id = $1 ORDER BY agent_id;
+
 -- name: UpsertCharacterLoyaltyPoint :one
 INSERT INTO app.character_loyalty_point AS t (character_id, corporation_id, loyalty_points)
 VALUES ($1,$2,$3)

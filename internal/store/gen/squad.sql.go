@@ -102,6 +102,22 @@ func (q *Queries) CreateSquadApplication(ctx context.Context, squadID uuid.UUID,
 	return i, err
 }
 
+const deleteSquad = `-- name: DeleteSquad :exec
+DELETE FROM app.squad WHERE squad_id = $1
+`
+
+// Phase 15 addition: DELETE /api/v1/squads/{id}. Child rows
+// (squad_member/squad_moderator/squad_role/squad_application) are removed
+// by their own FK ON DELETE CASCADE (02_DATABASE_SCHEMA.md §4.2's squad
+// family) — this is a hard delete of the squad itself, not a soft one,
+// matching how a squad (a HANGAR-native grouping, not an ESI-synced
+// projection) has no "last known state" worth retaining once its owner
+// deletes it.
+func (q *Queries) DeleteSquad(ctx context.Context, squadID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteSquad, squadID)
+	return err
+}
+
 const getSquad = `-- name: GetSquad :one
 SELECT squad_id, name, type, owner_user_id, description, created_at, updated_at FROM app.squad WHERE squad_id = $1
 `
@@ -319,4 +335,28 @@ UPDATE app.squad_application
 func (q *Queries) ResolveSquadApplication(ctx context.Context, applicationID uuid.UUID, status string, resolvedBy uuid.NullUUID) error {
 	_, err := q.db.Exec(ctx, resolveSquadApplication, applicationID, status, resolvedBy)
 	return err
+}
+
+const updateSquad = `-- name: UpdateSquad :one
+UPDATE app.squad AS t
+   SET name = $2, description = $3, updated_at = now()
+ WHERE t.squad_id = $1
+RETURNING squad_id, name, type, owner_user_id, description, created_at, updated_at
+`
+
+// Phase 15 addition (internal/api/v1): PATCH /api/v1/squads/{id} — no
+// mutation beyond Create existed for squad's own row before this phase.
+func (q *Queries) UpdateSquad(ctx context.Context, squadID uuid.UUID, name string, description *string) (AppSquad, error) {
+	row := q.db.QueryRow(ctx, updateSquad, squadID, name, description)
+	var i AppSquad
+	err := row.Scan(
+		&i.SquadID,
+		&i.Name,
+		&i.Type,
+		&i.OwnerUserID,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

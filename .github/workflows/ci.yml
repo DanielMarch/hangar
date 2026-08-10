@@ -15,13 +15,18 @@ env:
   NODE_VERSION: "22"
 
 jobs:
-  # `make ci` is the single source of truth for "does this branch pass";
-  # everything else in this file is the build/push matrix around it.
-  # Progressive: it skips checks whose input doesn't exist yet, and starts
-  # enforcing them the moment the phase that introduces them lands. Release
-  # tags run ci-strict instead (see release.yml) so a skip can never ship.
+  # `make ci-strict` is the single source of truth for "does this branch
+  # pass"; everything else in this file is the build/push matrix around it.
+  #
+  # PHASE 15 FIX: this job ran plain `make ci` through Phase 14.1, even
+  # though the Makefile's own header comment ("Set STRICT=1 ... CI does,
+  # from Phase 15 onward") always said this job would switch to
+  # ci-strict once Phase 15 landed — release.yml's tag-triggered job was
+  # the only one ever running ci-strict. A skip could ship silently on
+  # every push/PR into main right up to a release tag. Now that Phase 15
+  # exists, this job matches the Makefile's own documented intent.
   ci:
-    name: make ci
+    name: make ci-strict
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -64,8 +69,18 @@ jobs:
           args: --help # cache the binary; `make lint` invokes it for real below
           skip-cache: false
 
-      - name: make ci
-        run: make ci
+      # check-identifiers (STRICT now makes this mandatory, not skippable)
+      # needs real schema to check identifier columns against — migrate
+      # the service Postgres up first. This step didn't exist before
+      # Phase 15 because STRICT=0 never made a missing/unreachable
+      # precondition fatal; under ci-strict it would be.
+      - name: migrate up
+        run: go run ./cmd/hangar migrate up
+        env:
+          HANGAR_DB_URL: postgres://hangar:hangar@localhost:5432/hangar?sslmode=disable
+
+      - name: make ci-strict
+        run: make ci-strict
         env:
           HANGAR_DB_URL: postgres://hangar:hangar@localhost:5432/hangar?sslmode=disable
 

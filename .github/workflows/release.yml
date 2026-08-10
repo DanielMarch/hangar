@@ -47,6 +47,13 @@ jobs:
         with:
           version: latest
           args: --help
+      # Phase 15 fix — same as ci.yml: check-identifiers is mandatory
+      # under STRICT and needs real schema to check against.
+      - name: migrate up
+        run: go run ./cmd/hangar migrate up
+        env:
+          HANGAR_DB_URL: postgres://hangar:hangar@localhost:5432/hangar?sslmode=disable
+
       - name: make ci-strict
         run: make ci-strict
         env:

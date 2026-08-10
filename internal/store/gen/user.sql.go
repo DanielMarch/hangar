@@ -370,6 +370,49 @@ func (q *Queries) ListApiTokenAccessLog(ctx context.Context, tokenID uuid.UUID, 
 	return items, nil
 }
 
+const listApiTokensForUser = `-- name: ListApiTokensForUser :many
+SELECT token_id, user_id, name, hashed_secret, permissions, last_used_at, expires_at, revoked_at, created_at FROM app.api_token
+ WHERE user_id = $1
+ ORDER BY created_at DESC
+`
+
+// Phase 15 (internal/api/v1) addition: GET /api/v1/api-tokens needs a
+// caller-scoped list, which did not exist before this phase — every
+// other api_token query targets one already-known token_id/hash. Ordered
+// by created_at DESC so the newest token (the one a user just minted) is
+// first without needing a client-supplied cursor; the set per user is
+// small enough that keyset pagination isn't warranted here (same
+// reasoning as the SRS §6.2/§6.3 "naturally bounded per-owner" routes).
+func (q *Queries) ListApiTokensForUser(ctx context.Context, userID uuid.UUID) ([]AppApiToken, error) {
+	rows, err := q.db.Query(ctx, listApiTokensForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppApiToken
+	for rows.Next() {
+		var i AppApiToken
+		if err := rows.Scan(
+			&i.TokenID,
+			&i.UserID,
+			&i.Name,
+			&i.HashedSecret,
+			&i.Permissions,
+			&i.LastUsedAt,
+			&i.ExpiresAt,
+			&i.RevokedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSecurityLogForUser = `-- name: ListSecurityLogForUser :many
 SELECT log_id, user_id, action, target, ip_address, detail, at FROM app.security_log
  WHERE user_id = $1
@@ -394,6 +437,42 @@ func (q *Queries) ListSecurityLogForUser(ctx context.Context, userID uuid.NullUU
 			&i.IpAddress,
 			&i.Detail,
 			&i.At,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listShareLinksForUser = `-- name: ListShareLinksForUser :many
+SELECT link_id, user_id, view, params, expires_at, revoked_at, created_at FROM app.share_link
+ WHERE user_id = $1
+ ORDER BY created_at DESC
+`
+
+// Phase 15 addition, same rationale as ListApiTokensForUser above: GET
+// /api/v1/me/share-links needs a caller-scoped list.
+func (q *Queries) ListShareLinksForUser(ctx context.Context, userID uuid.UUID) ([]AppShareLink, error) {
+	rows, err := q.db.Query(ctx, listShareLinksForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppShareLink
+	for rows.Next() {
+		var i AppShareLink
+		if err := rows.Scan(
+			&i.LinkID,
+			&i.UserID,
+			&i.View,
+			&i.Params,
+			&i.ExpiresAt,
+			&i.RevokedAt,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

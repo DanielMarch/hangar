@@ -10,6 +10,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hangar-project/hangar/internal/api"
+	v1 "github.com/hangar-project/hangar/internal/api/v1"
+	"github.com/hangar-project/hangar/internal/store"
 	"github.com/hangar-project/hangar/internal/sync/planner"
 	"github.com/hangar-project/hangar/internal/telemetry"
 	webui "github.com/hangar-project/hangar/web"
@@ -87,6 +90,24 @@ func runServe(ctx context.Context) error {
 		_, _ = w.Write([]byte("ok"))
 	})
 
+	// Phase 15: the /api/v1 surface, mounted on the same mux as the SPA and
+	// healthchecks (Principle 6 — one API, no private endpoint). Deps.SSO
+	// is nil here — the /auth/login and /auth/callback redirect handlers
+	// degrade to 501 rather than panic when it is (see
+	// internal/api/v1/auth.go's RegisterAuthRedirects); wiring the full EVE
+	// SSO login flow (JWKS cache, keyring, OAuth config) into `serve` is a
+	// follow-up to this phase, not required for the /api/v1 JSON surface
+	// itself.
+	s := store.New(pool)
+	deps := api.Deps{Store: s}
+	api.Version = version
+	hapi := api.NewAPI(mux, deps)
+	v1.RegisterAll(hapi, deps)
+	v1.RegisterAuthRedirects(mux, s, nil)
+	if err := registerMumbleAuthRoute(ctx, mux, s, cfg); err != nil {
+		return err
+	}
+
 	dist, err := fs.Sub(webui.DistFS, "dist")
 	if err != nil {
 		return err
@@ -95,7 +116,7 @@ func runServe(ctx context.Context) error {
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           mux,
+		Handler:           api.Handler(mux, s),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

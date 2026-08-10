@@ -224,6 +224,14 @@ type Querier interface {
 	// A campaign that concluded simply vanishes from the live feed; there is no
 	// "resolved" flag upstream to soft-delete against.
 	DeleteSovereigntyCampaignsNotIn(ctx context.Context, keepCampaignIds []int64) error
+	// Phase 15 addition: DELETE /api/v1/squads/{id}. Child rows
+	// (squad_member/squad_moderator/squad_role/squad_application) are removed
+	// by their own FK ON DELETE CASCADE (02_DATABASE_SCHEMA.md §4.2's squad
+	// family) — this is a hard delete of the squad itself, not a soft one,
+	// matching how a squad (a HANGAR-native grouping, not an ESI-synced
+	// projection) has no "last known state" worth retaining once its owner
+	// deletes it.
+	DeleteSquad(ctx context.Context, squadID uuid.UUID) error
 	// Flagged by sqlc's flag-delete rule for review: a replica past the
 	// liveness threshold is dead by definition, not a soft-deletable entity.
 	DeleteStaleReplicas(ctx context.Context, liveThreshold time.Duration) error
@@ -295,6 +303,9 @@ type Querier interface {
 	GetCalendarEventDetail(ctx context.Context, characterID int64, eventID int64) (AppCalendarEventDetail, error)
 	GetCharacter(ctx context.Context, characterID int64) (AppCharacter, error)
 	GetCharacterAttributes(ctx context.Context, characterID int64) (AppCharacterAttribute, error)
+	// Phase 15 addition (internal/api/v1): GET /characters/{id}/fatigue needs a
+	// read query — only the sync-side Upsert existed before this phase.
+	GetCharacterJumpFatigue(ctx context.Context, characterID int64) (AppCharacterJumpFatigue, error)
 	GetCharacterLocation(ctx context.Context, characterID int64) (AppCharacterLocation, error)
 	GetCharacterToken(ctx context.Context, characterID int64) (AppCharacterToken, error)
 	// Affected set for a squad_member change (one character joining or
@@ -445,17 +456,38 @@ type Querier interface {
 	// app.alert_delivery, app.notification_unknown_type
 	// (02_DATABASE_SCHEMA.md §4.5 #38-#43).
 	ListAlertTypes(ctx context.Context) ([]AppAlertType, error)
+	// Phase 15 addition (internal/api/v1): GET /corporations/{id}/members/titles
+	// is corp-wide (SRS §6.3), unlike ListCorporationMemberTitles above which is
+	// one member's row set — no query existed for the whole-corporation view.
+	ListAllCorporationMemberTitles(ctx context.Context, corporationID int64) ([]AppCorporationMemberTitle, error)
+	// Phase 15 addition, same rationale as ListAllCorporationMemberTitles
+	// above: GET /corporations/{id}/roles is corp-wide.
+	ListAllCorporationRoles(ctx context.Context, corporationID int64) ([]AppCorporationRole, error)
 	// Every user linked to platform_id, matched or not — reconcile.go's bulk
 	// scope (Phase 11), as distinct from ListExposedProvisioningStates which
 	// only returns rows already known to disagree.
 	ListAllProvisioningStatesForPlatform(ctx context.Context, platformID uuid.UUID) ([]AppProvisioningState, error)
+	// Phase 15 addition (internal/api/v1): GET /api/v1/alliances needs a list
+	// query — every alliance query before this phase targeted one already-known
+	// alliance_id.
+	ListAlliances(ctx context.Context) ([]AppAlliance, error)
 	ListApiTokenAccessLog(ctx context.Context, tokenID uuid.UUID, pageSize int32) ([]AppApiTokenAccessLog, error)
+	// Phase 15 (internal/api/v1) addition: GET /api/v1/api-tokens needs a
+	// caller-scoped list, which did not exist before this phase — every
+	// other api_token query targets one already-known token_id/hash. Ordered
+	// by created_at DESC so the newest token (the one a user just minted) is
+	// first without needing a client-supplied cursor; the set per user is
+	// small enough that keyset pagination isn't warranted here (same
+	// reasoning as the SRS §6.2/§6.3 "naturally bounded per-owner" routes).
+	ListApiTokensForUser(ctx context.Context, userID uuid.UUID) ([]AppApiToken, error)
 	ListAssetsByOwner(ctx context.Context, arg ListAssetsByOwnerParams) ([]AppAsset, error)
 	ListAssetsByRootLocation(ctx context.Context, ownerKind string, ownerID int64, rootLocationID int64) ([]AppAssetLocation, error)
 	ListBlockedEsiRoutes(ctx context.Context) ([]AppEsiRoute, error)
 	ListBlueprintsByOwner(ctx context.Context, ownerKind string, ownerID int64) ([]AppBlueprint, error)
 	ListCalendarEventAttendees(ctx context.Context, characterID int64, eventID int64) ([]AppCalendarEventAttendee, error)
 	ListCalendarEvents(ctx context.Context, characterID int64) ([]AppCalendarEvent, error)
+	// Phase 15 addition, same rationale: GET /characters/{id}/agents_research.
+	ListCharacterAgentResearch(ctx context.Context, characterID int64) ([]AppCharacterAgentResearch, error)
 	ListCharacterClones(ctx context.Context, characterID int64) ([]AppCharacterClone, error)
 	ListCharacterCorporationHistory(ctx context.Context, characterID int64) ([]AppCharacterCorporationHistory, error)
 	ListCharacterFittingItems(ctx context.Context, characterID int64, fittingID int64) ([]AppCharacterFittingItem, error)
@@ -498,6 +530,8 @@ type Querier interface {
 	ListCorporationStarbases(ctx context.Context, corporationID int64) ([]AppCorporationStarbase, error)
 	ListCorporationStructures(ctx context.Context, corporationID int64) ([]AppCorporationStructure, error)
 	ListCorporationTitles(ctx context.Context, corporationID int64) ([]AppCorporationTitle, error)
+	// Phase 15 addition: GET /api/v1/alliances/{id}/corporations.
+	ListCorporationsByAlliance(ctx context.Context, allianceID *int64) ([]AppCorporation, error)
 	// The admin-visible dead-letter queue (§4.4: "an alert is lost only if it
 	// was neither delivered nor dead-lettered; dead-lettering is a visible
 	// outcome, not a loss"). Joined to the event and channel so the board can
@@ -578,6 +612,9 @@ type Querier interface {
 	// join sync_subscription against this, not against ListEsiRoutes.
 	ListSchedulableEsiRoutes(ctx context.Context) ([]AppEsiRoute, error)
 	ListSecurityLogForUser(ctx context.Context, userID uuid.NullUUID, pageSize int32) ([]AppSecurityLog, error)
+	// Phase 15 addition, same rationale as ListApiTokensForUser above: GET
+	// /api/v1/me/share-links needs a caller-scoped list.
+	ListShareLinksForUser(ctx context.Context, userID uuid.UUID) ([]AppShareLink, error)
 	ListSovereigntyCampaigns(ctx context.Context) ([]AppSovereigntyCampaign, error)
 	ListSovereigntySystems(ctx context.Context) ([]AppSovereigntySystem, error)
 	ListSquadMembers(ctx context.Context, squadID uuid.UUID) ([]AppSquadMember, error)
@@ -718,6 +755,16 @@ type Querier interface {
 	RevokeShareLink(ctx context.Context, linkID uuid.UUID) error
 	RevokeUserRole(ctx context.Context, userID uuid.UUID, roleID uuid.UUID) error
 	RevokeWebhookEndpoint(ctx context.Context, endpointID uuid.UUID) error
+	SearchAlliancesByName(ctx context.Context, query string, pageSize int32) ([]AppAlliance, error)
+	// Phase 15 addition: POST /api/v1/support/search's backing query — SRS
+	// §6.7/§4.7: "CCP prohibits using ESI for entity discovery", so this
+	// searches HANGAR's own already-synced app.character/app.corporation/
+	// app.alliance rows only, never calls out to ESI. $1 is always a bind
+	// parameter (never string-concatenated) — internal/api/filters' adversarial
+	// input rejection runs before this query is ever reached, and parameter
+	// binding is the second, independent layer of defense against injection.
+	SearchCharactersByName(ctx context.Context, query string, pageSize int32) ([]AppCharacter, error)
+	SearchCorporationsByName(ctx context.Context, query string, pageSize int32) ([]AppCorporation, error)
 	SetDiscordInvalidBudgetPaused(ctx context.Context, paused bool) error
 	SetEntitlementRuleEnabled(ctx context.Context, ruleID uuid.UUID, enabled bool) error
 	SetErrorBudgetPaused(ctx context.Context, paused bool) error
@@ -771,6 +818,9 @@ type Querier interface {
 	// (no INSERT branch) — reconcile.go/urgent.go only ever call this against
 	// a provisioning_state row obtained from one of the List* queries above.
 	UpdateProvisioningStateGroups(ctx context.Context, arg UpdateProvisioningStateGroupsParams) error
+	// Phase 15 addition (internal/api/v1): PATCH /api/v1/squads/{id} — no
+	// mutation beyond Create existed for squad's own row before this phase.
+	UpdateSquad(ctx context.Context, squadID uuid.UUID, name string, description *string) (AppSquad, error)
 	UpsertAlliance(ctx context.Context, arg UpsertAllianceParams) (AppAlliance, error)
 	UpsertAllianceStub(ctx context.Context, allianceID int64, name string) error
 	// app.asset, app.asset_location (02_DATABASE_SCHEMA.md §5.3).

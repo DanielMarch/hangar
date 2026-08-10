@@ -12,6 +12,24 @@ SELECT * FROM app.squad WHERE squad_id = $1;
 -- name: ListSquads :many
 SELECT * FROM app.squad ORDER BY name;
 
+-- name: UpdateSquad :one
+-- Phase 15 addition (internal/api/v1): PATCH /api/v1/squads/{id} — no
+-- mutation beyond Create existed for squad's own row before this phase.
+UPDATE app.squad AS t
+   SET name = $2, description = $3, updated_at = now()
+ WHERE t.squad_id = $1
+RETURNING *;
+
+-- name: DeleteSquad :exec
+-- Phase 15 addition: DELETE /api/v1/squads/{id}. Child rows
+-- (squad_member/squad_moderator/squad_role/squad_application) are removed
+-- by their own FK ON DELETE CASCADE (02_DATABASE_SCHEMA.md §4.2's squad
+-- family) — this is a hard delete of the squad itself, not a soft one,
+-- matching how a squad (a HANGAR-native grouping, not an ESI-synced
+-- projection) has no "last known state" worth retaining once its owner
+-- deletes it.
+DELETE FROM app.squad WHERE squad_id = $1;
+
 -- name: AddSquadMember :exec
 INSERT INTO app.squad_member (squad_id, character_id)
 VALUES ($1, $2)

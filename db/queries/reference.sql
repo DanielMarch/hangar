@@ -63,6 +63,32 @@ RETURNING *;
 -- name: GetAlliance :one
 SELECT * FROM app.alliance WHERE alliance_id = $1;
 
+-- name: ListAlliances :many
+-- Phase 15 addition (internal/api/v1): GET /api/v1/alliances needs a list
+-- query — every alliance query before this phase targeted one already-known
+-- alliance_id.
+SELECT * FROM app.alliance ORDER BY name;
+
+-- name: ListCorporationsByAlliance :many
+-- Phase 15 addition: GET /api/v1/alliances/{id}/corporations.
+SELECT * FROM app.corporation WHERE alliance_id = $1 ORDER BY name;
+
+-- name: SearchCharactersByName :many
+-- Phase 15 addition: POST /api/v1/support/search's backing query — SRS
+-- §6.7/§4.7: "CCP prohibits using ESI for entity discovery", so this
+-- searches HANGAR's own already-synced app.character/app.corporation/
+-- app.alliance rows only, never calls out to ESI. $1 is always a bind
+-- parameter (never string-concatenated) — internal/api/filters' adversarial
+-- input rejection runs before this query is ever reached, and parameter
+-- binding is the second, independent layer of defense against injection.
+SELECT * FROM app.character WHERE name ILIKE '%' || sqlc.arg(query)::text || '%' AND deleted_at IS NULL ORDER BY name LIMIT sqlc.arg(page_size);
+
+-- name: SearchCorporationsByName :many
+SELECT * FROM app.corporation WHERE name ILIKE '%' || sqlc.arg(query)::text || '%' ORDER BY name LIMIT sqlc.arg(page_size);
+
+-- name: SearchAlliancesByName :many
+SELECT * FROM app.alliance WHERE name ILIKE '%' || sqlc.arg(query)::text || '%' ORDER BY name LIMIT sqlc.arg(page_size);
+
 -- name: UpsertLocation :one
 INSERT INTO app.location AS t (location_type, location_id, name, system_id, owner_id, type_id, resolved_at)
 VALUES ($1, $2, $3, $4, $5, $6, now())

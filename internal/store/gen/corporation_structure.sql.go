@@ -231,6 +231,68 @@ func (q *Queries) InsertCorporationRoleHistory(ctx context.Context, arg InsertCo
 	return i, err
 }
 
+const listAllCorporationMemberTitles = `-- name: ListAllCorporationMemberTitles :many
+SELECT corporation_id, title_id, character_id FROM app.corporation_member_title WHERE corporation_id = $1
+`
+
+// Phase 15 addition (internal/api/v1): GET /corporations/{id}/members/titles
+// is corp-wide (SRS §6.3), unlike ListCorporationMemberTitles above which is
+// one member's row set — no query existed for the whole-corporation view.
+func (q *Queries) ListAllCorporationMemberTitles(ctx context.Context, corporationID int64) ([]AppCorporationMemberTitle, error) {
+	rows, err := q.db.Query(ctx, listAllCorporationMemberTitles, corporationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppCorporationMemberTitle
+	for rows.Next() {
+		var i AppCorporationMemberTitle
+		if err := rows.Scan(&i.CorporationID, &i.TitleID, &i.CharacterID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllCorporationRoles = `-- name: ListAllCorporationRoles :many
+SELECT corporation_id, character_id, role, grantable, at_hq, at_base, at_other, updated_at FROM app.corporation_role WHERE corporation_id = $1
+`
+
+// Phase 15 addition, same rationale as ListAllCorporationMemberTitles
+// above: GET /corporations/{id}/roles is corp-wide.
+func (q *Queries) ListAllCorporationRoles(ctx context.Context, corporationID int64) ([]AppCorporationRole, error) {
+	rows, err := q.db.Query(ctx, listAllCorporationRoles, corporationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppCorporationRole
+	for rows.Next() {
+		var i AppCorporationRole
+		if err := rows.Scan(
+			&i.CorporationID,
+			&i.CharacterID,
+			&i.Role,
+			&i.Grantable,
+			&i.AtHq,
+			&i.AtBase,
+			&i.AtOther,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCorporationContainerLog = `-- name: ListCorporationContainerLog :many
 SELECT corporation_id, log_id, logged_at, action, character_id, container_id, container_type_id, location_id, location_flag, new_config_bitmask, old_config_bitmask, password_type, quantity, type_id FROM app.corporation_container_log
  WHERE corporation_id = $1 ORDER BY logged_at DESC LIMIT $2

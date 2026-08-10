@@ -127,6 +127,214 @@ func (q *Queries) GetLocation(ctx context.Context, locationType string, location
 	return i, err
 }
 
+const listAlliances = `-- name: ListAlliances :many
+SELECT alliance_id, name, ticker, creator_id, creator_corporation_id, executor_corporation_id, date_founded, faction_id, updated_at FROM app.alliance ORDER BY name
+`
+
+// Phase 15 addition (internal/api/v1): GET /api/v1/alliances needs a list
+// query — every alliance query before this phase targeted one already-known
+// alliance_id.
+func (q *Queries) ListAlliances(ctx context.Context) ([]AppAlliance, error) {
+	rows, err := q.db.Query(ctx, listAlliances)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppAlliance
+	for rows.Next() {
+		var i AppAlliance
+		if err := rows.Scan(
+			&i.AllianceID,
+			&i.Name,
+			&i.Ticker,
+			&i.CreatorID,
+			&i.CreatorCorporationID,
+			&i.ExecutorCorporationID,
+			&i.DateFounded,
+			&i.FactionID,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCorporationsByAlliance = `-- name: ListCorporationsByAlliance :many
+SELECT corporation_id, name, ticker, member_count, ceo_id, alliance_id, description, tax_rate, date_founded, creator_id, url, faction_id, home_station_id, shares, war_eligible, palette, updated_at FROM app.corporation WHERE alliance_id = $1 ORDER BY name
+`
+
+// Phase 15 addition: GET /api/v1/alliances/{id}/corporations.
+func (q *Queries) ListCorporationsByAlliance(ctx context.Context, allianceID *int64) ([]AppCorporation, error) {
+	rows, err := q.db.Query(ctx, listCorporationsByAlliance, allianceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppCorporation
+	for rows.Next() {
+		var i AppCorporation
+		if err := rows.Scan(
+			&i.CorporationID,
+			&i.Name,
+			&i.Ticker,
+			&i.MemberCount,
+			&i.CeoID,
+			&i.AllianceID,
+			&i.Description,
+			&i.TaxRate,
+			&i.DateFounded,
+			&i.CreatorID,
+			&i.Url,
+			&i.FactionID,
+			&i.HomeStationID,
+			&i.Shares,
+			&i.WarEligible,
+			&i.Palette,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchAlliancesByName = `-- name: SearchAlliancesByName :many
+SELECT alliance_id, name, ticker, creator_id, creator_corporation_id, executor_corporation_id, date_founded, faction_id, updated_at FROM app.alliance WHERE name ILIKE '%' || $1::text || '%' ORDER BY name LIMIT $2
+`
+
+func (q *Queries) SearchAlliancesByName(ctx context.Context, query string, pageSize int32) ([]AppAlliance, error) {
+	rows, err := q.db.Query(ctx, searchAlliancesByName, query, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppAlliance
+	for rows.Next() {
+		var i AppAlliance
+		if err := rows.Scan(
+			&i.AllianceID,
+			&i.Name,
+			&i.Ticker,
+			&i.CreatorID,
+			&i.CreatorCorporationID,
+			&i.ExecutorCorporationID,
+			&i.DateFounded,
+			&i.FactionID,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchCharactersByName = `-- name: SearchCharactersByName :many
+SELECT character_id, user_id, name, corporation_id, alliance_id, faction_id, security_status, birthday, gender, race_id, bloodline_id, ancestry_id, description, title, owner_hash, deleted_at, created_at, updated_at, character_title_id, achievement_score FROM app.character WHERE name ILIKE '%' || $1::text || '%' AND deleted_at IS NULL ORDER BY name LIMIT $2
+`
+
+// Phase 15 addition: POST /api/v1/support/search's backing query — SRS
+// §6.7/§4.7: "CCP prohibits using ESI for entity discovery", so this
+// searches HANGAR's own already-synced app.character/app.corporation/
+// app.alliance rows only, never calls out to ESI. $1 is always a bind
+// parameter (never string-concatenated) — internal/api/filters' adversarial
+// input rejection runs before this query is ever reached, and parameter
+// binding is the second, independent layer of defense against injection.
+func (q *Queries) SearchCharactersByName(ctx context.Context, query string, pageSize int32) ([]AppCharacter, error) {
+	rows, err := q.db.Query(ctx, searchCharactersByName, query, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppCharacter
+	for rows.Next() {
+		var i AppCharacter
+		if err := rows.Scan(
+			&i.CharacterID,
+			&i.UserID,
+			&i.Name,
+			&i.CorporationID,
+			&i.AllianceID,
+			&i.FactionID,
+			&i.SecurityStatus,
+			&i.Birthday,
+			&i.Gender,
+			&i.RaceID,
+			&i.BloodlineID,
+			&i.AncestryID,
+			&i.Description,
+			&i.Title,
+			&i.OwnerHash,
+			&i.DeletedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CharacterTitleID,
+			&i.AchievementScore,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchCorporationsByName = `-- name: SearchCorporationsByName :many
+SELECT corporation_id, name, ticker, member_count, ceo_id, alliance_id, description, tax_rate, date_founded, creator_id, url, faction_id, home_station_id, shares, war_eligible, palette, updated_at FROM app.corporation WHERE name ILIKE '%' || $1::text || '%' ORDER BY name LIMIT $2
+`
+
+func (q *Queries) SearchCorporationsByName(ctx context.Context, query string, pageSize int32) ([]AppCorporation, error) {
+	rows, err := q.db.Query(ctx, searchCorporationsByName, query, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppCorporation
+	for rows.Next() {
+		var i AppCorporation
+		if err := rows.Scan(
+			&i.CorporationID,
+			&i.Name,
+			&i.Ticker,
+			&i.MemberCount,
+			&i.CeoID,
+			&i.AllianceID,
+			&i.Description,
+			&i.TaxRate,
+			&i.DateFounded,
+			&i.CreatorID,
+			&i.Url,
+			&i.FactionID,
+			&i.HomeStationID,
+			&i.Shares,
+			&i.WarEligible,
+			&i.Palette,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const startSdeImport = `-- name: StartSdeImport :one
 INSERT INTO app.sde_import (status) VALUES ('running') RETURNING import_id, started_at, completed_at, status, checksum, row_counts, error
 `
