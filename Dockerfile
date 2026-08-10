@@ -22,6 +22,14 @@ COPY web/ ./
 # way to produce it, and a chicken-and-egg break here would block every image
 # build until Phase 15.
 COPY docs/openapi.json /src/docs/openapi.json
+# internal/i18n/locales.json is the single source of truth vite.config.ts's
+# "@i18n/locales.json" alias resolves to (../internal/i18n/locales.json,
+# relative to web/ — deliberately outside Vite's default project root, per
+# that config's own comment, so the Go and TS sides never drift). Phase 3
+# introduced the alias but never added this COPY, so the SPA build stage
+# has been unbuildable in a clean Docker context ever since — caught only
+# now because nothing had rebuilt the image since before Phase 3 landed.
+COPY internal/i18n/locales.json /src/internal/i18n/locales.json
 RUN pnpm run build
 
 # ─── Stage 2: Go ─────────────────────────────────────────────────────────────
