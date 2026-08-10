@@ -1,0 +1,5 @@
+[
+  { "is_singleton": true, "item_id": 1000000000001, "location_flag": "Hangar", "location_id": 60003760, "location_type": "station", "quantity": 1, "type_id": 587 },
+  { "is_singleton": true, "item_id": 1000000000002, "location_flag": "Cargo", "location_id": 1000000000001, "location_type": "item", "quantity": 5, "type_id": 34 },
+  { "is_singleton": false, "item_id": 1000000000003, "location_flag": "Wallet", "location_id": 1000000000002, "location_type": "item", "quantity": 42, "type_id": 34 }
+]

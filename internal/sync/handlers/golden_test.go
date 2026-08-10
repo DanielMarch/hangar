@@ -36,6 +36,17 @@ var goldenParsers = map[string]func([]byte) (any, error){
 	"online":                 func(b []byte) (any, error) { return handlers.ParseCharacterOnline(b) },
 	"online_never_logged_in": func(b []byte) (any, error) { return handlers.ParseCharacterOnline(b) },
 	"ship":                   func(b []byte) (any, error) { return handlers.ParseCharacterShip(b) },
+
+	// Phase 9 additions.
+	"assets":                 func(b []byte) (any, error) { return handlers.ParseAssets(b) },
+	"contracts":              func(b []byte) (any, error) { return handlers.ParseContracts(b) },
+	"contract_items":         func(b []byte) (any, error) { return handlers.ParseContractItems(b) },
+	"contract_items_courier": func(b []byte) (any, error) { return handlers.ParseContractItems(b) },
+	"mail_headers":           func(b []byte) (any, error) { return handlers.ParseMailHeaders(b) },
+	"mail_body":              func(b []byte) (any, error) { return handlers.ParseMailBody(b) },
+	"orders":                 func(b []byte) (any, error) { return handlers.ParseMarketOrders(b) },
+	"orders_history":         func(b []byte) (any, error) { return handlers.ParseMarketOrderHistory(b) },
+	"planet_colony_detail":   func(b []byte) (any, error) { return handlers.ParsePlanetColonyDetail(b) },
 }
 
 const testdataDir = "../../../testdata/esi/character"

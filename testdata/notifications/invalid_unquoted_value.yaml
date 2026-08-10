@@ -1,0 +1,3 @@
+allianceID: 99000001
+	corpID: 98000001
+unquoted: value: with colon breaking parse

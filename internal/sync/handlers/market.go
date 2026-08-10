@@ -1,14 +1,12 @@
-// Market order sync (Phase 8's explicit scope per the roadmap prompt seed:
-// "market orders and order history") is owner-kind-generic, same rationale
-// as wallet.go, but this phase only ever calls it with ownerKind =
-// "corporation" — 02_DATABASE_SCHEMA.md §5.2's table map assigns the
-// broader "Market (4)" group (which includes market_history/market_price,
-// global reference data unrelated to any owner) to Phase 9 in full; the
-// two owner-polymorphic order tables are the one piece of that group this
-// phase's prompt seed explicitly calls out, so only the corp-owned call
-// site is wired into worker/corporation.go. The functions below stay
-// owner-generic so Phase 9's character-order sync is a dispatch-table
-// entry, not a rewrite.
+// Market order sync. SyncMarketOrders/SyncMarketOrderHistory were already
+// owner-kind-generic as of Phase 8, same rationale as wallet.go, though
+// Phase 8 only ever called them with ownerKind = "corporation"
+// (worker/corporation.go). Phase 9 wires the character-side call sites
+// into CharacterWorker's dispatch map (worker/character.go) — a
+// dispatch-table entry, not a rewrite of these functions — and closes out
+// 02_DATABASE_SCHEMA.md §5.2's broader "Market (4)" group in full
+// (market_history.go, market_price.go: region/type history and global
+// adjusted/average prices, neither owner-scoped).
 package handlers
 
 import (
@@ -24,12 +22,17 @@ import (
 
 // MarketOrderDTO is one element of GET /corporations/{id}/orders (or the
 // character equivalent). `issued_by` (the character who placed the order)
-// is a required field on the live spec but app.market_order has no column
-// for it — reported as a gap, parsed for field-loss coverage, not
-// persisted (same precedent as corporation_structure.go's title role
-// grants). `is_corporation` does not appear on either owner's response at
-// all; the caller supplies it (SyncMarketOrders' isCorporation parameter)
-// since it is a property of WHICH endpoint answered, not of the order.
+// is a required field on the live spec and IS persisted, into
+// app.market_order.issued_by (00034_phase9_market_issued_by.sql closes the
+// gap Phase 8 reported and carried forward) — nullable because a corp
+// order placed by a since-departed or since-unsynced character is a
+// legitimate case; on a character's own orders it is always that same
+// character, so it is never actually absent there in practice, but the
+// column stays nullable rather than assuming that holds for every past and
+// future spec revision. `is_corporation` does not appear on either owner's
+// response at all; the caller supplies it (SyncMarketOrders'
+// isCorporation parameter) since it is a property of WHICH endpoint
+// answered, not of the order.
 type MarketOrderDTO struct {
 	Duration       int32               `json:"duration"`
 	Escrow         decimal.NullDecimal `json:"escrow"`
@@ -77,7 +80,7 @@ func SyncMarketOrders(ctx context.Context, s *store.Store, ownerKind string, own
 			RegionID: o.RegionID, LocationID: o.LocationID, Range: o.Range, IsBuyOrder: isBuy,
 			IsCorporation: isCorporation, Escrow: o.Escrow, Price: o.Price, VolumeTotal: o.VolumeTotal,
 			VolumeRemain: o.VolumeRemain, MinVolume: o.MinVolume, Duration: o.Duration, Issued: o.Issued,
-			WalletDivision: &division,
+			WalletDivision: &division, IssuedBy: o.IssuedBy,
 		}); ignoreUnchanged(err) != nil {
 			return SyncResult{}, fmt.Errorf("handlers: upserting market order %d for %s %d: %w", o.OrderID, ownerKind, ownerID, err)
 		}
@@ -130,7 +133,7 @@ func SyncMarketOrderHistory(ctx context.Context, s *store.Store, ownerKind strin
 			RegionID: o.RegionID, LocationID: o.LocationID, Range: o.Range, IsBuyOrder: isBuy,
 			IsCorporation: isCorporation, Escrow: o.Escrow, Price: o.Price, VolumeTotal: o.VolumeTotal,
 			VolumeRemain: o.VolumeRemain, MinVolume: o.MinVolume, Duration: o.Duration, Issued: o.Issued,
-			State: o.State, WalletDivision: &division,
+			State: o.State, WalletDivision: &division, IssuedBy: o.IssuedBy,
 		}); ignoreUnchanged(err) != nil {
 			return SyncResult{}, fmt.Errorf("handlers: upserting market order history %d for %s %d: %w", o.OrderID, ownerKind, ownerID, err)
 		}

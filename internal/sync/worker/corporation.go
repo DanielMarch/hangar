@@ -159,6 +159,30 @@ var corporationDispatch = map[string]corporationHandler{
 		}
 		return res.RowsAffected, nil
 	},
+
+	// Phase 9 additions.
+	"/corporations/{corporation_id}/contracts": func(ctx context.Context, s *store.Store, corporationID int64, body []byte) (int32, error) {
+		dto, err := handlers.ParseContracts(body)
+		if err != nil {
+			return 0, err
+		}
+		res, err := handlers.SyncContracts(ctx, s, "corporation", corporationID, dto)
+		if err != nil {
+			return 0, err
+		}
+		return res.RowsAffected, nil
+	},
+	"/corporations/{corporation_id}/projects": func(ctx context.Context, s *store.Store, corporationID int64, body []byte) (int32, error) {
+		dto, err := handlers.ParseCorporationProjects(body)
+		if err != nil {
+			return 0, err
+		}
+		res, err := handlers.SyncCorporationProjects(ctx, s, corporationID, dto)
+		if err != nil {
+			return 0, err
+		}
+		return res.RowsAffected, nil
+	},
 }
 
 // pagePaginatedRoutes marks routes confirmed against the live embedded
@@ -286,6 +310,12 @@ func (w *CorporationWorker) Work(ctx context.Context, job *river.Job[planner.Syn
 		rowsAffected, outcome, syncErr = w.doSovereigntyHubDetailFanout(ctx, s, sub, route, args.EntityID, characterID, tok.Value)
 	case miningObserverRecordsPath:
 		rowsAffected, outcome, syncErr = w.doMiningObserverRecordsFanout(ctx, s, sub, route, args.EntityID, characterID, tok.Value)
+	case contractItemsPath:
+		rowsAffected, outcome, syncErr = w.doContractItemsFanout(ctx, s, sub, route, args.EntityID, characterID, tok.Value)
+	case contractBidsPath:
+		rowsAffected, outcome, syncErr = w.doContractBidsFanout(ctx, s, sub, route, args.EntityID, characterID, tok.Value)
+	case projectContributionsPath:
+		rowsAffected, outcome, syncErr = w.doProjectContributionsFanout(ctx, s, sub, route, args.EntityID, characterID, tok.Value)
 	default:
 		handler, isSimple := corporationDispatch[route.UpstreamPath]
 		if !isSimple {
@@ -325,6 +355,13 @@ const (
 	skyhookDetailPath         = "/corporations/{corporation_id}/structures/skyhooks/{skyhook_id}"
 	sovereigntyHubDetailPath  = "/corporations/{corporation_id}/structures/sovereignty-hubs/{sovereignty_hub_id}"
 	miningObserverRecordsPath = "/corporation/{corporation_id}/mining/observers/{observer_id}"
+
+	// Phase 9 additions: contract items/bids and project contributions are
+	// per-contract/per-project detail fanouts, same shape as the Phase 8.1
+	// routes above.
+	contractItemsPath        = "/corporations/{corporation_id}/contracts/{contract_id}/items"
+	contractBidsPath         = "/corporations/{corporation_id}/contracts/{contract_id}/bids"
+	projectContributionsPath = "/corporations/{corporation_id}/projects/{project_id}/contributions"
 )
 
 func strPtr(s string) *string { return &s }
@@ -841,4 +878,137 @@ func (w *CorporationWorker) doMiningObserverRecordsFanout(ctx context.Context, s
 			}
 			return res.RowsAffected, nil
 		})
+}
+
+// doContractItemsFanout fans out over every contract this corporation's
+// list sync already knows about. A courier contract's item list comes
+// back empty — the roadmap edge case: empty is a legitimate result, not a
+// failure, and SyncContractItems' own doc comment covers it — so nothing
+// here treats a 200 with zero items differently from any other 200.
+func (w *CorporationWorker) doContractItemsFanout(ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute, corporationID, characterID int64, accessToken string) (int32, string, error) {
+	contracts, err := s.ListContractsPage(ctx, gen.ListContractsPageParams{
+		OwnerKind: "corporation", OwnerID: corporationID, AfterContractID: 0, PageSize: 1_000_000,
+	})
+	if err != nil {
+		return 0, "", fmt.Errorf("worker: listing known contracts for corp %d: %w", corporationID, err)
+	}
+	items := make([]fanoutDetailItem, len(contracts))
+	for i, c := range contracts {
+		items[i] = fanoutDetailItem{id: c.ContractID}
+	}
+	return w.fanoutDetail(ctx, s, sub, route, corporationID, characterID, accessToken, "contract_id", items,
+		func(ctx context.Context, s *store.Store, contractID int64, body []byte) (int32, error) {
+			dto, err := handlers.ParseContractItems(body)
+			if err != nil {
+				return 0, err
+			}
+			res, err := handlers.SyncContractItems(ctx, s, "corporation", corporationID, contractID, dto)
+			if err != nil {
+				return 0, err
+			}
+			return res.RowsAffected, nil
+		})
+}
+
+// doContractBidsFanout mirrors doContractItemsFanout for auction-contract
+// bids (only meaningful on contracts of type 'auction'; ESI itself simply
+// returns an empty/404 body for any other type, handled the same way
+// fanoutDetail already treats a 404 on any other detail route: skip, not
+// a failure).
+func (w *CorporationWorker) doContractBidsFanout(ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute, corporationID, characterID int64, accessToken string) (int32, string, error) {
+	contracts, err := s.ListContractsPage(ctx, gen.ListContractsPageParams{
+		OwnerKind: "corporation", OwnerID: corporationID, AfterContractID: 0, PageSize: 1_000_000,
+	})
+	if err != nil {
+		return 0, "", fmt.Errorf("worker: listing known contracts for corp %d: %w", corporationID, err)
+	}
+	items := make([]fanoutDetailItem, len(contracts))
+	for i, c := range contracts {
+		items[i] = fanoutDetailItem{id: c.ContractID}
+	}
+	return w.fanoutDetail(ctx, s, sub, route, corporationID, characterID, accessToken, "contract_id", items,
+		func(ctx context.Context, s *store.Store, contractID int64, body []byte) (int32, error) {
+			dto, err := handlers.ParseContractBids(body)
+			if err != nil {
+				return 0, err
+			}
+			res, err := handlers.SyncContractBids(ctx, s, "corporation", corporationID, contractID, dto)
+			if err != nil {
+				return 0, err
+			}
+			return res.RowsAffected, nil
+		})
+}
+
+// doProjectContributionsFanout fans out over every project this
+// corporation's list sync already knows about. project_id is uuid FROM
+// CCP (Principle 13's proof case) — fanoutDetail's item shape is int64-only
+// (every other fanout in this file substitutes a bigint id), so this is a
+// small dedicated loop rather than forcing a uuid through that helper's
+// int64 field; the uuid is formatted to its canonical string form for the
+// path substitution and never touches a bigint or text column along the
+// way (internal/store's uuid.UUID round trip is the only place it's typed).
+func (w *CorporationWorker) doProjectContributionsFanout(ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute, corporationID, characterID int64, accessToken string) (rowsAffected int32, outcome string, err error) {
+	projects, err := s.ListCorporationProjects(ctx, corporationID)
+	if err != nil {
+		return 0, "", fmt.Errorf("worker: listing known projects for corp %d: %w", corporationID, err)
+	}
+
+	outcome = "200"
+	for _, p := range projects {
+		resp, doErr := w.Gateway.Do(ctx, esi.Request{
+			Method: route.Method, UpstreamPath: route.UpstreamPath,
+			PathParams: map[string]string{
+				"corporation_id": strconv.FormatInt(corporationID, 10),
+				"project_id":     p.ProjectID.String(),
+			},
+			AccessToken:     accessToken,
+			CacheMode:       derefStr(route.CacheMode),
+			RateLimitGroup:  derefStr(route.RateLimitGroup),
+			RateLimitMax:    int(derefInt32(route.RateLimitMax)),
+			RateLimitWindow: sync.IntervalToDuration(route.RateLimitWindow),
+			UserKey:         fmt.Sprintf("hangar:%d", characterID),
+		})
+		if doErr != nil {
+			return rowsAffected, normalize.Outcome(0, true), fmt.Errorf("worker: fetching contributions for project %s of corp %d: %w", p.ProjectID, corporationID, doErr)
+		}
+
+		switch resp.StatusCode {
+		case http.StatusOK:
+			dto, perr := handlers.ParseCorporationProjectContributions(resp.Body)
+			if perr != nil {
+				return rowsAffected, normalize.Outcome(resp.StatusCode, false), perr
+			}
+			res, serr := handlers.SyncCorporationProjectContributions(ctx, s, p.ProjectID, dto)
+			if serr != nil {
+				return rowsAffected, normalize.Outcome(resp.StatusCode, false), serr
+			}
+			rowsAffected += res.RowsAffected
+			outcome = normalize.Outcome(resp.StatusCode, false)
+		case http.StatusNotFound:
+			continue
+		case http.StatusForbidden:
+			if err := s.RecordSync403(ctx, sub.SubscriptionID); err != nil {
+				return rowsAffected, normalize.Outcome(resp.StatusCode, false), err
+			}
+			return rowsAffected, normalize.Outcome(resp.StatusCode, false), nil
+		default:
+			return rowsAffected, normalize.Outcome(resp.StatusCode, false), fmt.Errorf("worker: contributions fetch for project %s of corp %d returned status %d", p.ProjectID, corporationID, resp.StatusCode)
+		}
+	}
+
+	next, err := sync.PlanNextDueAt(sync.DueTimeInput{
+		Route:  sync.RouteCacheConfig{CacheMode: derefStr(route.CacheMode), CacheAge: sync.IntervalToDuration(route.CacheAge), BlockedByPin: route.BlockedByPin},
+		Policy: w.Policy, LastSuccess: time.Now(), Consecutive304: 0, OptInNoCache: sub.OptInNoCache, Now: time.Now(),
+	})
+	if err != nil {
+		return rowsAffected, outcome, err
+	}
+	if err := s.RecordSyncSuccess(ctx, gen.RecordSyncSuccessParams{
+		SubscriptionID: sub.SubscriptionID, LastStatus: statusOf(outcome), CursorAfter: sub.CursorAfter,
+		NextDueAt: next, Consecutive304: 0,
+	}); err != nil {
+		return rowsAffected, outcome, err
+	}
+	return rowsAffected, outcome, nil
 }

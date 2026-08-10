@@ -1,0 +1,14 @@
+[
+  {
+    "availability": "public", "contract_id": 5001, "date_expired": "2026-09-01T00:00:00Z",
+    "date_issued": "2026-08-01T00:00:00Z", "for_corporation": false, "issuer_corporation_id": 98000001,
+    "issuer_id": 90000001, "price": 1000.00, "start_location_id": 60003760, "status": "outstanding",
+    "type": "item_exchange", "title": "Test contract"
+  },
+  {
+    "availability": "public", "contract_id": 5002, "date_expired": "2026-09-01T00:00:00Z",
+    "date_issued": "2026-08-01T00:00:00Z", "for_corporation": false, "issuer_corporation_id": 98000001,
+    "issuer_id": 90000001, "reward": 0, "collateral": 5000.00, "start_location_id": 60003760,
+    "end_location_id": 60003761, "status": "outstanding", "type": "courier"
+  }
+]

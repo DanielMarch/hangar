@@ -24,6 +24,15 @@ RETURNING *;
 -- name: GetMailBody :one
 SELECT * FROM app.mail_body WHERE character_id = $1 AND mail_id = $2;
 
+-- name: ListMailHeadersWithoutBody :many
+-- Drives the per-mail body fanout (roadmap: "Mail bodies are one ESI
+-- request per mail"; HANGAR must route each through the catalogue, never
+-- build the URL by hand — see worker.doMailBodyFanout).
+SELECT h.* FROM app.mail_header h
+  LEFT JOIN app.mail_body b ON b.character_id = h.character_id AND b.mail_id = h.mail_id
+ WHERE h.character_id = $1 AND b.mail_id IS NULL
+ ORDER BY h.mail_id;
+
 -- name: InsertMailRecipient :one
 INSERT INTO app.mail_recipient (character_id, mail_id, recipient_id, recipient_type) VALUES ($1,$2,$3,$4)
 ON CONFLICT (character_id, mail_id, recipient_id) DO NOTHING

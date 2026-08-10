@@ -5,11 +5,13 @@
 INSERT INTO app.market_order AS t (
     owner_kind, owner_id, order_id, type_id, region_id, location_id, range,
     is_buy_order, is_corporation, escrow, price, volume_total, volume_remain,
-    min_volume, duration, issued, wallet_division
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+    min_volume, duration, issued, wallet_division, issued_by
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
 ON CONFLICT (owner_kind, owner_id, order_id) DO UPDATE
-   SET volume_remain = EXCLUDED.volume_remain, escrow = EXCLUDED.escrow, updated_at = now()
- WHERE (t.volume_remain, t.escrow) IS DISTINCT FROM (EXCLUDED.volume_remain, EXCLUDED.escrow)
+   SET volume_remain = EXCLUDED.volume_remain, escrow = EXCLUDED.escrow,
+       issued_by = EXCLUDED.issued_by, updated_at = now()
+ WHERE (t.volume_remain, t.escrow, t.issued_by)
+    IS DISTINCT FROM (EXCLUDED.volume_remain, EXCLUDED.escrow, EXCLUDED.issued_by)
 RETURNING *;
 
 -- name: ListMarketOrdersByOwner :many
@@ -26,11 +28,13 @@ DELETE FROM app.market_order
 INSERT INTO app.market_order_history AS t (
     owner_kind, owner_id, order_id, type_id, region_id, location_id, range,
     is_buy_order, is_corporation, escrow, price, volume_total, volume_remain,
-    min_volume, duration, issued, state, wallet_division
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+    min_volume, duration, issued, state, wallet_division, issued_by
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
 ON CONFLICT (owner_kind, owner_id, order_id) DO UPDATE
-   SET state = EXCLUDED.state, volume_remain = EXCLUDED.volume_remain, updated_at = now()
- WHERE (t.state, t.volume_remain) IS DISTINCT FROM (EXCLUDED.state, EXCLUDED.volume_remain)
+   SET state = EXCLUDED.state, volume_remain = EXCLUDED.volume_remain,
+       issued_by = EXCLUDED.issued_by, updated_at = now()
+ WHERE (t.state, t.volume_remain, t.issued_by)
+    IS DISTINCT FROM (EXCLUDED.state, EXCLUDED.volume_remain, EXCLUDED.issued_by)
 RETURNING *;
 
 -- name: ListMarketOrderHistoryByOwner :many

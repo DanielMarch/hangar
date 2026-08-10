@@ -1,0 +1,4 @@
+[
+  { "is_included": true, "is_singleton": false, "quantity": 10, "record_id": 1, "type_id": 34 },
+  { "is_included": true, "is_singleton": false, "quantity": 5, "record_id": 2, "type_id": 35 }
+]

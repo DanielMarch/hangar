@@ -27,6 +27,19 @@ import (
 	"github.com/hangar-project/hangar/internal/sync/planner"
 )
 
+// mailBodyPath is the "detail" route the roadmap's mail-body edge case
+// covers: one ESI request per mail, subscribed once per character the
+// same way a corporation's starbase/skyhook/sovereignty-hub detail routes
+// are (worker/corporation.go's fanoutDetail pattern) — a single
+// subscription for the templated upstream_path, fanning out over every
+// header this character already has that has no body row yet
+// (mail.sql's ListMailHeadersWithoutBody). Routed through
+// internal/esi.Client with UpstreamPath taken from the catalogue row,
+// never a hand-built URL (roadmap: "Legacy invokes this inline, bypassing
+// its own endpoint registry — HANGAR must route it through the route
+// catalogue like every other call" — TestMailBodyRoutedThroughCatalogue).
+const mailBodyPath = "/characters/{character_id}/mail/{mail_id}"
+
 // characterHandler is the shape every character-domain sync function in
 // internal/sync/handlers reduces to once its Parse+Sync pair is combined:
 // raw response body in, rows-affected count out.
@@ -137,6 +150,54 @@ var characterDispatch = map[string]characterHandler{
 		}
 		return res.RowsAffected, nil
 	},
+
+	// Phase 9 additions below. Market orders/history reuse market.go's
+	// already owner-generic Sync functions (this file's header comment on
+	// market.go explains why they didn't need a rewrite); assets,
+	// contracts (list + bids), mail headers/labels/lists, PI colonies,
+	// calendar events, and notifications are new domains this phase adds.
+	"/characters/{character_id}/orders": func(ctx context.Context, s *store.Store, characterID int64, body []byte) (int32, error) {
+		dto, err := handlers.ParseMarketOrders(body)
+		if err != nil {
+			return 0, err
+		}
+		res, err := handlers.SyncMarketOrders(ctx, s, "character", characterID, false, dto)
+		if err != nil {
+			return 0, err
+		}
+		return res.RowsAffected, nil
+	},
+	"/characters/{character_id}/orders/history": func(ctx context.Context, s *store.Store, characterID int64, body []byte) (int32, error) {
+		dto, err := handlers.ParseMarketOrderHistory(body)
+		if err != nil {
+			return 0, err
+		}
+		res, err := handlers.SyncMarketOrderHistory(ctx, s, "character", characterID, false, dto)
+		if err != nil {
+			return 0, err
+		}
+		return res.RowsAffected, nil
+	},
+	"/characters/{character_id}/assets": func(ctx context.Context, s *store.Store, characterID int64, body []byte) (int32, error) {
+		dto, err := handlers.ParseAssets(body)
+		if err != nil {
+			return 0, err
+		}
+		res, err := handlers.SyncAssets(ctx, s, "character", characterID, dto, nil)
+		if err != nil {
+			return 0, err
+		}
+		return res.RowsAffected, nil
+	},
+	"/characters/{character_id}/contracts": wrap(handlers.ParseContracts, func(ctx context.Context, s *store.Store, characterID int64, dto []handlers.ContractDTO) (handlers.SyncResult, error) {
+		return handlers.SyncContracts(ctx, s, "character", characterID, dto)
+	}),
+	"/characters/{character_id}/mail":            wrap(handlers.ParseMailHeaders, handlers.SyncMailHeaders),
+	"/characters/{character_id}/mail/labels":     wrap(handlers.ParseMailLabels, handlers.SyncMailLabels),
+	"/characters/{character_id}/mail/lists":      wrap(handlers.ParseMailLists, handlers.SyncMailLists),
+	"/characters/{character_id}/planets":         wrap(handlers.ParsePlanetColonies, handlers.SyncPlanetColonies),
+	"/characters/{character_id}/calendar/events": wrap(handlers.ParseCalendarEvents, handlers.SyncCalendarEvents),
+	"/characters/{character_id}/notifications":   wrap(handlers.ParseCharacterNotifications, handlers.SyncCharacterNotifications),
 }
 
 // walletJournalCharacterPath is page-paginated the same way the
@@ -202,11 +263,6 @@ func (w *CharacterWorker) Work(ctx context.Context, job *river.Job[planner.SyncJ
 		return nil
 	}
 
-	handler, ok := characterDispatch[route.UpstreamPath]
-	if !ok {
-		return fmt.Errorf("worker: no character handler registered for route %s (%s)", route.UpstreamPath, route.OperationID)
-	}
-
 	tok, err := w.Tokens.EnsureAccessToken(ctx, args.EntityID)
 	if err != nil {
 		return fmt.Errorf("worker: obtaining access token for character %d: %w", args.EntityID, err)
@@ -217,7 +273,23 @@ func (w *CharacterWorker) Work(ctx context.Context, job *river.Job[planner.SyncJ
 		return fmt.Errorf("worker: starting sync run for %s: %w", args.SubscriptionID, err)
 	}
 
-	rowsAffected, outcome, syncErr := w.doSync(ctx, s, sub, route, args.EntityID, tok.Value, handler)
+	var rowsAffected int32
+	var outcome string
+	var syncErr error
+	if route.UpstreamPath == mailBodyPath {
+		// Fanout, not a simple body-in/rows-out handler — see doMailBodyFanout.
+		rowsAffected, outcome, syncErr = w.doMailBodyFanout(ctx, s, sub, route, args.EntityID, tok.Value)
+	} else {
+		handler, ok := characterDispatch[route.UpstreamPath]
+		if !ok {
+			finishErr := s.FinishSyncRun(ctx, gen.FinishSyncRunParams{RunID: run.RunID, Status: nil, Outcome: nil, Error: strPtr("no handler registered"), RowsAffected: nil})
+			if finishErr != nil {
+				return finishErr
+			}
+			return fmt.Errorf("worker: no character handler registered for route %s (%s)", route.UpstreamPath, route.OperationID)
+		}
+		rowsAffected, outcome, syncErr = w.doSync(ctx, s, sub, route, args.EntityID, tok.Value, handler)
+	}
 
 	finishErr := s.FinishSyncRun(ctx, gen.FinishSyncRunParams{
 		RunID: run.RunID, Status: statusOf(outcome), Outcome: &outcome,
@@ -315,6 +387,83 @@ func (w *CharacterWorker) doSync(ctx context.Context, s *store.Store, sub gen.Ap
 	default:
 		return 0, outcome, fmt.Errorf("worker: unexpected status %d from %s", resp.StatusCode, route.UpstreamPath)
 	}
+}
+
+// doMailBodyFanout fetches the body of every mail header this character
+// has that doesn't have one yet (mail.sql's ListMailHeadersWithoutBody),
+// one ESI request per mail — the roadmap's own framing. Every call goes
+// through w.Gateway.Do with UpstreamPath taken verbatim from the catalogue
+// route row (never a hand-built URL string), mirroring
+// worker/corporation.go's fanoutDetail for the same reason: Principle 5's
+// "the catalogue's upstream_path is used verbatim, never derived" applies
+// here exactly as it does to every other route. A 404 on one mail (it was
+// deleted after the header sync ran) is data, not a failure, and is
+// skipped; a 403 stops the whole fanout for this attempt, matching
+// fanoutDetail's same reasoning (a role failure is homogeneous across
+// every item of one character's token).
+func (w *CharacterWorker) doMailBodyFanout(ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute, characterID int64, accessToken string) (rowsAffected int32, outcome string, err error) {
+	headers, err := s.ListMailHeadersWithoutBody(ctx, characterID)
+	if err != nil {
+		return 0, "", fmt.Errorf("worker: listing mail headers without a body for character %d: %w", characterID, err)
+	}
+
+	outcome = "200"
+	for _, h := range headers {
+		resp, doErr := w.Gateway.Do(ctx, esi.Request{
+			Method: route.Method, UpstreamPath: route.UpstreamPath,
+			PathParams: map[string]string{
+				"character_id": strconv.FormatInt(characterID, 10),
+				"mail_id":      strconv.FormatInt(h.MailID, 10),
+			},
+			AccessToken:     accessToken,
+			CacheMode:       derefStr(route.CacheMode),
+			RateLimitGroup:  derefStr(route.RateLimitGroup),
+			RateLimitMax:    int(derefInt32(route.RateLimitMax)),
+			RateLimitWindow: sync.IntervalToDuration(route.RateLimitWindow),
+			UserKey:         fmt.Sprintf("hangar:%d", characterID),
+		})
+		if doErr != nil {
+			return rowsAffected, normalize.Outcome(0, true), fmt.Errorf("worker: fetching body for mail %d of character %d: %w", h.MailID, characterID, doErr)
+		}
+
+		switch resp.StatusCode {
+		case http.StatusOK:
+			dto, perr := handlers.ParseMailBody(resp.Body)
+			if perr != nil {
+				return rowsAffected, normalize.Outcome(resp.StatusCode, false), perr
+			}
+			res, serr := handlers.SyncMailBody(ctx, s, characterID, h.MailID, dto)
+			if serr != nil {
+				return rowsAffected, normalize.Outcome(resp.StatusCode, false), serr
+			}
+			rowsAffected += res.RowsAffected
+			outcome = normalize.Outcome(resp.StatusCode, false)
+		case http.StatusNotFound:
+			continue
+		case http.StatusForbidden:
+			if err := s.RecordSync403(ctx, sub.SubscriptionID); err != nil {
+				return rowsAffected, normalize.Outcome(resp.StatusCode, false), err
+			}
+			return rowsAffected, normalize.Outcome(resp.StatusCode, false), nil
+		default:
+			return rowsAffected, normalize.Outcome(resp.StatusCode, false), fmt.Errorf("worker: body fetch for mail %d of character %d returned status %d", h.MailID, characterID, resp.StatusCode)
+		}
+	}
+
+	next, err := sync.PlanNextDueAt(sync.DueTimeInput{
+		Route:  sync.RouteCacheConfig{CacheMode: derefStr(route.CacheMode), CacheAge: sync.IntervalToDuration(route.CacheAge), BlockedByPin: route.BlockedByPin},
+		Policy: w.Policy, LastSuccess: time.Now(), Consecutive304: 0, OptInNoCache: sub.OptInNoCache, Now: time.Now(),
+	})
+	if err != nil {
+		return rowsAffected, outcome, err
+	}
+	if err := s.RecordSyncSuccess(ctx, gen.RecordSyncSuccessParams{
+		SubscriptionID: sub.SubscriptionID, LastStatus: statusOf(outcome), CursorAfter: sub.CursorAfter,
+		NextDueAt: next, Consecutive304: 0,
+	}); err != nil {
+		return rowsAffected, outcome, err
+	}
+	return rowsAffected, outcome, nil
 }
 
 func statusOf(outcome string) *int16 {

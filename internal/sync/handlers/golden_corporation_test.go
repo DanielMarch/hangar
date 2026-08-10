@@ -52,6 +52,10 @@ var corporationGoldenParsers = map[string]func([]byte) (any, error){
 	"market_order_history":     func(b []byte) (any, error) { return handlers.ParseMarketOrderHistory(b) },
 	"sovereignty_campaigns":    func(b []byte) (any, error) { return handlers.ParseSovereigntyCampaigns(b) },
 	"sovereignty_systems":      func(b []byte) (any, error) { return handlers.ParseSovereigntySystems(b) },
+
+	// Phase 9 additions.
+	"projects":              func(b []byte) (any, error) { return handlers.ParseCorporationProjects(b) },
+	"project_contributions": func(b []byte) (any, error) { return handlers.ParseCorporationProjectContributions(b) },
 }
 
 const corporationTestdataDir = "../../../testdata/esi/corporation"

@@ -1,0 +1,5 @@
+{
+  "links": [{"destination_pin_id": 2, "link_level": 0, "source_pin_id": 1}],
+  "pins": [{"pin_id": 1, "type_id": 2254}, {"pin_id": 2, "type_id": 2255}],
+  "routes": [{"content_type_id": 3777, "destination_pin_id": 2, "quantity": 100.0, "route_id": 1, "source_pin_id": 1}]
+}

@@ -3,9 +3,14 @@
 -- sent_at; the partition key rides along in the ON CONFLICT target.
 
 -- name: UpsertCharacterNotification :one
+-- payload/parse_failed (00035): CCP notification YAML is not always valid
+-- YAML (roadmap edge case). `payload` holds the parsed structure when it
+-- is, or a `{"raw": text}` fallback wrapper when it is not; `parse_failed`
+-- flags the latter so the generic renderer and the unknown-types board can
+-- find them without re-parsing. A parse failure never blocks this insert.
 INSERT INTO app.character_notification AS t (
-    character_id, notification_id, sent_at, sender_id, sender_type, type, text, is_read
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    character_id, notification_id, sent_at, sender_id, sender_type, type, text, is_read, payload, parse_failed
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 ON CONFLICT (character_id, notification_id, sent_at) DO UPDATE
    SET is_read = EXCLUDED.is_read
  WHERE t.is_read IS DISTINCT FROM EXCLUDED.is_read
@@ -16,6 +21,13 @@ SELECT * FROM app.character_notification
  WHERE character_id = $1 AND sent_at < sqlc.arg(before_sent_at)
  ORDER BY sent_at DESC
  LIMIT sqlc.arg(page_size);
+
+-- name: ListUnparseableCharacterNotifications :many
+-- The unknown-types board's YAML-parse-failure view (Principle 14 applied
+-- to a whole payload shape, not just one field — see 00035's header).
+SELECT * FROM app.character_notification
+ WHERE character_id = $1 AND parse_failed
+ ORDER BY sent_at DESC;
 
 -- name: UpsertNotificationContact :one
 INSERT INTO app.notification_contact AS t (
