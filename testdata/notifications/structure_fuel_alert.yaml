@@ -1,0 +1,13 @@
+# StructureFuelAlert — CCP notification payload shape (Phase 14 fixture).
+# Real notification bodies are YAML inside the `text` field; this is the
+# parsed shape internal/sync/handlers.parseNotificationYAML produces.
+listOfTypesAndQty:
+  - - 307
+    - 4051
+solarsystemID: 30000142
+structureID: 1021975179626
+structureShowInfoData:
+  - showinfo
+  - 35832
+  - 1021975179626
+structureTypeID: 35832

@@ -88,6 +88,17 @@ func (q *Queries) CountAlertTypesByDomain(ctx context.Context) ([]CountAlertType
 	return items, nil
 }
 
+const countDeadLetterAlertDeliveries = `-- name: CountDeadLetterAlertDeliveries :one
+SELECT count(*) FROM app.alert_delivery WHERE state = 'dead_letter'
+`
+
+func (q *Queries) CountDeadLetterAlertDeliveries(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countDeadLetterAlertDeliveries)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAlertChannel = `-- name: CreateAlertChannel :one
 INSERT INTO app.alert_channel (kind, name, config)
 VALUES ($1, $2, $3)
@@ -145,13 +156,22 @@ func (q *Queries) CreateAlertRoutingRule(ctx context.Context, arg CreateAlertRou
 }
 
 const enqueueAlertDelivery = `-- name: EnqueueAlertDelivery :one
-INSERT INTO app.alert_delivery (event_id, channel_id)
-VALUES ($1, $2)
+INSERT INTO app.alert_delivery (event_id, channel_id, next_attempt_at)
+VALUES ($1, $2, $3)
 RETURNING delivery_id, event_id, channel_id, state, attempts, last_attempt_at, next_attempt_at, error, created_at
 `
 
-func (q *Queries) EnqueueAlertDelivery(ctx context.Context, eventID uuid.UUID, channelID uuid.UUID) (AppAlertDelivery, error) {
-	row := q.db.QueryRow(ctx, enqueueAlertDelivery, eventID, channelID)
+// PHASE 14: gained a third parameter. next_attempt_at is the moment the
+// delivery becomes claimable, and for a coalesced event that is the close
+// of its coalescing window — so the forty deliveries of a forty-event
+// burst all become eligible at the same instant and one claim picks up the
+// whole group. Setting it here rather than deferring each delivery on
+// first claim keeps attempts (and therefore the dead-letter budget)
+// untouched by coalescing: waiting for a window is not a failed attempt.
+// NULL means "claimable immediately", which is what an uncoalesced event
+// passes and what the column defaulted to before.
+func (q *Queries) EnqueueAlertDelivery(ctx context.Context, eventID uuid.UUID, channelID uuid.UUID, nextAttemptAt *time.Time) (AppAlertDelivery, error) {
+	row := q.db.QueryRow(ctx, enqueueAlertDelivery, eventID, channelID, nextAttemptAt)
 	var i AppAlertDelivery
 	err := row.Scan(
 		&i.DeliveryID,
@@ -163,6 +183,93 @@ func (q *Queries) EnqueueAlertDelivery(ctx context.Context, eventID uuid.UUID, c
 		&i.NextAttemptAt,
 		&i.Error,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const ensureAlertType = `-- name: EnsureAlertType :exec
+
+INSERT INTO app.alert_type (alert_type, domain, category, default_enabled)
+VALUES ($1, $2, $3, false)
+ON CONFLICT (alert_type) DO NOTHING
+`
+
+// ── PHASE 14 ADDITIONS ──────────────────────────────────────────────────
+// Everything above already existed (Phase 1a) and is reused as-is: the
+// outbox is app.alert_delivery + ClaimPendingAlertDeliveries, the dedupe
+// primitive is RecordAlertEvent's `ON CONFLICT (dedupe_hash) DO NOTHING`,
+// and the unknown-types board is RecordUnknownNotificationType. The
+// queries below are the ones that had no Phase 1a consumer to justify
+// them: reading back a claimed delivery's event/channel, the coalescing
+// window's member events, the admin-visible dead-letter queue, and the
+// open-vocabulary insert that lets a CCP type nobody has ever seen satisfy
+// app.alert_event's foreign key instead of halting the queue.
+// Principle 14 applied to app.alert_type: a CCP notification type this
+// build's catalogue does not know is REGISTERED, never rejected. Without a
+// row here, app.alert_event.alert_type's foreign key would reject the
+// event and the unrecognised notification would halt the queue — the exact
+// failure §4.4 forbids. DO NOTHING (not DO UPDATE) so a runtime discovery
+// can never overwrite a seeded row's domain/category/default_enabled.
+func (q *Queries) EnsureAlertType(ctx context.Context, alertType string, domain string, category string) error {
+	_, err := q.db.Exec(ctx, ensureAlertType, alertType, domain, category)
+	return err
+}
+
+const getAlertChannel = `-- name: GetAlertChannel :one
+SELECT channel_id, kind, name, config, enabled, created_at FROM app.alert_channel WHERE channel_id = $1
+`
+
+func (q *Queries) GetAlertChannel(ctx context.Context, channelID uuid.UUID) (AppAlertChannel, error) {
+	row := q.db.QueryRow(ctx, getAlertChannel, channelID)
+	var i AppAlertChannel
+	err := row.Scan(
+		&i.ChannelID,
+		&i.Kind,
+		&i.Name,
+		&i.Config,
+		&i.Enabled,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getAlertChannelByName = `-- name: GetAlertChannelByName :one
+SELECT channel_id, kind, name, config, enabled, created_at FROM app.alert_channel WHERE name = $1
+`
+
+// Used at worker boot to find the env-configured "default-*" channels
+// without creating a second one on every restart. app.alert_channel.name
+// has no UNIQUE constraint (an installation may legitimately want two
+// channels with the same label), so this is a lookup-then-insert rather
+// than an upsert; the boot path is single-writer and idempotent.
+func (q *Queries) GetAlertChannelByName(ctx context.Context, name string) (AppAlertChannel, error) {
+	row := q.db.QueryRow(ctx, getAlertChannelByName, name)
+	var i AppAlertChannel
+	err := row.Scan(
+		&i.ChannelID,
+		&i.Kind,
+		&i.Name,
+		&i.Config,
+		&i.Enabled,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getAlertEvent = `-- name: GetAlertEvent :one
+SELECT event_id, alert_type, dedupe_hash, coalesce_key, payload, occurred_at FROM app.alert_event WHERE event_id = $1
+`
+
+func (q *Queries) GetAlertEvent(ctx context.Context, eventID uuid.UUID) (AppAlertEvent, error) {
+	row := q.db.QueryRow(ctx, getAlertEvent, eventID)
+	var i AppAlertEvent
+	err := row.Scan(
+		&i.EventID,
+		&i.AlertType,
+		&i.DedupeHash,
+		&i.CoalesceKey,
+		&i.Payload,
+		&i.OccurredAt,
 	)
 	return i, err
 }
@@ -204,6 +311,45 @@ func (q *Queries) ListAlertChannels(ctx context.Context) ([]AppAlertChannel, err
 			&i.Config,
 			&i.Enabled,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAlertEventsForCoalesceKeySince = `-- name: ListAlertEventsForCoalesceKeySince :many
+SELECT event_id, alert_type, dedupe_hash, coalesce_key, payload, occurred_at FROM app.alert_event
+ WHERE coalesce_key = $1
+   AND occurred_at >= $2
+ ORDER BY occurred_at
+`
+
+// The coalescing window's members: every event sharing one
+// (routing target, alert type) key since the window opened. Ordered
+// oldest-first so a roll-up reads chronologically and its "and N more"
+// remainder always truncates the TAIL, never the first thing that
+// happened.
+func (q *Queries) ListAlertEventsForCoalesceKeySince(ctx context.Context, coalesceKey *string, since time.Time) ([]AppAlertEvent, error) {
+	rows, err := q.db.Query(ctx, listAlertEventsForCoalesceKeySince, coalesceKey, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppAlertEvent
+	for rows.Next() {
+		var i AppAlertEvent
+		if err := rows.Scan(
+			&i.EventID,
+			&i.AlertType,
+			&i.DedupeHash,
+			&i.CoalesceKey,
+			&i.Payload,
+			&i.OccurredAt,
 		); err != nil {
 			return nil, err
 		}
@@ -271,6 +417,71 @@ func (q *Queries) ListAlertTypes(ctx context.Context) ([]AppAlertType, error) {
 			&i.Category,
 			&i.SourceRouteID,
 			&i.DefaultEnabled,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDeadLetterAlertDeliveries = `-- name: ListDeadLetterAlertDeliveries :many
+SELECT d.delivery_id, d.event_id, d.channel_id, d.attempts, d.last_attempt_at,
+       d.error, d.created_at,
+       e.alert_type, e.payload, e.occurred_at,
+       c.kind AS channel_kind, c.name AS channel_name
+  FROM app.alert_delivery d
+  JOIN app.alert_event   e ON e.event_id   = d.event_id
+  JOIN app.alert_channel c ON c.channel_id = d.channel_id
+ WHERE d.state = 'dead_letter'
+ ORDER BY d.last_attempt_at DESC NULLS LAST
+ LIMIT $1
+`
+
+type ListDeadLetterAlertDeliveriesRow struct {
+	DeliveryID    uuid.UUID
+	EventID       uuid.UUID
+	ChannelID     uuid.UUID
+	Attempts      int32
+	LastAttemptAt *time.Time
+	Error         *string
+	CreatedAt     time.Time
+	AlertType     string
+	Payload       json.RawMessage
+	OccurredAt    time.Time
+	ChannelKind   string
+	ChannelName   string
+}
+
+// The admin-visible dead-letter queue (§4.4: "an alert is lost only if it
+// was neither delivered nor dead-lettered; dead-lettering is a visible
+// outcome, not a loss"). Joined to the event and channel so the board can
+// name what failed and where without an N+1 read per row.
+func (q *Queries) ListDeadLetterAlertDeliveries(ctx context.Context, pageSize int32) ([]ListDeadLetterAlertDeliveriesRow, error) {
+	rows, err := q.db.Query(ctx, listDeadLetterAlertDeliveries, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDeadLetterAlertDeliveriesRow
+	for rows.Next() {
+		var i ListDeadLetterAlertDeliveriesRow
+		if err := rows.Scan(
+			&i.DeliveryID,
+			&i.EventID,
+			&i.ChannelID,
+			&i.Attempts,
+			&i.LastAttemptAt,
+			&i.Error,
+			&i.CreatedAt,
+			&i.AlertType,
+			&i.Payload,
+			&i.OccurredAt,
+			&i.ChannelKind,
+			&i.ChannelName,
 		); err != nil {
 			return nil, err
 		}
@@ -426,5 +637,21 @@ ON CONFLICT (type) DO UPDATE
 
 func (q *Queries) RecordUnknownNotificationType(ctx context.Context, type_ string, samplePayload []byte) error {
 	_, err := q.db.Exec(ctx, recordUnknownNotificationType, type_, samplePayload)
+	return err
+}
+
+const requeueDeadLetterAlertDelivery = `-- name: RequeueDeadLetterAlertDelivery :exec
+UPDATE app.alert_delivery
+   SET state = 'pending', attempts = 0, next_attempt_at = NULL
+ WHERE delivery_id = $1 AND state = 'dead_letter'
+`
+
+// The administrator's escape hatch once the cause is fixed (SMTP host back
+// up, webhook URL corrected). attempts is reset so the requeued delivery
+// gets a full retry budget rather than dead-lettering again on its first
+// attempt; the previous error text is kept until the next attempt
+// overwrites it, so the board's history is not erased by the retry.
+func (q *Queries) RequeueDeadLetterAlertDelivery(ctx context.Context, deliveryID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, requeueDeadLetterAlertDelivery, deliveryID)
 	return err
 }

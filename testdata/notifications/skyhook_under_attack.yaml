@@ -1,0 +1,11 @@
+# SkyhookUnderAttack — one of §4.4's five named Skyhook types.
+# Field names below follow the Equinox skyhook notification family as CCP
+# ships it; the exact key set is NOT verified against a recorded live
+# payload (none was available offline), so this fixture exercises the
+# render/dedupe path, not a payload-shape contract.
+aggressorAllianceName: Test Alliance Please Ignore
+aggressorCorpName: Test Corp
+aggressorID: 98000001
+planetID: 40000045
+solarsystemID: 30000142
+typeID: 81080

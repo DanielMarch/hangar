@@ -324,11 +324,15 @@ func (w *CharacterWorker) doSync(ctx context.Context, s *store.Store, sub gen.Ap
 
 	resp, doErr := w.Gateway.Do(ctx, esi.Request{
 		Method: route.Method, UpstreamPath: route.UpstreamPath,
-		PathParams:      map[string]string{"character_id": strconv.FormatInt(characterID, 10)},
-		AccessToken:     accessToken,
-		CacheMode:       derefStr(route.CacheMode),
-		RateLimitGroup:  derefStr(route.RateLimitGroup),
-		RateLimitMax:    int(derefInt32(route.RateLimitMax)),
+		PathParams:     map[string]string{"character_id": strconv.FormatInt(characterID, 10)},
+		AccessToken:    accessToken,
+		CacheMode:      derefStr(route.CacheMode),
+		RateLimitGroup: derefStr(route.RateLimitGroup),
+		// Phase 14: a background sync is exactly the caller the
+		// char-notification reserve holds budget back from — see
+		// reserve.go. Every other group is unaffected (the helper returns
+		// the route's real ceiling).
+		RateLimitMax:    BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
 		RateLimitWindow: sync.IntervalToDuration(route.RateLimitWindow),
 		UserKey:         fmt.Sprintf("hangar:%d", characterID),
 		Validators:      validators,
@@ -418,7 +422,7 @@ func (w *CharacterWorker) doMailBodyFanout(ctx context.Context, s *store.Store, 
 			AccessToken:     accessToken,
 			CacheMode:       derefStr(route.CacheMode),
 			RateLimitGroup:  derefStr(route.RateLimitGroup),
-			RateLimitMax:    int(derefInt32(route.RateLimitMax)),
+			RateLimitMax:    BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
 			RateLimitWindow: sync.IntervalToDuration(route.RateLimitWindow),
 			UserKey:         fmt.Sprintf("hangar:%d", characterID),
 		})

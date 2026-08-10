@@ -161,10 +161,23 @@ func runWork(ctx context.Context) error {
 	}
 	defer func() { _ = riverClient.Stop(context.Background()) }()
 
+	// Phase 14: the alert outbox pump. It runs as a plain ticker alongside
+	// the River pool rather than as a River job, because a delivery pass is
+	// a short, idempotent sweep of a table — giving it a job row per tick
+	// would put more rows through River than it delivers alerts. Channels
+	// come from app.alert_channel; an installation with none configured
+	// runs this loop finding nothing, which is the default and is not an
+	// error (Principle 7's optional-dependency shape).
+	if err := ensureDefaultAlertChannels(ctx, cfg, pool, logger); err != nil {
+		return err
+	}
+	dispatcher := buildAlertDispatcher(cfg, pool, logger)
+
 	hb := telemetry.NewReplicaHeartbeat(pool, telemetry.RoleWork, version, logger)
 
 	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go runAlertDispatcher(sigCtx, dispatcher, cfg.Alerting.DispatchInterval, logger)
 	hb.Run(sigCtx)
 	return nil
 }

@@ -30,6 +30,69 @@ type Config struct {
 	Discord   DiscordConfig
 	TeamSpeak TeamSpeakConfig
 	Mumble    MumbleConfig
+	Alerting  AlertingConfig
+}
+
+// AlertingConfig governs Phase 14's delivery pipeline (SRS §4.4). Most of
+// its keys already existed in .env.example's "ALERT DELIVERY CHANNELS"
+// block since Phase 0 and had no consumer until now; this struct is where
+// they finally land.
+//
+// ── CHANNELS LIVE IN THE DATABASE, NOT HERE ─────────────────────────────
+// app.alert_channel is the real channel registry — an installation can
+// have any number of Slack and Discord webhooks and SMTP destinations,
+// each targeted by its own routing rules. The three env-configured
+// endpoints below are a convenience: when set, cmd/hangar provisions ONE
+// corresponding "default-*" channel row at worker boot so a fresh
+// installation can deliver without an operator writing SQL first. Leaving
+// them empty is the default and is not an error — it means "no channels
+// configured yet", exactly like RedisConfig's zero value (Principle 7).
+type AlertingConfig struct {
+	// CoalesceWindow is §4.4's coalescing window
+	// (HANGAR_ALERT_COALESCE_WINDOW, 300s).
+	CoalesceWindow time.Duration
+	// MaxAttempts is how many send attempts a delivery gets before it
+	// dead-letters (HANGAR_ALERT_MAX_ATTEMPTS, 8).
+	MaxAttempts int
+	// DeadLetterAfter is the age bound that dead-letters a delivery
+	// regardless of how few attempts it has made
+	// (HANGAR_ALERT_DEAD_LETTER_AFTER, 24h). Orthogonal to MaxAttempts:
+	// with a long backoff a delivery could otherwise sit pending for days,
+	// and an alert nobody has seen in a day is not going to become useful.
+	DeadLetterAfter time.Duration
+	// DispatchInterval is how often the outbox pump runs, and ClaimSize
+	// bounds one pass. PHASE 14 ADDITIONS to .env.example: ClaimSize in
+	// particular must exceed the largest expected coalescing group, since
+	// a group is rolled up from one pass's claim.
+	DispatchInterval time.Duration
+	ClaimSize        int32
+	// RetryBase is the first retry delay; each subsequent retry doubles it
+	// up to RetryCap. PHASE 14 ADDITIONS.
+	RetryBase time.Duration
+	RetryCap  time.Duration
+
+	// SMTP: HANGAR_SMTP_*.
+	SMTPEnabled  bool
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUsername string
+	SMTPPassword Secret
+	SMTPFrom     string
+	// SMTPTo is the default channel's recipient list. PHASE 14 ADDITION,
+	// and a gap worth naming: .env.example declared a FROM address and no
+	// recipients, because §4.4's per-user email routing has nothing to
+	// resolve a user to an address with — app.user has no email column,
+	// and EVE SSO never provides one. An installation-wide recipient list
+	// is what can honestly be delivered; per-user email routing needs a
+	// schema change and an address-verification flow that no phase owns.
+	SMTPTo []string
+	// SMTPTLS is "starttls" (default), "tls" (implicit/SMTPS), or "none".
+	SMTPTLS string
+
+	// SlackWebhook/DiscordWebhook are the default webhook URLs. Both are
+	// credentials — anyone holding one can post to the channel.
+	SlackWebhook   Secret
+	DiscordWebhook Secret
 }
 
 // ESIConfig governs Phase 3/4's outbound gateway: the conditional-cache
@@ -269,6 +332,20 @@ func applyDefaults(v *viper.Viper) {
 	v.SetDefault("mumble_server_id", 1)
 	v.SetDefault("mumble_external_authenticator", false)
 	v.SetDefault("mumble_auth_fail_closed", false)
+
+	// Phase 14 — alerting. The first three mirror .env.example verbatim;
+	// the rest are this phase's additions (see AlertingConfig).
+	v.SetDefault("alert_coalesce_window", "300s")
+	v.SetDefault("alert_max_attempts", 8)
+	v.SetDefault("alert_dead_letter_after", "24h")
+	v.SetDefault("alert_dispatch_interval", "15s")
+	v.SetDefault("alert_claim_size", 500)
+	v.SetDefault("alert_retry_base", "60s")
+	v.SetDefault("alert_retry_cap", "1h")
+	v.SetDefault("smtp_enabled", false)
+	v.SetDefault("smtp_port", 587)
+	v.SetDefault("smtp_from", "hangar@example.com")
+	v.SetDefault("smtp_tls", "starttls")
 }
 
 func splitCSV(s string) []string {
@@ -395,6 +472,25 @@ func Load(v *viper.Viper) (*Config, error) {
 			ExternalAuthenticator: v.GetBool("mumble_external_authenticator"),
 			FailClosed:            v.GetBool("mumble_auth_fail_closed"),
 			AuthSharedSecret:      NewSecret(v.GetString("mumble_auth_shared_secret")),
+		},
+		Alerting: AlertingConfig{
+			CoalesceWindow:   v.GetDuration("alert_coalesce_window"),
+			MaxAttempts:      v.GetInt("alert_max_attempts"),
+			DeadLetterAfter:  v.GetDuration("alert_dead_letter_after"),
+			DispatchInterval: v.GetDuration("alert_dispatch_interval"),
+			ClaimSize:        int32(v.GetInt("alert_claim_size")),
+			RetryBase:        v.GetDuration("alert_retry_base"),
+			RetryCap:         v.GetDuration("alert_retry_cap"),
+			SMTPEnabled:      v.GetBool("smtp_enabled"),
+			SMTPHost:         v.GetString("smtp_host"),
+			SMTPPort:         v.GetInt("smtp_port"),
+			SMTPUsername:     v.GetString("smtp_username"),
+			SMTPPassword:     NewSecret(v.GetString("smtp_password")),
+			SMTPFrom:         v.GetString("smtp_from"),
+			SMTPTo:           splitCSV(v.GetString("smtp_to")),
+			SMTPTLS:          v.GetString("smtp_tls"),
+			SlackWebhook:     NewSecret(v.GetString("slack_default_webhook")),
+			DiscordWebhook:   NewSecret(v.GetString("discord_default_webhook")),
 		},
 	}
 

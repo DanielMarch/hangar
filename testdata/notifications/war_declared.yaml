@@ -1,0 +1,10 @@
+# WarDeclared — one of the six notification-derived war alerts (§4.4 B10:
+# wars have no endpoint and no table; the alert is produced from this
+# notification alone).
+against_id: 98000001
+cost: 100000000.0
+declared_by_id: 99000001
+delayHours: 24
+hostileState: 0
+timeStarted: 133900000000000000
+warHQ: Jita IV - Moon 4

@@ -125,7 +125,7 @@ func (w *GlobalWorker) doSync(ctx context.Context, s *store.Store, sub gen.AppSy
 		Method: route.Method, UpstreamPath: route.UpstreamPath,
 		CacheMode:       derefStr(route.CacheMode),
 		RateLimitGroup:  derefStr(route.RateLimitGroup),
-		RateLimitMax:    int(derefInt32(route.RateLimitMax)),
+		RateLimitMax:    BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
 		RateLimitWindow: sync.IntervalToDuration(route.RateLimitWindow),
 		UserKey:         "hangar:global",
 		Validators:      validators,

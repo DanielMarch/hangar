@@ -118,6 +118,7 @@ type Querier interface {
 	// session), but there is no verifier/state left to consume.
 	CompleteSessionLogin(ctx context.Context, sessionID uuid.UUID, userID uuid.NullUUID) error
 	CountAlertTypesByDomain(ctx context.Context) ([]CountAlertTypesByDomainRow, error)
+	CountDeadLetterAlertDeliveries(ctx context.Context) (int64, error)
 	// Cheap operational visibility into L2 size — useful for the admin
 	// observability surface (Phase 18) without needing a full table scan tool.
 	CountEsiCacheEntries(ctx context.Context) (int64, error)
@@ -229,8 +230,34 @@ type Querier interface {
 	DeleteStandingsNotIn(ctx context.Context, ownerKind string, ownerID int64, keepFromIds []int64) error
 	DeregisterReplica(ctx context.Context, replicaID uuid.UUID) error
 	ElectActingCharacter(ctx context.Context, subscriptionID uuid.UUID, actingCharacterID *int64) error
-	EnqueueAlertDelivery(ctx context.Context, eventID uuid.UUID, channelID uuid.UUID) (AppAlertDelivery, error)
+	// PHASE 14: gained a third parameter. next_attempt_at is the moment the
+	// delivery becomes claimable, and for a coalesced event that is the close
+	// of its coalescing window — so the forty deliveries of a forty-event
+	// burst all become eligible at the same instant and one claim picks up the
+	// whole group. Setting it here rather than deferring each delivery on
+	// first claim keeps attempts (and therefore the dead-letter budget)
+	// untouched by coalescing: waiting for a window is not a failed attempt.
+	// NULL means "claimable immediately", which is what an uncoalesced event
+	// passes and what the column defaulted to before.
+	EnqueueAlertDelivery(ctx context.Context, eventID uuid.UUID, channelID uuid.UUID, nextAttemptAt *time.Time) (AppAlertDelivery, error)
 	EnqueueWebhookDelivery(ctx context.Context, endpointID uuid.UUID, eventID uuid.UUID) (AppWebhookDelivery, error)
+	// ── PHASE 14 ADDITIONS ──────────────────────────────────────────────────
+	// Everything above already existed (Phase 1a) and is reused as-is: the
+	// outbox is app.alert_delivery + ClaimPendingAlertDeliveries, the dedupe
+	// primitive is RecordAlertEvent's `ON CONFLICT (dedupe_hash) DO NOTHING`,
+	// and the unknown-types board is RecordUnknownNotificationType. The
+	// queries below are the ones that had no Phase 1a consumer to justify
+	// them: reading back a claimed delivery's event/channel, the coalescing
+	// window's member events, the admin-visible dead-letter queue, and the
+	// open-vocabulary insert that lets a CCP type nobody has ever seen satisfy
+	// app.alert_event's foreign key instead of halting the queue.
+	// Principle 14 applied to app.alert_type: a CCP notification type this
+	// build's catalogue does not know is REGISTERED, never rejected. Without a
+	// row here, app.alert_event.alert_type's foreign key would reject the
+	// event and the unrecognised notification would halt the queue — the exact
+	// failure §4.4 forbids. DO NOTHING (not DO UPDATE) so a runtime discovery
+	// can never overwrite a seeded row's domain/category/default_enabled.
+	EnsureAlertType(ctx context.Context, alertType string, domain string, category string) error
 	// Settled/synthetic entries only: a 'reserved' row's consumed_at is its
 	// issue time, not a window-eviction signal — ExpireLedgerReservations
 	// above is what retires a reservation, on the request-timeout schedule,
@@ -253,6 +280,14 @@ type Querier interface {
 	// clustered -> solo: read the shared table into memory before the fast path
 	// engages.
 	FlushLedgerEntriesForBucket(ctx context.Context, rateLimitGroup string, userKey string) ([]AppEsiLedgerEntry, error)
+	GetAlertChannel(ctx context.Context, channelID uuid.UUID) (AppAlertChannel, error)
+	// Used at worker boot to find the env-configured "default-*" channels
+	// without creating a second one on every restart. app.alert_channel.name
+	// has no UNIQUE constraint (an installation may legitimately want two
+	// channels with the same label), so this is a lookup-then-insert rather
+	// than an upsert; the boot path is single-writer and idempotent.
+	GetAlertChannelByName(ctx context.Context, name string) (AppAlertChannel, error)
+	GetAlertEvent(ctx context.Context, eventID uuid.UUID) (AppAlertEvent, error)
 	GetAlertType(ctx context.Context, alertType string) (AppAlertType, error)
 	GetAlliance(ctx context.Context, allianceID int64) (AppAlliance, error)
 	GetApiTokenByHash(ctx context.Context, hashedSecret []byte) (AppApiToken, error)
@@ -399,6 +434,12 @@ type Querier interface {
 	LeaseSyncSubscriptions(ctx context.Context, leasedUntil time.Time, subscriptionIds []uuid.UUID) error
 	ListActingCharacterHistory(ctx context.Context, entityKind string, entityID int64, routeID uuid.UUID) ([]AppSyncActingCharacterHistory, error)
 	ListAlertChannels(ctx context.Context) ([]AppAlertChannel, error)
+	// The coalescing window's members: every event sharing one
+	// (routing target, alert type) key since the window opened. Ordered
+	// oldest-first so a roll-up reads chronologically and its "and N more"
+	// remainder always truncates the TAIL, never the first thing that
+	// happened.
+	ListAlertEventsForCoalesceKeySince(ctx context.Context, coalesceKey *string, since time.Time) ([]AppAlertEvent, error)
 	ListAlertRoutingRulesForType(ctx context.Context, alertType string) ([]AppAlertRoutingRule, error)
 	// app.alert_type, app.alert_channel, app.alert_routing_rule, app.alert_event,
 	// app.alert_delivery, app.notification_unknown_type
@@ -457,6 +498,11 @@ type Querier interface {
 	ListCorporationStarbases(ctx context.Context, corporationID int64) ([]AppCorporationStarbase, error)
 	ListCorporationStructures(ctx context.Context, corporationID int64) ([]AppCorporationStructure, error)
 	ListCorporationTitles(ctx context.Context, corporationID int64) ([]AppCorporationTitle, error)
+	// The admin-visible dead-letter queue (§4.4: "an alert is lost only if it
+	// was neither delivered nor dead-lettered; dead-lettering is a visible
+	// outcome, not a loss"). Joined to the event and channel so the board can
+	// name what failed and where without an N+1 read per row.
+	ListDeadLetterAlertDeliveries(ctx context.Context, pageSize int32) ([]ListDeadLetterAlertDeliveriesRow, error)
 	ListEffectivePermissions(ctx context.Context, userID uuid.UUID) ([]string, error)
 	ListEntitlementRulesForGroup(ctx context.Context, groupID uuid.UUID) ([]AppEntitlementRule, error)
 	// Every enabled rule that targets one of platform_id's groups — what
@@ -655,6 +701,12 @@ type Querier interface {
 	ReplaceCharacterTokenScopes(ctx context.Context, characterID int64) error
 	ReplaceCorporationMemberTitle(ctx context.Context, corporationID int64, titleID int64, characterID int64) (AppCorporationMemberTitle, error)
 	ReplaceCorporationRole(ctx context.Context, arg ReplaceCorporationRoleParams) (AppCorporationRole, error)
+	// The administrator's escape hatch once the cause is fixed (SMTP host back
+	// up, webhook URL corrected). attempts is reset so the requeued delivery
+	// gets a full retry budget rather than dead-lettering again on its first
+	// attempt; the previous error text is kept until the next attempt
+	// overwrites it, so the board's history is not erased by the retry.
+	RequeueDeadLetterAlertDelivery(ctx context.Context, deliveryID uuid.UUID) error
 	ReserveLedgerEntry(ctx context.Context, rateLimitGroup string, userKey string, requestTimeout time.Duration) (AppEsiLedgerEntry, error)
 	// Called on a success by the character that just acted, so a candidate
 	// that failed twice and then succeeded once is no longer penalised.

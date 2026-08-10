@@ -1,0 +1,12 @@
+# A payload for a notification type that is NOT in HANGAR's catalogue —
+# the input to TestUnrecognisedTypeUsesGenericRenderer. Deliberately a
+# shape no template knows, with a nested map and a list, so the generic
+# key/value renderer is demonstrably the thing producing the output.
+mysteriousField: 42
+nested:
+  innerA: alpha
+  innerB: 7
+someList:
+  - one
+  - two
+whoKnows: a value CCP invented after this build shipped

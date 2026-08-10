@@ -101,6 +101,31 @@ func Validate(cfg *Config) error {
 		}
 	}
 
+	// Alerting (Phase 14). Strictly optional in the same sense: no
+	// channels configured is a valid, working installation that simply
+	// delivers nothing yet. Only SMTP has required companions, because a
+	// half-configured mail channel fails at delivery time — on the queue,
+	// hours later — rather than at boot, which is the failure mode
+	// fail-fast validation exists to prevent.
+	if cfg.Alerting.SMTPEnabled {
+		requireString("HANGAR_SMTP_HOST", cfg.Alerting.SMTPHost)
+		requireString("HANGAR_SMTP_FROM", cfg.Alerting.SMTPFrom)
+		if len(cfg.Alerting.SMTPTo) == 0 {
+			errs = append(errs, fmt.Errorf("HANGAR_SMTP_TO is required when HANGAR_SMTP_ENABLED=true (a mail channel with no recipients can never deliver)"))
+		}
+	}
+	switch cfg.Alerting.SMTPTLS {
+	case "starttls", "tls", "none":
+	default:
+		errs = append(errs, fmt.Errorf("HANGAR_SMTP_TLS must be one of starttls|tls|none, got %q", cfg.Alerting.SMTPTLS))
+	}
+	if cfg.Alerting.MaxAttempts < 1 {
+		errs = append(errs, fmt.Errorf("HANGAR_ALERT_MAX_ATTEMPTS must be at least 1, got %d", cfg.Alerting.MaxAttempts))
+	}
+	if cfg.Alerting.ClaimSize < 1 {
+		errs = append(errs, fmt.Errorf("HANGAR_ALERT_CLAIM_SIZE must be at least 1, got %d", cfg.Alerting.ClaimSize))
+	}
+
 	if len(errs) > 0 {
 		return fmt.Errorf("config: invalid configuration: %w", errors.Join(errs...))
 	}

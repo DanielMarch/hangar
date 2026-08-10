@@ -386,7 +386,7 @@ func (w *CorporationWorker) doWalletDivisionSync(ctx context.Context, s *store.S
 			AccessToken:     accessToken,
 			CacheMode:       derefStr(route.CacheMode),
 			RateLimitGroup:  derefStr(route.RateLimitGroup),
-			RateLimitMax:    int(derefInt32(route.RateLimitMax)),
+			RateLimitMax:    BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
 			RateLimitWindow: sync.IntervalToDuration(route.RateLimitWindow),
 			UserKey:         fmt.Sprintf("hangar:%d", characterID),
 		}
@@ -491,7 +491,7 @@ func (w *CorporationWorker) doSync(ctx context.Context, s *store.Store, sub gen.
 		AccessToken:     accessToken,
 		CacheMode:       derefStr(route.CacheMode),
 		RateLimitGroup:  derefStr(route.RateLimitGroup),
-		RateLimitMax:    int(derefInt32(route.RateLimitMax)),
+		RateLimitMax:    BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
 		RateLimitWindow: sync.IntervalToDuration(route.RateLimitWindow),
 		UserKey:         fmt.Sprintf("hangar:%d", characterID),
 		Validators:      validators,
@@ -716,7 +716,7 @@ func (w *CorporationWorker) fanoutDetail(
 			PathParams: pathParams, Query: query, AccessToken: accessToken,
 			CacheMode:       derefStr(route.CacheMode),
 			RateLimitGroup:  derefStr(route.RateLimitGroup),
-			RateLimitMax:    int(derefInt32(route.RateLimitMax)),
+			RateLimitMax:    BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
 			RateLimitWindow: sync.IntervalToDuration(route.RateLimitWindow),
 			UserKey:         fmt.Sprintf("hangar:%d", characterID),
 		})
@@ -965,7 +965,7 @@ func (w *CorporationWorker) doProjectContributionsFanout(ctx context.Context, s 
 			AccessToken:     accessToken,
 			CacheMode:       derefStr(route.CacheMode),
 			RateLimitGroup:  derefStr(route.RateLimitGroup),
-			RateLimitMax:    int(derefInt32(route.RateLimitMax)),
+			RateLimitMax:    BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
 			RateLimitWindow: sync.IntervalToDuration(route.RateLimitWindow),
 			UserKey:         fmt.Sprintf("hangar:%d", characterID),
 		})
