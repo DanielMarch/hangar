@@ -29,10 +29,22 @@ STRICT     ?= 0
 SPEC_SNAPSHOT := internal/esi/catalogue/embedded/openapi.snapshot.json
 
 # skip <name> <reason> — honours STRICT.
-define skip
-	@if [ "$(STRICT)" = "1" ]; then echo "STRICT: $(1) cannot run — $(2)"; exit 1; \
-	else echo "skip: $(1) — $(2)"; fi
-endef
+#
+# PHASE 14.1 FIX. This was a `define ... endef` block whose body began with a
+# TAB and an `@` and spanned two lines. Every call site uses it INLINE inside
+# an if/else recipe (`... else $(call skip,x,y); fi`), so that expansion
+# injected a newline, a tab and an `@` into the middle of a shell compound
+# command — and the recipe died with "syntax error near unexpected token
+# `then'" before it could evaluate anything. It affected EVERY guarded gate:
+# check-money, check-identifiers, check-alert-sources, check-locales,
+# check-css, sqlc, openapi, types, verify-generated — i.e. `make ci` as a
+# whole, which is Phase 0's own exit criterion. Not a Windows quirk; the
+# expansion is equally broken under GNU Make on Linux.
+#
+# A recursively-expanded single-line variable is the fix: no embedded newline,
+# no tab, no `@` (the call sites already prefix their own). It behaves
+# identically in both positions — standalone or inside an else branch.
+skip = if [ "$(STRICT)" = "1" ]; then echo "STRICT: $(1) cannot run — $(2)"; exit 1; else echo "skip: $(1) — $(2)"; fi
 
 .PHONY: help
 help: ## List targets
@@ -123,9 +135,9 @@ check-money:         ## Principle 9 (Phase 1b) — reflection proof of zero floa
 	else $(call skip,check-money,internal/domain is empty); fi
 
 check-identifiers:   ## Principle 13 (Phase 2) — every identifier column matches the ingested spec
-	@if [ -f "$(SPEC_SNAPSHOT)" ]; then \
+	@if [ -f "$(SPEC_SNAPSHOT)" ] && [ -n "$${HANGAR_DB_URL:-}" ]; then \
 	  go run ./cmd/hangar admin verify-identifier-types --spec "$(SPEC_SNAPSHOT)"; \
-	else $(call skip,check-identifiers,$(SPEC_SNAPSHOT) not captured yet); fi
+	else $(call skip,check-identifiers,needs $(SPEC_SNAPSHOT) and a reachable HANGAR_DB_URL); fi
 
 check-alert-sources: ## §4.4 (Phase 14) — every threshold alert's source route is in the sync set
 	@if [ -n "$$(ls -A internal/alerting/catalogue 2>/dev/null)" ]; then \
@@ -138,7 +150,9 @@ check-locales:       ## §4.6 (Phase 3) — all 9 UI locales resolve to a valid 
 	else $(call skip,check-locales,internal/i18n/locales.json absent); fi
 
 check-css:           ## §8.1 (Phase 0) — exactly one .css file may exist under web/src
-	@n=$$(find web/src -name '*.css' 2>/dev/null | tee /dev/stderr | wc -l | tr -d ' '); \
+	@found=$$(find web/src -name '*.css' 2>/dev/null); \
+	 [ -n "$$found" ] && echo "$$found" >&2; \
+	 n=$$(printf '%s' "$$found" | grep -c . || true); \
 	 if [ "$$n" = "0" ]; then $(call skip,check-css,web/src has no stylesheet yet); \
 	 elif [ "$$n" != "1" ]; then echo "expected exactly 1 stylesheet (web/src/styles/index.css), found $$n"; exit 1; \
 	 else echo "check-css: ok"; fi
