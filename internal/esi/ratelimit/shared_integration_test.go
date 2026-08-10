@@ -4,6 +4,7 @@ package ratelimit_test
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -168,21 +169,37 @@ func BenchmarkLedgerClusteredThroughput(b *testing.B) {
 
 	// Pre-warm every worker's bucket row once, before any timed
 	// iteration of any invocation.
+	//
+	// A warm-up failure is reported back to the benchmark's OWN goroutine
+	// rather than raised where it happens. testing.B.Fatalf must only be
+	// called from the goroutine running the benchmark — it ends the
+	// caller with runtime.Goexit, which unwinds just that goroutine, so a
+	// Fatalf inside a worker would kill the worker (leaving warmWG.Done
+	// to the deferred call) while the benchmark itself sailed on and
+	// measured a half-warmed cluster. `go vet -tags=integration` flags
+	// exactly this ("call to (*testing.B).Fatalf from a non-test
+	// goroutine"); the buffered channel below is the standard fix.
 	var warmWG sync.WaitGroup
+	warmErrs := make(chan error, clusterBenchWorkers)
 	for w := 0; w < clusterBenchWorkers; w++ {
 		warmWG.Add(1)
 		go func(id int) {
 			defer warmWG.Done()
 			res, err := ledger.Acquire(ctx, clusterBenchReq(id))
 			if err != nil {
-				b.Fatalf("warm-up acquire: %v", err)
+				warmErrs <- fmt.Errorf("warm-up acquire: %w", err)
+				return
 			}
 			if err := ledger.Settle(ctx, res, ratelimit.Cost2XX, time.Now()); err != nil {
-				b.Fatalf("warm-up settle: %v", err)
+				warmErrs <- fmt.Errorf("warm-up settle: %w", err)
 			}
 		}(w)
 	}
 	warmWG.Wait()
+	close(warmErrs)
+	if err := <-warmErrs; err != nil {
+		b.Fatalf("%v", err)
+	}
 
 	// One replica handling many characters concurrently — not one
 	// sequential connection — is what "per replica" throughput means in
