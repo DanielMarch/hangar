@@ -676,6 +676,14 @@ type AppCorporationTitle struct {
 	UpdatedAt     time.Time
 }
 
+type AppDiscordInvalidBudget struct {
+	ID           int16
+	WindowStart  time.Time
+	InvalidCount int32
+	Paused       bool
+	UpdatedAt    time.Time
+}
+
 type AppEffectivePermission struct {
 	UserID      uuid.UUID
 	Permission  string

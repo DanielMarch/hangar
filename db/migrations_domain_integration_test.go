@@ -76,9 +76,10 @@ var defaultPartitionTables = []string{
 // criterion). Also proves the combined platform+domain table count matches
 // SRS v3.1 §5.2's ≈129 (51 + 78, plus the five materialised DEFAULT
 // partitions that are ordinary tables in information_schema) — PLUS Phase
-// 8's one legitimate platform-table addition, sync_acting_character_history
-// (see expectedPlatformTables' PHASE 8 ADDITION comment in
-// migrations_integration_test.go), for 135 total.
+// 8's one legitimate platform-table addition, sync_acting_character_history,
+// PLUS Phase 12's one legitimate platform-table addition,
+// discord_invalid_budget (see expectedPlatformTables' PHASE 8/PHASE 12
+// ADDITION comments in migrations_integration_test.go), for 136 total.
 func TestAllDomainTablesPresent(t *testing.T) {
 	_, sqlDB := newMigratedContainer(t)
 

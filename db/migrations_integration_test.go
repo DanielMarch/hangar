@@ -52,6 +52,17 @@ var expectedPlatformTables = []string{
 	// total; TestAllDomainTablesPresent's wantTotal below is 135, not 134,
 	// for exactly this reason.
 	"sync_acting_character_history",
+	// PHASE 12 ADDITION (1): discord_invalid_budget
+	// (00038_phase12_discord_invalid_budget.sql) — the installation-wide
+	// Discord invalid-request (401/403/429) counter, alongside
+	// esi_error_budget above; §4.4's original access-provisioning table
+	// map (the 5 tables platform/platform_group/entitlement_rule/
+	// provisioning_state/provisioning_audit) predates Phase 12's driver
+	// entirely, so there was never a slot reserved for this. Same
+	// shape/reasoning as Phase 8's addition above — a real migration, not a
+	// worked-around gap. TestAllDomainTablesPresent's wantTotal is 136, not
+	// 135, for exactly this reason.
+	"discord_invalid_budget",
 }
 
 func newMigratedContainer(t *testing.T) (*pgxpool.Pool, *sql.DB) {

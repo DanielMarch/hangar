@@ -271,6 +271,13 @@ type Querier interface {
 	// Backs GET /corporations/{id}/projects/{project_id}/contribution/{character_id} —
 	// the uuid PK joining a bigint FK in one row without coercion (Gate 6).
 	GetCorporationProjectContribution(ctx context.Context, projectID uuid.UUID, characterID int64) (AppCorporationProjectContribution, error)
+	// app.discord_invalid_budget — Phase 12's installation-wide Discord
+	// invalid-request (401/403/429) counter, one row, mirroring
+	// db/queries/esi_error_budget.sql's shape exactly (01_ARCHITECTURE.md
+	// §9.3 shares §5.7's mechanism — see db/migrations/00038's comment for
+	// why "shares the mechanism" won out over the surrounding "rolling"
+	// prose). Read through a one-second in-process cache by the caller.
+	GetDiscordInvalidBudget(ctx context.Context) (AppDiscordInvalidBudget, error)
 	// The middleware's hot path (02_DATABASE_SCHEMA.md §4.2: "the hot path
 	// is a single indexed lookup"): one row from the materialised table,
 	// never a live role_grant join. A missing row (this user was never
@@ -352,6 +359,7 @@ type Querier interface {
 	// millisecond query at scale.
 	HasInvalidCharacterToken(ctx context.Context, userID uuid.NullUUID) (bool, error)
 	IncrementErrorBudget(ctx context.Context) (AppEsiErrorBudget, error)
+	InitDiscordInvalidBudget(ctx context.Context) error
 	InitErrorBudget(ctx context.Context) error
 	// app.character_corporation_history, app.corporation_alliance_history,
 	// app.character_intel_edge (02_DATABASE_SCHEMA.md §5.2 "History", "Intel").
@@ -588,6 +596,10 @@ type Querier interface {
 	// MVCC serialises the two outcomes.
 	RecordErrorAgainstBudget(ctx context.Context, errorWindow time.Duration) (AppEsiErrorBudget, error)
 	RecordEsiPinAdvance(ctx context.Context, arg RecordEsiPinAdvanceParams) (AppEsiPinHistory, error)
+	// Same atomic single-UPDATE window-rollover pattern as
+	// RecordErrorAgainstBudget: one round trip, no read-then-branch-then-write
+	// race between replicas.
+	RecordInvalidAgainstDiscordBudget(ctx context.Context, invalidWindow time.Duration) (AppDiscordInvalidBudget, error)
 	// The one Principle-14 write path: every observed external value, of every
 	// vocabulary, lands here. Never rejected, whatever it is.
 	RecordOpenVocabularyValue(ctx context.Context, vocabulary string, value string) error
@@ -635,6 +647,7 @@ type Querier interface {
 	RevokeShareLink(ctx context.Context, linkID uuid.UUID) error
 	RevokeUserRole(ctx context.Context, userID uuid.UUID, roleID uuid.UUID) error
 	RevokeWebhookEndpoint(ctx context.Context, endpointID uuid.UUID) error
+	SetDiscordInvalidBudgetPaused(ctx context.Context, paused bool) error
 	SetEntitlementRuleEnabled(ctx context.Context, ruleID uuid.UUID, enabled bool) error
 	SetErrorBudgetPaused(ctx context.Context, paused bool) error
 	SetSyncNoCacheOptIn(ctx context.Context, subscriptionID uuid.UUID, optInNoCache bool) error

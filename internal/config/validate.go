@@ -72,8 +72,34 @@ func Validate(cfg *Config) error {
 		errs = append(errs, fmt.Errorf("HANGAR_SYNC_JITTER: invalid value %q (want full|none)", cfg.Sync.Jitter))
 	}
 
+	// Discord is strictly optional (RedisConfig's pattern) — these checks
+	// only run when an administrator has actually turned it on
+	// (HANGAR_DISCORD_ENABLED=true). Phase 12 / 01_ARCHITECTURE.md §9.3:
+	// "a version outside the allowlist fails at config validation, not at
+	// first request" — enforced HERE, at the same boot-time fail-fast
+	// point as every other required-when-enabled setting, not deferred to
+	// discord.NewClient (which re-checks the same thing defensively for
+	// callers that construct a driver directly, e.g. this package's own
+	// tests, without going through internal/config at all).
+	if cfg.Discord.Enabled {
+		requireSecret("HANGAR_DISCORD_BOT_TOKEN", cfg.Discord.BotToken)
+		requireString("HANGAR_DISCORD_GUILD_ID", cfg.Discord.GuildID)
+		if !containsInt(cfg.Discord.Allowlist, cfg.Discord.APIVersion) {
+			errs = append(errs, fmt.Errorf("HANGAR_DISCORD_API_VERSION: version %d not in allowlist %v", cfg.Discord.APIVersion, cfg.Discord.Allowlist))
+		}
+	}
+
 	if len(errs) > 0 {
 		return fmt.Errorf("config: invalid configuration: %w", errors.Join(errs...))
 	}
 	return nil
+}
+
+func containsInt(haystack []int, needle int) bool {
+	for _, v := range haystack {
+		if v == needle {
+			return true
+		}
+	}
+	return false
 }

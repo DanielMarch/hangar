@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,12 +21,13 @@ type Config struct {
 	PublicURL      string
 	TrustedProxies []string
 
-	DB     DatabaseConfig
-	Redis  RedisConfig
-	Crypto CryptoConfig
-	SSO    SSOConfig
-	ESI    ESIConfig
-	Sync   SyncConfig
+	DB      DatabaseConfig
+	Redis   RedisConfig
+	Crypto  CryptoConfig
+	SSO     SSOConfig
+	ESI     ESIConfig
+	Sync    SyncConfig
+	Discord DiscordConfig
 }
 
 // ESIConfig governs Phase 3/4's outbound gateway: the conditional-cache
@@ -83,6 +85,37 @@ type SyncConfig struct {
 	// completes. Wiring "none" through to PlanNextDueAt's Rand parameter
 	// (e.g. a generator that always returns 0) is that phase's job.
 	Jitter string
+}
+
+// DiscordConfig governs Phase 12's provisioning driver
+// (internal/provisioning/drivers/discord) — strictly optional, like
+// RedisConfig: a zero value (Enabled=false) is valid and means "no
+// Discord provisioning", never an error. Field names mirror
+// discord.Config 1:1; cmd/hangar's wiring converts one to the other
+// rather than internal/config importing internal/provisioning/drivers/
+// discord directly (this package stays dependency-free of any specific
+// driver, the same reason ESIConfig doesn't import internal/esi).
+type DiscordConfig struct {
+	Enabled      bool
+	BotToken     Secret
+	ClientID     string
+	ClientSecret Secret
+	GuildID      string
+	// APIVersion must appear in Allowlist — enforced at Validate time
+	// (§9.3: "a version outside the allowlist fails at config validation,
+	// not at first request"), not deferred to the driver's own
+	// construction.
+	APIVersion int
+	Allowlist  []int
+	// GlobalRate is Discord's flat requests/second ceiling (50 per the
+	// spec, configurable for testing against a mock).
+	GlobalRate int
+	// InvalidBudgetMax/WarnPercent/PausePercent are the Cloudflare
+	// invalid-request budget's fixed-window size and hysteresis
+	// thresholds (§9.3: 10,000 per 10 minutes, warn at 50%, pause at 80%).
+	InvalidBudgetMax    int
+	InvalidWarnPercent  int
+	InvalidPausePercent int
 }
 
 // DatabaseConfig is PostgreSQL 18 connection configuration (SRS §3.1).
@@ -188,6 +221,14 @@ func applyDefaults(v *viper.Viper) {
 	v.SetDefault("sync_claim_lease", "2m")
 	v.SetDefault("sync_backoff_cap", "24h")
 	v.SetDefault("sync_jitter", "full")
+
+	v.SetDefault("discord_enabled", false)
+	v.SetDefault("discord_api_version", 10)
+	v.SetDefault("discord_api_version_allowlist", "10")
+	v.SetDefault("discord_global_rate", 50)
+	v.SetDefault("discord_invalid_budget", 10000)
+	v.SetDefault("discord_invalid_warn_pct", 50)
+	v.SetDefault("discord_invalid_pause_pct", 80)
 }
 
 func splitCSV(s string) []string {
@@ -199,6 +240,23 @@ func splitCSV(s string) []string {
 	for _, p := range parts {
 		if p = strings.TrimSpace(p); p != "" {
 			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// splitCSVInts is splitCSV plus an int parse per element — HANGAR_DISCORD_
+// API_VERSION_ALLOWLIST's shape ("10" today, "10,11" once Discord ships a
+// new version HANGAR has verified against). A malformed entry is silently
+// dropped rather than failing config load outright — Validate's allowlist
+// membership check on the resolved APIVersion is what actually enforces
+// correctness; a stray typo in the allowlist just shrinks it.
+func splitCSVInts(s string) []int {
+	parts := splitCSV(s)
+	out := make([]int, 0, len(parts))
+	for _, p := range parts {
+		if n, err := strconv.Atoi(p); err == nil {
+			out = append(out, n)
 		}
 	}
 	return out
@@ -268,6 +326,19 @@ func Load(v *viper.Viper) (*Config, error) {
 			ClaimLease:      v.GetDuration("sync_claim_lease"),
 			BackoffCap:      v.GetDuration("sync_backoff_cap"),
 			Jitter:          v.GetString("sync_jitter"),
+		},
+		Discord: DiscordConfig{
+			Enabled:             v.GetBool("discord_enabled"),
+			BotToken:            NewSecret(v.GetString("discord_bot_token")),
+			ClientID:            v.GetString("discord_client_id"),
+			ClientSecret:        NewSecret(v.GetString("discord_client_secret")),
+			GuildID:             v.GetString("discord_guild_id"),
+			APIVersion:          v.GetInt("discord_api_version"),
+			Allowlist:           splitCSVInts(v.GetString("discord_api_version_allowlist")),
+			GlobalRate:          v.GetInt("discord_global_rate"),
+			InvalidBudgetMax:    v.GetInt("discord_invalid_budget"),
+			InvalidWarnPercent:  v.GetInt("discord_invalid_warn_pct"),
+			InvalidPausePercent: v.GetInt("discord_invalid_pause_pct"),
 		},
 	}
 

@@ -99,7 +99,10 @@ func runWork(ctx context.Context) error {
 	// — the two queues sharing a river.Client is fine (River schedules
 	// per-queue independently); it is sharing a WORKER POOL that's
 	// prohibited, and QueueConfig below gives each its own.
-	drivers := provisioning.NewDrivers() // real Discord/TeamSpeak/Mumble drivers register here in Phase 12/13
+	drivers := provisioning.NewDrivers() // TeamSpeak/Mumble drivers register here in Phase 13
+	if err := registerDiscordDriver(ctx, cfg, pool, drivers); err != nil {
+		return err
+	}
 	river.AddWorker(workers, &provisioning.UrgentWorker{Pool: pool, Drivers: drivers})
 	river.AddWorker(workers, &provisioning.BulkWorker{Pool: pool, Drivers: drivers})
 
@@ -107,7 +110,7 @@ func runWork(ctx context.Context) error {
 		Queues: map[string]river.QueueConfig{
 			planner.QueueSync:        {MaxWorkers: 20},
 			provisioning.QueueUrgent: {MaxWorkers: 32},
-			provisioning.QueueBulk:   {MaxWorkers: 4},
+			provisioning.QueueBulk:   {MaxWorkers: 8}, // matches .env.example's HANGAR_WORKER_QUEUES documented provision-bulk:8
 		},
 		Workers: workers,
 	})
