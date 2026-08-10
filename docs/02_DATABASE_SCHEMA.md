@@ -475,8 +475,12 @@ CREATE TABLE app.alert_type (
 );
 ```
 
-Seeded domain counts, asserted at build time: Structures 22 (5 Skyhook), Characters 7,
+Seeded domain counts, asserted at build time: Structures **23** (5 Skyhook), Characters 7,
 platform 7, Wars 6, Corporations 5, Sovereignty 4, Contracts 1, Alliances 1 = **54**.
+
+> **Corrected in Phase 14.1.** This line previously read "Structures 22" while still totalling
+> 54 — the same arithmetic defect §4.4 carried, stated here in a form where the sum is written
+> out. Measured against the upstream: Structures is 23. See docs/BASELINE.md §4a.
 
 `alert_event.payload` is `jsonb` and is where an unparseable CCP notification YAML lands
 verbatim so the generic renderer can produce key/value output. The queue never halts.

@@ -8,6 +8,14 @@ independently reproduced against legacy repository HEAD and the ESI spec on 2026
 **Result: every measured count agrees with SRS v3.1 Appendix B's expected value.** No
 disagreement to raise as a specification defect for this measurement pass.
 
+**Phase 14.1 addendum.** One dimension has since been measured in more detail than this pass
+recorded: §4 "Concrete alert types" captured only the total, and the per-domain split it omitted
+turned out to be where a specification defect was hiding. §4a below records that split, taken with
+the same command at the same pinned commit. The total is unchanged and still agrees with Appendix
+B; the newly measured detail corrects one figure in SRS §4.4. The lesson is recorded here rather
+than only in the phase that hit it: **a total that matches is not evidence that its breakdown
+does.**
+
 ## Repositories measured
 
 Shallow-cloned (`git clone --depth 1`) on 2026-08-06:
@@ -106,6 +114,46 @@ find src/Notifications -name "*.php" \( -path "*/Discord/*" -o -path "*/Slack/*"
   | sed 's#^\./##' | sort -u | grep -v '/Abstract' | wc -l
 # => 54
 ```
+
+### 4a. Per-domain breakdown **[added in Phase 14.1]**
+
+The measurement above recorded only the total. Phase 14 needed the per-domain split and could not
+obtain it — `eveseat/notifications` was unreachable from that build environment — so it reported
+the resulting inconsistency (SRS §4.4's eight domain counts summed to 53 against a stated 54) and
+shipped 53 rather than guessing which domain was short. Phase 14.1 obtained access and re-ran
+**this same pipeline, at the same pinned commit**, grouped by category:
+
+```sh
+find src/Notifications -name "*.php" \( -path "*/Discord/*" -o -path "*/Slack/*" -o -path "*/Mail/*" \) \
+  | grep -v /Traits/ \
+  | sed -E 's#/(Discord|Slack|Mail)/#/#' \
+  | sed 's#^\./##' | sort -u | grep -v '/Abstract' \
+  | awk -F/ '{print $3}' | sort | uniq -c
+# =>  23 Structures     7 Characters    7 Seat      6 Wars
+#      5 Corporations   4 Sovereignties 1 Contracts 1 Alliances     (total 54)
+```
+
+**Result: the total of 54 is confirmed; SRS §4.4's "Structures (22 …)" was understated by one.**
+Seven of the eight domain figures are correct, Skyhook is correctly 5, and the arithmetic gap
+Phase 14 reported is fully accounted for. §4.4 has been corrected to 23.
+
+**Independent cross-check.** `src/Config/notifications.alerts.php` maps alert key → handler
+classes and holds **55 keys**, one of which (`test_integration`) is marked `'visible' => false`:
+54 again, from a different artefact. It distributes differently (Structures 25, because
+`StructureLowReagentsAlert` and `StructureNoReagentsAlert` are keys that reuse another class's
+file and so have no file of their own). The file-based reading above is the one adopted, because
+it is the method this document recorded and it agrees with §4.4 in seven domains rather than five.
+
+**Upstream defect noted in passing.** `src/Notifications/Characters/{Discord,Mail,Slack}/NewMailMessage.php`
+exists in all three channels but has **no key** in `notifications.alerts.php`, so nothing upstream
+can dispatch it. It is counted by the file-based method and absent from the key-based one. Recorded
+as an observation about the upstream; HANGAR does not reproduce it.
+
+The full measurement — every entry, its domain, and whether it is a CCP notification type or an
+observer-computed SeAT alert — is committed at
+`testdata/upstream/eveseat_notifications_alerts.txt` and read back by
+`TestCatalogueMatchesMeasuredUpstream`, so the alert catalogue's provenance is reproducible in CI
+rather than resting on this document.
 
 ## 5. UI locales
 

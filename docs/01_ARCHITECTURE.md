@@ -710,10 +710,14 @@ an Ice runtime exists, and it is not written in Go.
 
 ## 10. Alerting (`internal/alerting`)
 
-54 concrete types across eight domains: Structures 22 (including 5 Skyhook types),
+54 concrete types across eight domains: Structures **23** (including 5 Skyhook types),
 Characters 7, HANGAR platform events 7, Wars 6, Corporations 5, Sovereignty 4, Contracts 1,
 Alliances 1. Seeded into `app.alert_type`; the seed count is asserted at build time so a
 dropped type is a red build, not a silent parity regression.
+
+> **Corrected in Phase 14.1** (was "Structures 22", which made these eight numbers sum to 53
+> against the stated 54). Measured against `eveseat/notifications` at the commit
+> docs/BASELINE.md pins — see docs/BASELINE.md §4a and SRS §4.4.
 
 Three categories: ESI notifications, domain events, internally evaluated threshold alerts.
 

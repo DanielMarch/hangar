@@ -58,7 +58,7 @@ func runAlertDispatcher(ctx context.Context, dispatcher *alerting.Dispatcher, in
 				if errors.Is(err, context.Canceled) {
 					return
 				}
-				logger.Error("alerting: dispatch tick failed", "error", err.Error())
+				logger.Error("alerting: dispatch tick failed", "error", err)
 				continue
 			}
 			if result.Claimed > 0 {

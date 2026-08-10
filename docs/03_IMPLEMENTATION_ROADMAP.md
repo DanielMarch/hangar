@@ -1245,9 +1245,15 @@ db/seed/alert_types.sql
 testdata/notifications/*.yaml
 ```
 
-**Design notes.** 54 types across eight domains: Structures 22 (incl. 5 Skyhook),
+**Design notes.** 54 types across eight domains: Structures **23** (incl. 5 Skyhook),
 Characters 7, platform 7, **Wars 6**, Corporations 5, Sovereignty 4, Contracts 1, Alliances 1.
 The seed count and per-domain counts are asserted at build time.
+
+> **Corrected in Phase 14.1.** This line originally read "Structures 22", and its eight numbers
+> summed to 53 against the stated total of 54. Phase 14 reported the inconsistency rather than
+> reconciling it silently; Phase 14.1 measured the upstream and established that the total was
+> right and the Structures figure was understated by one. See Phase 14.1's section below and
+> docs/BASELINE.md §4a.
 
 **Wars have no dedicated table** — the six war alerts are notification-derived and §6 exposes no
 wars endpoint. Do not invent one.
@@ -1282,7 +1288,9 @@ starbase fuel → `/corporations/{id}/starbases/{starbase_id}` (the *detail* rou
 | `TestCharNotificationPollingHoldsFiveTokenReserve` | 600 s polling never drops the bucket below 5 |
 | `TestDeadLetterAfterMaxAttempts` | exhausted deliveries land on the admin-visible dead-letter queue |
 
-**Prompt seed.**
+**Prompt seed.** *(Left verbatim as the historical record of the instruction given. Its
+"Structures 22" is the defect Phase 14 reported and Phase 14.1 corrected to 23 — the seed is not
+edited, because what it asked for is exactly what made the inconsistency findable.)*
 > Implement HANGAR Phase 14: alerting. Seed **54** concrete alert types across eight domains
 > (Structures 22 including 5 Skyhook, Characters 7, platform 7, Wars 6, Corporations 5,
 > Sovereignty 4, Contracts 1, Alliances 1) sourced from `eveseat/notifications`
@@ -1292,6 +1300,92 @@ starbase fuel → `/corporations/{id}/starbases/{starbase_id}` (the *detail* rou
 > An unrecognised CCP notification type must render generically and never halt the queue. Poll
 > `char-notification` at 600 s holding a permanent 5-token reserve against its 15/15min bucket.
 > Exit on the six named tests.
+
+---
+
+## Phase 14.1 — Alert catalogue reconciliation & Phase 14 defect closure
+
+**Objective.** Close every open item Phase 14 reported, now that the upstream it could not reach
+is reachable.
+
+**Depends on.** Phase 14.
+
+**Trigger.** Phase 14 shipped with six reported findings, two of which it could not resolve from
+inside its own build environment and deliberately did not guess at. Access to
+`eveseat/notifications` became available afterwards, which settles the largest of them outright
+and turns the alert catalogue from a defensible reading into a measured one.
+
+**Legacy reference.** https://github.com/eveseat/notifications at commit
+`844f7de7746b8c5161a0ad61cc7690af61eaf092` — the same commit docs/BASELINE.md §"Repositories
+measured" already pinned. `src/Notifications/**` and `src/Config/notifications.alerts.php`.
+
+**Scope.**
+
+* **The 53-vs-54 defect, resolved by measurement.** SRS §4.4's eight per-domain counts summed to
+  53 against a stated total of 54. Phase 14 reported this, established from docs/BASELINE.md §4
+  that the *total* was the independently measured figure, and shipped 53 with the per-domain
+  counts exact rather than invent a 54th type into a domain it could not identify. Phase 14.1
+  re-ran BASELINE §4's own pipeline — same command, same pinned commit — grouped by category:
+  **Structures is 23, not §4.4's 22.** The other seven counts are confirmed, Skyhook is confirmed
+  to be 5, and the total of 54 is confirmed twice over (a second, independent artefact,
+  `notifications.alerts.php`, holds 55 alert keys of which one is marked not visible). §4.4 and
+  docs/BASELINE.md §4a are corrected; the catalogue now seeds 54.
+* **Catalogue membership rebuilt from the measurement.** Phase 14 flagged every domain assignment
+  as unverified judgement. Membership is now the upstream's wherever the upstream entry is a CCP
+  notification type, with four documented substitutions where it is not (the platform domain is
+  HANGAR's own events, upstream's two observer-computed entries become HANGAR thresholds,
+  upstream's `Killmail`/`NewMailMessage` become HANGAR domain events, and CCP's
+  `StructureFuelAlert`/`TowerResourceAlertMsg` are displaced by the two fuel-low thresholds §4.4
+  mandates). The measurement is committed to `testdata/upstream/` and read back in CI, so this is
+  reproducible provenance rather than a claim. Several Phase 14 guesses were wrong and are
+  corrected — notably the entire Characters and Wars sets, and CCP's own `Moonmining` casing.
+* **`internal/telemetry` — errors no longer vanish from logs.** The redacting handler rebuilt
+  every `slog.KindAny` value by reflection, and Go's errors are structs with only unexported
+  fields, which reflection cannot copy. Every `logger.Error(..., "error", err)` call **in the
+  entire product** therefore rendered as `error=""`. Found in Phase 14 when a deliberately
+  unreachable webhook logged an empty reason while writing the correct text to the database.
+  Fixed at the handler; the workaround Phase 14 added in `internal/alerting` is reverted.
+* **`TestPlannerSoakNoDuplicateJobs` de-flaked.** Its 5 ms timing slack sat below the drift
+  between the database clock (which enforces the lease) and Go-side callback timing (which
+  measured it) under full-suite load — the flake seen at the end of Phases 11, 13 and 14. The
+  slack is now 20 ms, chosen to sit strictly between "lease honoured" (~40 ms) and "lease ignored"
+  (~15 ms, the claim interval), so no detection power is lost and the lease itself is untouched.
+* **Per-user email routing recorded as a known limitation.** `app.user` has no email column and
+  EVE SSO never supplies one, so a `target_kind = 'user'` rule has no address to resolve to.
+  Documented in §4.4 with the reason and what closing it would require (a column *and* an
+  address-verification flow); no schema change made.
+
+**Files.**
+
+```
+internal/alerting/catalogue/seed.go, domains.go       (membership + counts from the measurement)
+internal/alerting/catalogue/catalogue_test.go         (upstream provenance test)
+internal/alerting/alerting_integration_test.go        (displaced-type delivery test)
+internal/telemetry/redact.go, redact_test.go          (error-message preservation)
+internal/sync/planner/claim_integration_test.go       (timing slack)
+db/seed/alert_types.sql                               (54 rows)
+testdata/upstream/eveseat_notifications_alerts.txt    (the measurement, committed)
+docs/00_SRS_v3.1.md §4.4, docs/BASELINE.md §4a
+```
+
+**Exit criteria.**
+
+| Test | Assertion |
+| :-- | :-- |
+| `TestAlertCatalogueSeeds54AcrossEightDomains` | now asserts **54**, and per-domain counts including Structures 23 |
+| `TestCatalogueMatchesMeasuredUpstream` | counts and CCP-type membership match the committed measurement; divergences are exactly the documented ones |
+| `TestCatalogueTypesExistInLiveSpecEnum` | every seeded CCP type is in the live spec's own enum (unchanged, still passing) |
+| `TestDisplacedUpstreamTypeStillDeliversViaOpenVocabulary` | a displaced CCP type still registers, boards and delivers |
+| `TestRedactHandlerPreservesErrorMessages` | `error=""` cannot return, in both the JSON and text handlers |
+| `TestPlannerSoakNoDuplicateJobs` | passes under full-suite load without weakening the lease invariant |
+
+**Prompt seed.**
+> Resolve the findings Phase 14 reported. Measure `eveseat/notifications` at the commit
+> docs/BASELINE.md pins, using BASELINE §4's own pipeline grouped per category, and rebuild the
+> alert catalogue from the result — correcting SRS §4.4's Structures count and committing the
+> measurement as test data so the provenance is reproducible. Fix the redacting slog handler that
+> blanks every error message in the product. De-flake the planner soak test without weakening its
+> invariant. Record per-user email routing as a known limitation with its reason.
 
 ---
 

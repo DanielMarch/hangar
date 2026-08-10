@@ -1,0 +1,128 @@
+# MEASURED UPSTREAM — eveseat/notifications alert catalogue
+#
+# Source:  https://github.com/eveseat/notifications
+# Commit:  844f7de7746b8c5161a0ad61cc7690af61eaf092   (the commit docs/BASELINE.md
+#          §"Repositories measured" pinned on 2026-08-06; GitHub reports the repo's
+#          pushed_at as 2026-06-16, matching BASELINE's recorded clone date)
+# Files:   src/Notifications/**  and  src/Config/notifications.alerts.php
+# Measured: Phase 14.1, 2026-08-10
+#
+# WHY THIS FILE EXISTS. Phase 14 had to build the alert catalogue without
+# access to this upstream and said so, flagging every domain assignment as
+# unverified. Phase 14.1 obtained access and measured it. This file is the
+# measurement, committed so the catalogue's provenance is reproducible rather
+# than a claim in a commit message — TestCatalogueMatchesMeasuredUpstream reads
+# it directly.
+#
+# ── HOW THE COUNT WAS TAKEN ─────────────────────────────────────────────────
+# docs/BASELINE.md §4's own pipeline, applied verbatim to the tree above:
+#
+#   find src/Notifications -name "*.php" \
+#        \( -path "*/Discord/*" -o -path "*/Slack/*" -o -path "*/Mail/*" \) \
+#     | grep -v /Traits/ | sed -E 's#/(Discord|Slack|Mail)/#/#' \
+#     | sed 's#^\./##' | sort -u | grep -v '/Abstract' | wc -l
+#   => 54          (reproduces BASELINE.md §4's recorded figure exactly)
+#
+# Adding `| awk -F/ '{print $3}' | sort | uniq -c` gives the per-domain
+# breakdown BASELINE.md never recorded — which is the figure Phase 14 needed
+# and could not obtain, and which resolves the 53-vs-54 defect it reported:
+#
+#   23 Structures   7 Characters   7 Seat   6 Wars
+#    5 Corporations 4 Sovereignties 1 Contracts 1 Alliances     total 54
+#
+# SRS v3.1 §4.4 states "Structures (22, including 5 Skyhook types)". The
+# measured figure is 23. Seven of the eight domain counts are correct; the
+# Structures figure is understated by exactly one, which is precisely the
+# arithmetic gap Phase 14 reported (its eight numbers summed to 53, not 54).
+# Skyhook is 5, exactly as §4.4 states.
+#
+# ── INDEPENDENT CROSS-CHECK ─────────────────────────────────────────────────
+# src/Config/notifications.alerts.php maps alert KEY -> handler classes. It
+# holds 55 keys, one of which ('test_integration') is marked 'visible' => false.
+# 55 - 1 = 54 visible alert keys — a second, independent route to the same
+# total, from a different artefact.
+#
+# The two agree on the TOTAL but distribute differently (key-based Structures
+# is 25, because StructureLowReagentsAlert and StructureNoReagentsAlert are
+# keys that reuse another class's file and so have no file of their own). The
+# file-based reading is the one adopted here: it is the method BASELINE.md
+# recorded, and it agrees with SRS §4.4 in seven of eight domains, whereas the
+# key-based reading agrees in five.
+#
+# ── UPSTREAM DEFECT NOTED IN PASSING ────────────────────────────────────────
+# src/Notifications/Characters/{Discord,Mail,Slack}/NewMailMessage.php exists
+# in all three channels but has NO key in notifications.alerts.php, so nothing
+# can dispatch it. It is counted by the file-based method (it is one of the
+# seven Characters entries) and is absent from the key-based one. Reported as
+# an observation about the upstream, not something HANGAR reproduces.
+#
+# ── FORMAT ──────────────────────────────────────────────────────────────────
+# <domain> <name> <kind>
+#   kind = ccp      the name is a CCP notification type, present verbatim in
+#                   the live spec's own notification `type` enum
+#   kind = computed the upstream entry is produced by a SeAT observer from
+#                   synced data, not by a CCP notification (Killmail,
+#                   NewMailMessage, inactive_member, contract_created) or is a
+#                   SeAT platform event with no CCP analogue (the Seat/ set)
+
+Alliances      AllianceCapitalChanged        ccp
+
+Characters     Killmail                      computed
+Characters     NewMailMessage                computed
+Characters     RaffleCreated                 ccp
+Characters     RaffleExpired                 ccp
+Characters     RaffleFinished                ccp
+Characters     ResearchMissionAvailableMsg   ccp
+Characters     StoryLineMissionAvailableMsg  ccp
+
+Contracts      ContractNotification          computed
+
+Corporations   BillPaidCorpAllMsg            ccp
+Corporations   CharLeftCorpMsg               ccp
+Corporations   CorpAllBillMsg                ccp
+Corporations   CorpAppNewMsg                 ccp
+Corporations   InActiveCorpMember            computed
+
+Seat           CreatedUser                   computed
+Seat           DisabledToken                 computed
+Seat           EnabledToken                  computed
+Seat           SquadApplicationNotification  computed
+Seat           SquadMemberNotification       computed
+Seat           SquadMemberRemovedNotification computed
+Seat           TestNotification              computed
+
+Sovereignties  EntosisCaptureStarted         ccp
+Sovereignties  SovCommandNodeEventStarted    ccp
+Sovereignties  SovStructureDestroyed         ccp
+Sovereignties  SovStructureReinforced        ccp
+
+Structures     AllAnchoringMsg               ccp
+Structures     MoonminingExtractionFinished  ccp
+Structures     MoonminingExtractionStarted   ccp
+Structures     OrbitalAttacked               ccp
+Structures     OrbitalReinforced             ccp
+Structures     OwnershipTransferred          ccp
+Structures     SkyhookDeployed               ccp
+Structures     SkyhookDestroyed              ccp
+Structures     SkyhookLostShields            ccp
+Structures     SkyhookOnline                 ccp
+Structures     SkyhookUnderAttack            ccp
+Structures     StructureAnchoring            ccp
+Structures     StructureDestroyed            ccp
+Structures     StructureFuelAlert            ccp
+Structures     StructureLostArmor            ccp
+Structures     StructureLostShields          ccp
+Structures     StructureServicesOffline      ccp
+Structures     StructureUnanchoring          ccp
+Structures     StructureUnderAttack          ccp
+Structures     StructureWentHighPower        ccp
+Structures     StructureWentLowPower         ccp
+Structures     TowerAlertMsg                 ccp
+Structures     TowerResourceAlertMsg         ccp
+
+Wars           AllWarDeclaredMsg             ccp
+Wars           AllWarInvalidatedMsg          ccp
+Wars           AllyJoinedWarAggressorMsg     ccp
+Wars           AllyJoinedWarAllyMsg          ccp
+Wars           AllyJoinedWarDefenderMsg      ccp
+Wars           WarDeclared                   ccp

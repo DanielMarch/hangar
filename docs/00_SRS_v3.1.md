@@ -425,11 +425,34 @@ recent 403s, then lowest character id — so that a 403 investigation is reprodu
   administrator opt-in; failing closed by default would lock every user out during a restart.
 
 ### 4.4 Alerting & Notifications (Core Subsystem)
-* **Alert Catalogue:** 54 concrete alert types seeded across eight domains — Structures (22,
+* **Alert Catalogue:** 54 concrete alert types seeded across eight domains — Structures (**23**,
   including 5 Skyhook types), Characters (7), HANGAR platform events (7), **Wars (6)**,
   Corporations (5), Sovereignty (4), Contracts (1), Alliances (1) — categorized as ESI
   notifications, domain events, or internally evaluated threshold alerts. The seed count and the
   per-domain counts are asserted at build time.
+  * **[v3.1 — corrected in Phase 14.1] Structures is 23, not 22.** As originally written this
+    list read "Structures (22 …)", and its eight numbers summed to **53** against a stated total
+    of 54 — an inconsistency Phase 14 reported rather than silently reconciling, shipping 53 with
+    the per-domain counts exact because the upstream needed to settle it was unreachable from
+    that build environment. Phase 14.1 measured `eveseat/notifications` directly at the commit
+    docs/BASELINE.md §4 already pins, applying that section's own recorded pipeline: it
+    reproduces BASELINE's total of **54** and yields the per-domain breakdown BASELINE never
+    recorded, in which Structures is **23**. The total was right and this one domain figure was
+    understated by one; the other seven are confirmed correct, as is Skyhook (5). The measurement
+    is committed at `testdata/upstream/eveseat_notifications_alerts.txt` and is read back by
+    `TestCatalogueMatchesMeasuredUpstream`, so the catalogue's provenance is reproducible rather
+    than asserted. A second, independent artefact agrees on the total: upstream's
+    `src/Config/notifications.alerts.php` holds 55 alert keys of which one is marked not visible.
+  * **HANGAR's membership is the upstream's wherever the upstream entry is a CCP notification
+    type.** It differs in exactly four documented places, each recorded in
+    `internal/alerting/catalogue/seed.go` and enforced by the same test: the platform domain
+    carries HANGAR's own seven events rather than SeAT's; upstream's two observer-computed
+    entries (`inactive_member`, `contract_created`) become HANGAR threshold alerts over the same
+    data; upstream's `Killmail`/`NewMailMessage` become HANGAR domain events; and CCP's
+    `StructureFuelAlert`/`TowerResourceAlertMsg` are displaced by the two computed fuel-low
+    thresholds this section mandates below. A displaced type is not lost — Principle 14's
+    open-vocabulary path registers it on first sighting
+    (`TestDisplacedUpstreamTypeStillDeliversViaOpenVocabulary`).
 * **[v3.1 — B10] Wars are notification-derived.** The six war alert types are produced from CCP
   notifications. §6 exposes no wars endpoint and §5.2 defines no wars table, and neither may be
   invented to satisfy this domain.
@@ -440,6 +463,19 @@ recent 403s, then lowest character id — so that a 403 investigation is reprodu
 * **Delivery Channels:** SMTP (email), Slack webhooks, Discord webhooks, with per-group and
   per-user routing and mentions. A coalesced roll-up that exceeds a channel's payload limit is
   truncated with an explicit remainder count, never dropped.
+  * **[v3.1 — known limitation, recorded in Phase 14.1] Per-USER email routing is not
+    implemented, and cannot be without a schema change.** `app.user` (§5.2 #1) has no email
+    column and EVE SSO never supplies an address, so a routing rule with `target_kind = 'user'`
+    has nothing to resolve to a recipient. SMTP channels therefore carry an installation-wide
+    recipient list in `app.alert_channel.config.to` (`HANGAR_SMTP_TO`), and user-targeted rules
+    route to the chat channels, which identify a user by a platform handle they have already
+    linked. Closing this needs an `app.user.email` column *and* an address-verification flow —
+    an unverified address is a delivery target and therefore an abuse vector — which is a phase
+    of its own, not a Phase 14 omission.
+  * A webhook URL is a **credential**: it carries its own token and anyone holding it can post to
+    the channel. It must never reach a stored error string or a log line
+    (`internal/alerting/channels.scrubURL`, added in Phase 14 after the image verification caught
+    an unreachable endpoint writing its full URL to the dead-letter board).
 * **Generic Fallback:** CCP notification YAML shape changes must never halt the queue.
   Unrecognised payloads render as generic key/value pairs and are logged to the unknown-types
   board. Per Principle 14, unknown notification types are ingested, never rejected. CCP payloads

@@ -392,14 +392,14 @@ func TestDeadLetterAfterMaxAttempts(t *testing.T) {
 	ctx := context.Background()
 	s := store.New(pool)
 
-	const alertType = "StructureFuelAlert"
+	const alertType = "StructureServicesOffline"
 	brokenChannel, _ := seedChannelAndRule(t, s, alertType, "squad", "7")
 	seedChannelAndRule(t, s, alertType, "squad", "7") // a second, healthy channel for the same target
 
 	emitter := &alerting.Emitter{Pool: pool, Window: -1} // coalescing off: one event, one message
 	_, err := emitter.IngestNotification(ctx, alerting.Notification{
 		Type: alertType, NotificationID: 4000000001,
-		Payload: fixturePayload(t, "structure_fuel_alert.yaml"), OccurredAt: time.Now().Add(-time.Minute),
+		Payload: fixturePayload(t, "valid_structure_under_attack.yaml"), OccurredAt: time.Now().Add(-time.Minute),
 	})
 	require.NoError(t, err)
 	require.Equal(t, map[string]int{alerting.StatePending: 2}, deliveryStates(t, pool))
@@ -668,4 +668,65 @@ func TestThresholdSeedResolvesRouteIdsOnceIngested(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, len(catalogue.Catalogue),
 		"with routes ingested, the live catalogue is complete — all %d rows", len(catalogue.Catalogue))
+}
+
+// TestDisplacedUpstreamTypeStillDeliversViaOpenVocabulary is Phase 14.1's
+// proof of the one claim its catalogue reconciliation rests on.
+//
+// The catalogue seeds 21 of the upstream's 23 Structures types: CCP's
+// StructureFuelAlert and TowerResourceAlertMsg are displaced by HANGAR's
+// two computed fuel-low thresholds, which §4.4 mandates and whose source
+// routes it names. seed.go's sourcing note asserts those two are "not
+// lost" because Principle 14's open-vocabulary path picks up any unseeded
+// type. That is a claim about runtime behaviour, so it is tested rather
+// than asserted: a real StructureFuelAlert notification must still reach
+// an operator.
+func TestDisplacedUpstreamTypeStillDeliversViaOpenVocabulary(t *testing.T) {
+	pool := newMigratedPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+
+	const displaced = "StructureFuelAlert"
+	_, seeded := catalogue.ByName(displaced)
+	require.False(t, seeded, "the premise: this upstream type is deliberately not seeded")
+	require.True(t, render.HasTemplate(displaced),
+		"its renderer is kept even though the type is unseeded, so a displaced type still reads well")
+
+	emitter := &alerting.Emitter{Pool: pool, Window: -1}
+	payload := fixturePayload(t, "structure_fuel_alert.yaml")
+
+	// First sighting registers and boards it — nothing to deliver yet.
+	first, err := emitter.IngestNotification(ctx, alerting.Notification{
+		Type: displaced, NotificationID: 7000000001, Payload: payload, OccurredAt: time.Now().Add(-time.Minute),
+	})
+	require.NoError(t, err)
+	require.False(t, first.Known)
+	require.True(t, first.OnUnknownBoard, "a displaced type must surface on the board so an operator can route it")
+
+	registered, err := s.GetAlertType(ctx, displaced)
+	require.NoError(t, err)
+	require.Equal(t, string(catalogue.DomainUnknown), registered.Domain)
+
+	// The operator routes it, and it delivers.
+	seedChannelAndRule(t, s, displaced, "corporation", "98000001")
+	_, err = emitter.IngestNotification(ctx, alerting.Notification{
+		Type: displaced, NotificationID: 7000000002, Payload: payload, OccurredAt: time.Now().Add(-time.Minute),
+	})
+	require.NoError(t, err)
+
+	recorder := &recordingChannel{kind: channels.KindSlackWebhook}
+	dispatcher := &alerting.Dispatcher{
+		Pool:     pool,
+		Channels: func(gen.AppAlertChannel) (channels.Channel, error) { return recorder, nil },
+	}
+	tick, err := dispatcher.Tick(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, tick.Sent, "a displaced upstream type must still be deliverable")
+	require.Zero(t, tick.DeadLettered)
+
+	// And it renders through its own template, not the generic fallback —
+	// keeping the renderer is what makes the displacement cost-free.
+	line := recorder.sent()[0].Lines[0]
+	require.Contains(t, line, "structure ", "the StructureFuelAlert template must still be the one that rendered it")
+	require.NotContains(t, line, "structureShowInfoData:", "that would be the generic key/value fallback")
 }

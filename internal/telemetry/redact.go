@@ -29,6 +29,39 @@ func redactAny(v any) any {
 	if v == nil {
 		return nil
 	}
+
+	// ── PHASE 14.1 FIX: errors must survive redaction ───────────────────
+	// An error is rendered by its Error() method, not by its fields, and
+	// almost every error in Go is a struct with ONLY unexported fields
+	// (fmt.Errorf returns *fmt.wrapError{msg, err}; errors.New returns
+	// *errors.errorString{s}). The reflection walk below rebuilds structs
+	// field by field and necessarily skips fields it cannot set — see the
+	// `!dst.CanSet()` branch in redactReflect — so an error came out the
+	// other side with an empty message and rendered as `error=""`.
+	//
+	// That silently blanked the error text of EVERY `logger.Error(...,
+	// "error", err)` call in the product. It was found in Phase 14 when a
+	// deliberately unreachable webhook produced a WARN line whose reason
+	// was empty while the same text was written correctly to the database.
+	//
+	// Returning the MESSAGE STRING (rather than a rebuilt error value) is
+	// deliberate: slog's TextHandler and JSONHandler both render a string
+	// identically and unambiguously, whereas an error value's treatment
+	// differs between them and a marshalling handler can turn a value with
+	// no exported fields into `{}` — the same silent blanking in a new
+	// costume.
+	//
+	// Redaction is not weakened. The walk never scanned free text for
+	// secrets — it matches config.Secret values and sensitive FIELD NAMES,
+	// neither of which survives inside an already-formatted message. Any
+	// secret in an error's text must be kept out at construction time,
+	// which is what internal/alerting/channels.scrubURL does for webhook
+	// URLs. Blanking the whole message was never a secret-safety measure;
+	// it was an accident of reflection.
+	if err, ok := v.(error); ok {
+		return err.Error()
+	}
+
 	out := redactReflect(reflect.ValueOf(v))
 	if !out.IsValid() {
 		return v

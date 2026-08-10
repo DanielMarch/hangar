@@ -44,13 +44,16 @@ var Domains = []Domain{
 	DomainCorporations, DomainSovereignty, DomainContracts, DomainAlliances,
 }
 
-// ExpectedCounts is §4.4's per-domain count table, verbatim:
-// "Structures (22, including 5 Skyhook types), Characters (7), HANGAR
-// platform events (7), Wars (6), Corporations (5), Sovereignty (4),
-// Contracts (1), Alliances (1)". Asserted at build time by
+// ExpectedCounts is the per-domain count table, asserted at build time by
 // TestAlertCatalogueSeeds54AcrossEightDomains.
+//
+// It is §4.4's table with ONE correction, made in Phase 14.1 against a
+// direct measurement of the upstream: Structures is 23, not the 22 §4.4
+// states. See DocumentedTotal below, and
+// testdata/upstream/eveseat_notifications_alerts.txt for the measurement
+// itself. The other seven counts are §4.4's, unchanged and confirmed.
 var ExpectedCounts = map[Domain]int{
-	DomainStructures:   22,
+	DomainStructures:   23,
 	DomainCharacters:   7,
 	DomainPlatform:     7,
 	DomainWars:         6,
@@ -66,57 +69,44 @@ var ExpectedCounts = map[Domain]int{
 // while missing the thing §4.4 actually calls out.
 const ExpectedSkyhookCount = 5
 
-// DocumentedTotal is the total §4.4, the roadmap's Phase 14 design note,
-// SRS §17's invariant table and migration 00008's own header all state:
-// 54 concrete alert types.
+// DocumentedTotal is the total 00_SRS_v3.1.md §4.4, the roadmap's Phase 14
+// design note, SRS §17's invariant table and migration 00008's own header
+// all state: 54 concrete alert types. SeededTotal() equals it.
 //
-// ── REPORTED SPECIFICATION DEFECT (Phase 14) ────────────────────────────
-// The eight per-domain counts in ExpectedCounts sum to 53, not 54:
+// ── RESOLVED SPECIFICATION DEFECT (raised in Phase 14, fixed in 14.1) ────
+// Phase 14 reported that §4.4's eight per-domain counts summed to 53 while
+// the same sentence stated 54, and that it could not tell which side was
+// wrong because eveseat/notifications was not reachable from that build
+// environment. It shipped 53 — per-domain counts exact, defect documented,
+// no type invented into a guessed domain.
 //
-//	22 + 7 + 7 + 6 + 5 + 4 + 1 + 1 = 53
+// Phase 14.1 obtained access to the upstream and measured it, applying
+// docs/BASELINE.md §4's own recorded pipeline to the same pinned commit
+// (844f7de7746b8c5161a0ad61cc7690af61eaf092). The measurement reproduces
+// BASELINE's total of 54 exactly and yields the per-domain breakdown
+// BASELINE never recorded:
 //
-// The two figures cannot both be right, and the arithmetic is not a
-// rounding or an off-by-one in this file — it is the same eight numbers,
-// verbatim and identical, in 00_SRS_v3.1.md §4.4, 03_IMPLEMENTATION_
-// ROADMAP.md's Phase 14 design note, and Phase 14's own prompt seed. Every
-// one of those three states "54" in the same breath as a breakdown summing
-// to 53.
+//	23 Structures   7 Characters   7 Seat   6 Wars
+//	 5 Corporations 4 Sovereignties 1 Contracts 1 Alliances    = 54
 //
-// WHICH SIDE IS WRONG IS KNOWN — and it is not the total. docs/BASELINE.md
-// §4 ("Concrete alert types") records Phase 0 INDEPENDENTLY MEASURING the
-// real upstream: eveseat/notifications pinned at commit 844f7de7746b8c516
-// 1a0ad61cc7690af61eaf092, deduped by (category, base filename) across the
-// Discord/Slack/Mail channel subdirectories, excluding the three top-level
-// abstract bases, Structures/Traits/, and the two nested per-channel
-// abstracts — result: 54, matching SRS Appendix B. That measurement was
-// reproduced against a real clone with a recorded command; the per-domain
-// breakdown in §4.4 has no such provenance anywhere in the documentation.
+// So the TOTAL was right and the BREAKDOWN was wrong, exactly as Phase 14
+// deduced: §4.4's "Structures (22, including 5 Skyhook types)" understates
+// Structures by one. It is 23. The other seven counts are confirmed
+// correct, and Skyhook is confirmed to be 5.
 //
-// So the defect is in the BREAKDOWN: one of the eight domain counts is
-// understated by one. Which one is not determinable here — BASELINE.md
-// recorded only the total, and eveseat/notifications is not fetchable from
-// this build environment (the same constraint Phase 13 hit with MurmurRPC's
-// actual .proto). Anyone with a clone can settle it in one command by
-// grouping BASELINE.md §4's own pipeline per category:
+// A second, independent artefact agrees on the total: upstream's
+// src/Config/notifications.alerts.php holds 55 alert keys of which one
+// ('test_integration') is marked not visible — 54 again, from a different
+// source. It distributes differently (Structures 25, because two keys reuse
+// another class's file); the file-based reading is adopted because it is
+// BASELINE's recorded method and it agrees with §4.4 in seven domains
+// rather than five.
 //
-//	find src/Notifications -name "*.php" \
-//	     \( -path "*/Discord/*" -o -path "*/Slack/*" -o -path "*/Mail/*" \) \
-//	  | grep -v /Traits/ | sed -E 's#/(Discord|Slack|Mail)/#/#' \
-//	  | sed 's#^\./##' | sort -u | grep -v '/Abstract' \
-//	  | awk -F/ '{print $3}' | sort | uniq -c
-//
-// The fix is then a one-line change: correct the short domain's entry in
-// ExpectedCounts and add the type it names. Until that measurement exists,
-// this catalogue seeds 53 — the per-domain counts hit EXACTLY, and no
-// 54th type invented into a domain that may not be the one missing it.
-// Guessing which domain is short would trade a known, documented shortfall
-// for a silent, wrong assignment, and Principle 13 forbids exactly that
-// trade.
-//
-// SeededTotal() below is therefore 53. TestAlertCatalogueSeeds54Across
-// EightDomains asserts the per-domain table exactly and asserts the total
-// equals its sum; it does NOT assert 54, and it fails loudly with this
-// explanation if anyone "fixes" the count by padding a domain.
+// The full measurement, both cross-checks, and an upstream dead-code
+// observation are committed in
+// testdata/upstream/eveseat_notifications_alerts.txt, which
+// TestCatalogueMatchesMeasuredUpstream reads — so this is reproducible
+// evidence, not a claim in a comment.
 const DocumentedTotal = 54
 
 // SeededTotal is the number of alert types this catalogue actually seeds:

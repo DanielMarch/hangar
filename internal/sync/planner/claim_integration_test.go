@@ -244,6 +244,30 @@ func TestPlannerSoakNoDuplicateJobs(t *testing.T) {
 		claimInterval = 15 * time.Millisecond
 		claimLease    = 40 * time.Millisecond // deliberately tight: see doc comment above
 		soakDuration  = 3 * time.Second
+
+		// claimTimingSlack is how far below the lease a measured re-claim
+		// gap may fall before it counts as a violation.
+		//
+		// PHASE 14.1 FIX — this was 5ms and made the test flaky under
+		// full-suite load (observed at the end of Phases 11, 13 and 14:
+		// gaps of 32.06ms and 34.49ms against the 40ms lease, i.e. inside
+		// the old 35ms threshold). The lease itself was never violated:
+		// it is enforced in SQL as next_due_at = now() + lease, on the
+		// DATABASE's clock, while this measurement is the Go-side gap
+		// between two OnClaim callbacks. Those two clocks drift apart by
+		// tens of milliseconds when a dozen other packages are each
+		// driving a Postgres container on the same box, so the old 5ms
+		// slack was measuring scheduler jitter, not the invariant.
+		//
+		// 20ms is chosen to sit strictly between the two outcomes the
+		// test must tell apart, so it loses no detection power:
+		//   * lease HONOURED  -> re-claim at ~40ms (the lease)
+		//   * lease IGNORED   -> re-claim at ~15ms (the claim interval)
+		// A threshold of 40-20 = 20ms passes the first and still fails the
+		// second. Raising the lease instead would have blunted the
+		// "deliberately tight lease" property the doc comment above
+		// depends on, so the lease is untouched.
+		claimTimingSlack = 20 * time.Millisecond
 	)
 
 	p := newTestPlanner(t, pool, connStr, Config{
@@ -261,7 +285,7 @@ func TestPlannerSoakNoDuplicateJobs(t *testing.T) {
 		defer mu.Unlock()
 		for _, id := range result.SubscriptionIDs {
 			if prev, ok := lastClaimAt[id]; ok {
-				if gap := now.Sub(prev); gap < claimLease-5*time.Millisecond { // small scheduling slack
+				if gap := now.Sub(prev); gap < claimLease-claimTimingSlack {
 					violations = append(violations, fmt.Sprintf("subscription %s reclaimed after %s, less than the %s lease", id, gap, claimLease))
 				}
 			}

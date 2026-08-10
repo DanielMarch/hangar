@@ -234,7 +234,7 @@ defect and blocks the gate.
 | 4.1 | 58 capability rows, all `status = verified` |
 | 4.2 | Every one of the 106 measured distinct ESI routes maps to at least one `app.sync_subscription` route, or is explicitly recorded as deliberately unmapped with a reason |
 | 4.3 | All 72 legacy UI controllers map to a HANGAR endpoint or screen |
-| 4.4 | All 54 alert types seeded, with per-domain counts matching (Structures 22 incl. 5 Skyhook, Characters 7, platform 7, Wars 6, Corporations 5, Sovereignty 4, Contracts 1, Alliances 1) |
+| 4.4 | All 54 alert types seeded, with per-domain counts matching (Structures **23** incl. 5 Skyhook, Characters 7, platform 7, Wars 6, Corporations 5, Sovereignty 4, Contracts 1, Alliances 1). Structures corrected from 22 in Phase 14.1 against a direct measurement of the upstream — see docs/BASELINE.md §4a |
 | 4.5 | All 9 UI locales present and each resolving to a valid ESI `Accept-Language` |
 | 4.6 | The three retired health-check routes (`/ping`, `/status/`, `/status.json`) are **absent** from the catalogue; `/meta/status` and `/status` are present as two distinct capabilities |
 | 4.7 | The two declared scope reductions (in-process plugins, versioned `/api/v2`) are recorded as intentional, not counted as gaps |

@@ -182,18 +182,9 @@ func (d *Dispatcher) deliver(ctx context.Context, s *store.Store, g deliveryGrou
 	msg.Mention = d.mentionFor(ctx, s, g)
 	if err := channel.Send(ctx, msg); err != nil {
 		if d.Log != nil {
-			// err.Error(), not err. internal/telemetry's RedactingHandler
-			// rebuilds every slog.KindAny value through reflection, and an
-			// error from fmt.Errorf/errors.New has only unexported fields —
-			// reflect cannot copy them, so the rebuilt value's Error()
-			// returns "" and the log line reads `error=""`. Passing the
-			// string keeps it on slog's KindString path, which the handler
-			// leaves alone. The underlying redactor defect is product-wide
-			// (every "error", err log line in this codebase is affected)
-			// and is reported separately; this is not the place to fix it.
 			d.Log.WarnContext(ctx, "alerting: delivery failed",
 				"alert_type", g.AlertType, "channel", channelRow.Name, "kind", channelRow.Kind,
-				"events", len(g.Events), "error", err.Error())
+				"events", len(g.Events), "error", err)
 		}
 		return d.settleAll(ctx, s, g, err, now)
 	}
@@ -206,7 +197,7 @@ func (d *Dispatcher) deliver(ctx context.Context, s *store.Store, g deliveryGrou
 	for _, delivery := range g.Deliveries {
 		if err := s.MarkAlertDeliverySent(ctx, delivery.DeliveryID); err != nil {
 			if d.Log != nil {
-				d.Log.ErrorContext(ctx, "alerting: marking delivery sent failed", "delivery_id", delivery.DeliveryID, "error", err.Error())
+				d.Log.ErrorContext(ctx, "alerting: marking delivery sent failed", "delivery_id", delivery.DeliveryID, "error", err)
 			}
 			continue
 		}
@@ -256,7 +247,7 @@ func (d *Dispatcher) mentionFor(ctx context.Context, s *store.Store, g deliveryG
 	if err != nil {
 		if d.Log != nil {
 			d.Log.WarnContext(ctx, "alerting: resolving mention failed; delivering without it",
-				"alert_type", g.AlertType, "error", err.Error())
+				"alert_type", g.AlertType, "error", err)
 		}
 		return ""
 	}
@@ -277,7 +268,7 @@ func (d *Dispatcher) settleAll(ctx context.Context, s *store.Store, g deliveryGr
 		decision := d.Policy.Decide(int(delivery.Attempts), delivery.CreatedAt, cause, now)
 		if err := Settle(ctx, s, delivery.DeliveryID, decision); err != nil {
 			if d.Log != nil {
-				d.Log.ErrorContext(ctx, "alerting: settling failed delivery failed", "delivery_id", delivery.DeliveryID, "error", err.Error())
+				d.Log.ErrorContext(ctx, "alerting: settling failed delivery failed", "delivery_id", delivery.DeliveryID, "error", err)
 			}
 			continue
 		}

@@ -38,79 +38,111 @@ type AlertType struct {
 // ─────────────────────────────────────────────────────────────────────────
 // SOURCING NOTE — read before changing any Name below.
 //
-// Two independent things are being asserted by each CCP-notification row,
-// and they have very different confidence levels:
+// PHASE 14.1: this catalogue is now DERIVED FROM A DIRECT MEASUREMENT of
+// the upstream, not from judgement. Phase 14 had no access to
+// eveseat/notifications and said so, flagging every domain assignment as
+// unverified; 14.1 obtained access, measured the tree at the pinned commit
+// docs/BASELINE.md already records, and rebuilt this list from it. The
+// measurement is committed at
+// testdata/upstream/eveseat_notifications_alerts.txt and read back by
+// TestCatalogueMatchesMeasuredUpstream.
 //
-//  1. THE TYPE NAME ITSELF is verified. Every CategoryESINotification Name
-//     below appears verbatim in the `type` enum of the live ingested spec
-//     (internal/esi/catalogue/embedded/openapi.snapshot.json, schema
-//     CharactersCharacterIdNotificationsGet.items.properties.type — 254
-//     values). A name that is not in that enum can never arrive from ESI,
-//     so this is the property worth machine-checking; TestCatalogueTypes
-//     ExistInLiveSpecEnum does exactly that against the snapshot.
+// Two properties are machine-checked, from two different sources:
 //
-//  2. THE DOMAIN ASSIGNMENT IS NOT VERIFIED against the nominal upstream.
-//     The roadmap names eveseat/notifications `src/Notifications/**` as
-//     the authoritative source for which of CCP's 254 types are promoted
-//     to first-class alerts and which directory (= domain) each lives in.
-//     That repository is NOT fetchable in this environment (the same
-//     constraint Phase 13 hit with MurmurRPC's actual .proto). The
-//     selection and domain placement below are therefore HANGAR's
-//     judgement, constrained to hit §4.4's per-domain counts exactly and
-//     chosen for operational usefulness to a corporation-management tool.
-//     They are NOT a reproduction of eveseat's file tree and must not be
-//     presented as one. Reconciling them against the real upstream is a
-//     follow-up worth doing the moment that source is reachable.
+//  1. EVERY CategoryESINotification NAME IS A REAL CCP TYPE — present
+//     verbatim in the live ingested spec's own notification `type` enum
+//     (internal/esi/catalogue/embedded/openapi.snapshot.json, 254 values).
+//     TestCatalogueTypesExistInLiveSpecEnum.
+//  2. EVERY CategoryESINotification NAME IS ALSO IN THE UPSTREAM'S OWN
+//     SET, in the same domain. TestCatalogueMatchesMeasuredUpstream.
 //
-// The counts are the contract; the membership is a defensible reading.
+// ── WHERE HANGAR DELIBERATELY DIFFERS FROM UPSTREAM ─────────────────────
+// The per-domain COUNTS are the upstream's, exactly. The membership is the
+// upstream's wherever the upstream entry is a CCP notification type. It
+// differs in exactly three places, each a substitution of a HANGAR
+// equivalent for an upstream entry that is NOT a CCP notification (SeAT
+// computes those from synced data with an observer — the same job
+// HANGAR's 'threshold' and 'domain_event' categories do):
+//
+//   - platform (7): upstream's Seat/ set is SeAT's own platform events
+//     (CreatedUser, DisabledToken, EnabledToken, three squad events,
+//     TestNotification). HANGAR's seven are HANGAR's own platform events,
+//     seeded since Phase 1a and already referenced by operators' routing
+//     rules. Same count, same role, different platform.
+//   - Corporations (5) and Contracts (1): upstream's `inactive_member` and
+//     `contract_created` are observer-computed. HANGAR's equivalents are
+//     threshold alerts over the same underlying data, each declaring the
+//     synced source route §4.4 requires.
+//   - Characters (7): upstream's Killmail and NewMailMessage are
+//     observer-computed. HANGAR's equivalents are domain events over its
+//     own synced killmail and mail tables. (NewMailMessage is also the
+//     upstream dead-code case noted in the measurement file — it has files
+//     but no alert key, so nothing upstream can dispatch it.)
+//
+// And one substitution inside Structures, which is the only place a count
+// slot is taken by something other than the upstream's own entry:
+//
+//   - StructureFuelAlert and TowerResourceAlertMsg (CCP's fixed-schedule
+//     fuel warnings for upwell structures and starbases) are replaced by
+//     HANGAR's two computed fuel-low thresholds. §4.4 REQUIRES those
+//     thresholds and names their source routes
+//     (/corporations/{id}/structures and the starbase DETAIL route), and a
+//     threshold computed from synced fuel data strictly supersedes CCP's
+//     warning: it fires on an operator-chosen margin rather than CCP's
+//     fixed one. The two displaced CCP types are not lost — Principle 14's
+//     open-vocabulary path (internal/alerting.Emitter.IngestNotification)
+//     registers any unseeded type on first sighting and puts it on the
+//     unknown-types board, where an operator can route it.
+//
+// TestCatalogueMatchesMeasuredUpstream asserts these substitutions are
+// EXACTLY the ones listed above — a new divergence fails the build rather
+// than passing silently.
 // ─────────────────────────────────────────────────────────────────────────
 
 // Catalogue is the seeded alert-type set. Order within a domain is
 // operational (most severe first) rather than alphabetical, so an operator
 // reading `hangar admin alerts list` sees the ones that matter at the top.
 var Catalogue = []AlertType{
-	// ── Structures (22 = 15 CCP + 5 Skyhook + 2 threshold) ──────────────
-	// The 5 Skyhook types are §4.4's explicitly named subset; they are
-	// grouped together below and counted by TestAlertCatalogueSeeds54
-	// AcrossEightDomains's Skyhook assertion.
+	// ── Structures (23 = 21 CCP + 2 threshold) ──────────────────────────
+	// The upstream's 23, with StructureFuelAlert and TowerResourceAlertMsg
+	// replaced by HANGAR's two computed fuel-low thresholds (see the
+	// sourcing note above). The 5 Skyhook types §4.4 names explicitly are
+	// all present.
 	{Name: "StructureUnderAttack", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Structure under attack"},
 	{Name: "StructureLostShields", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Structure lost its shields"},
 	{Name: "StructureLostArmor", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Structure lost its armour"},
 	{Name: "StructureDestroyed", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Structure destroyed"},
-	{Name: "StructureFuelAlert", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Structure fuel running out"},
 	{Name: "StructureAnchoring", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Structure anchoring"},
 	{Name: "StructureUnanchoring", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Structure unanchoring"},
-	{Name: "StructureOnline", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Structure online"},
 	{Name: "StructureServicesOffline", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Structure services offline"},
 	{Name: "StructureWentHighPower", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Structure went high power"},
 	{Name: "StructureWentLowPower", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Structure went low power"},
-	{Name: "StructureImpendingAbandonmentAssetsAtRisk", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Assets at risk in an abandoning structure"},
 	{Name: "OwnershipTransferred", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Structure ownership transferred"},
-	// TowerAlertMsg/TowerResourceAlertMsg are the starbase (POS) analogues
-	// of StructureUnderAttack/StructureFuelAlert — same domain, different
-	// upstream structure family.
+	{Name: "AllAnchoringMsg", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Alliance structure anchoring"},
+	// Starbase (POS) and customs-office family.
 	{Name: "TowerAlertMsg", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Starbase under attack"},
-	{Name: "TowerResourceAlertMsg", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Starbase fuel running out"},
-
-	// Skyhook (5) — §4.4's named subset. Equinox-era structures; all five
-	// names are present in the live spec enum.
+	{Name: "OrbitalAttacked", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Customs office under attack"},
+	{Name: "OrbitalReinforced", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Customs office reinforced"},
+	// Moon mining. Note CCP's own casing: "Moonmining", not "MoonMining"
+	// (upstream's PHP class names use the second, its alert KEYS use the
+	// first — the keys are what arrives on the wire, so the keys are what
+	// this catalogue stores).
+	{Name: "MoonminingExtractionStarted", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Moon extraction started"},
+	{Name: "MoonminingExtractionFinished", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Moon extraction finished"},
+	// Skyhook (5) — §4.4's named subset, confirmed by the measurement.
 	{Name: "SkyhookUnderAttack", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Skyhook under attack"},
 	{Name: "SkyhookLostShields", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Skyhook lost its shields"},
 	{Name: "SkyhookDestroyed", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Skyhook destroyed"},
 	{Name: "SkyhookDeployed", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Skyhook deployed"},
 	{Name: "SkyhookOnline", Domain: DomainStructures, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Skyhook online"},
 
-	// Threshold (2) — the two §4.4 names explicitly: "Structure and
-	// starbase fuel alerts depend on /corporations/{id}/structures and
-	// /corporations/{id}/starbases/{starbase_id} respectively". The
-	// starbase one's alert_type string is fixed by
-	// 02_DATABASE_SCHEMA.md §4.x and migration 00010's own comment
-	// ("app.alert_type('corporation.starbase.fuel_low').source_route_id"),
-	// so it is used verbatim and the structure one mirrors its shape.
-	//
-	// Note the starbase source is the DETAIL route, not the list route:
-	// app.starbase_detail.fuels — the fuel bay itself — is only populated
-	// by the detail fan-out (Phase 8.1 wired it for exactly this reason).
+	// The two fuel thresholds §4.4 mandates, with the two source routes it
+	// names. The starbase one uses the DETAIL route because
+	// app.starbase_detail.fuels — the actual fuel bay — is only populated
+	// by the detail fan-out (Phase 8.1 wired it for exactly this reason);
+	// the list route would be the wrong declaration even though it is also
+	// in the sync set. corporation.starbase.fuel_low's exact spelling is
+	// fixed by 02_DATABASE_SCHEMA.md and migration 00010's own comment.
 	{
 		Name: "corporation.structure.fuel_low", Domain: DomainStructures, Category: CategoryThreshold,
 		SourceRoute: "/corporations/{corporation_id}/structures", SourceMethod: "GET",
@@ -122,22 +154,24 @@ var Catalogue = []AlertType{
 		DefaultEnabled: true, Summary: "Starbase fuel below threshold",
 	},
 
-	// ── Characters (7) ──────────────────────────────────────────────────
-	{Name: "CharTerminationMsg", Domain: DomainCharacters, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Character removed from corporation"},
-	{Name: "CharLeftCorpMsg", Domain: DomainCharacters, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Character left the corporation"},
-	{Name: "CharMedalMsg", Domain: DomainCharacters, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Medal awarded"},
-	{Name: "CloneActivationMsg2", Domain: DomainCharacters, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Jump clone activated"},
-	{Name: "JumpCloneDeletedMsg1", Domain: DomainCharacters, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Jump clone deleted"},
-	{Name: "InsurancePayoutMsg", Domain: DomainCharacters, Category: CategoryESINotification, DefaultEnabled: false, Summary: "Insurance paid out"},
-	{Name: "ExpertSystemExpiryImminent", Domain: DomainCharacters, Category: CategoryESINotification, DefaultEnabled: false, Summary: "Expert system about to expire"},
+	// ── Characters (7 = 5 CCP + 2 domain event) ─────────────────────────
+	{Name: "RaffleCreated", Domain: DomainCharacters, Category: CategoryESINotification, DefaultEnabled: false, Summary: "Raffle created"},
+	{Name: "RaffleExpired", Domain: DomainCharacters, Category: CategoryESINotification, DefaultEnabled: false, Summary: "Raffle expired"},
+	{Name: "RaffleFinished", Domain: DomainCharacters, Category: CategoryESINotification, DefaultEnabled: false, Summary: "Raffle finished"},
+	{Name: "ResearchMissionAvailableMsg", Domain: DomainCharacters, Category: CategoryESINotification, DefaultEnabled: false, Summary: "Research mission available"},
+	{Name: "StoryLineMissionAvailableMsg", Domain: DomainCharacters, Category: CategoryESINotification, DefaultEnabled: false, Summary: "Storyline mission available"},
+	// HANGAR equivalents of upstream's two observer-computed entries.
+	// Domain events rather than thresholds: they fire on a row arriving,
+	// not on a value crossing a boundary, so there is no threshold to
+	// evaluate and no source route to declare.
+	{Name: "character.killmail.received", Domain: DomainCharacters, Category: CategoryDomainEvent, DefaultEnabled: false, Summary: "Killmail recorded"},
+	{Name: "character.mail.received", Domain: DomainCharacters, Category: CategoryDomainEvent, DefaultEnabled: false, Summary: "New EVE mail"},
 
 	// ── platform (7) ────────────────────────────────────────────────────
-	// HANGAR's own events. These seven already existed in
-	// db/seed/alert_types.sql from Phase 1a (that file's header explains
-	// why only these seven could be seeded before app.esi_route existed);
-	// they are restated here because this Go catalogue — not the SQL — is
-	// the build-time source of truth the count assertions read, and
-	// TestSeedSQLMatchesGoCatalogue proves the two agree.
+	// HANGAR's own platform events, seeded since Phase 1a. The upstream's
+	// Seat/ set is SeAT's equivalent (CreatedUser, DisabledToken,
+	// EnabledToken, three squad events, TestNotification) — same count,
+	// same role, a different platform's events.
 	{Name: "hangar.platform.replica_clustered", Domain: DomainPlatform, Category: CategoryDomainEvent, DefaultEnabled: true, Summary: "Rate-limit ledger switched to clustered mode"},
 	{Name: "hangar.platform.replica_solo", Domain: DomainPlatform, Category: CategoryDomainEvent, DefaultEnabled: true, Summary: "Rate-limit ledger switched to solo mode"},
 	{Name: "hangar.platform.esi_pin_advanced", Domain: DomainPlatform, Category: CategoryDomainEvent, DefaultEnabled: true, Summary: "ESI compatibility pin advanced"},
@@ -147,34 +181,30 @@ var Catalogue = []AlertType{
 	{Name: "hangar.provisioning.driver_unreachable", Domain: DomainPlatform, Category: CategoryDomainEvent, DefaultEnabled: true, Summary: "Provisioning driver unreachable"},
 
 	// ── Wars (6) ────────────────────────────────────────────────────────
-	// §4.4 [v3.1 — B10]: "Wars are notification-derived." All six are CCP
-	// notification types; §6 exposes no wars endpoint and §5.2 defines no
-	// wars table, and this phase invents neither.
-	//
-	// "WarAdopted" carries a VERIFIED CCP SPEC QUIRK: the live enum value
-	// is "WarAdopted " — with a trailing space. See Normalize below; the
-	// catalogue stores the trimmed form and the interpreter trims before
-	// lookup, so a payload carrying CCP's literal spelling still matches.
+	// §4.4 [v3.1 — B10]: "Wars are notification-derived." All six are the
+	// upstream's own, all CCP notification types; §6 exposes no wars
+	// endpoint and §5.2 defines no wars table, and this phase invents
+	// neither. (ESI does expose /wars — that is CCP's API, not HANGAR's
+	// §6 surface, and nothing here reads it.)
 	{Name: "WarDeclared", Domain: DomainWars, Category: CategoryESINotification, DefaultEnabled: true, Summary: "War declared"},
-	{Name: "WarInvalid", Domain: DomainWars, Category: CategoryESINotification, DefaultEnabled: true, Summary: "War invalidated"},
-	{Name: "WarRetractedByConcord", Domain: DomainWars, Category: CategoryESINotification, DefaultEnabled: true, Summary: "War retracted by CONCORD"},
-	{Name: "WarAdopted", Domain: DomainWars, Category: CategoryESINotification, DefaultEnabled: true, Summary: "War adopted"},
-	{Name: "WarInherited", Domain: DomainWars, Category: CategoryESINotification, DefaultEnabled: true, Summary: "War inherited"},
+	{Name: "AllWarDeclaredMsg", Domain: DomainWars, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Alliance war declared"},
+	{Name: "AllWarInvalidatedMsg", Domain: DomainWars, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Alliance war invalidated"},
+	{Name: "AllyJoinedWarAggressorMsg", Domain: DomainWars, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Ally joined the war on the aggressing side"},
+	{Name: "AllyJoinedWarAllyMsg", Domain: DomainWars, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Ally joined the war"},
 	{Name: "AllyJoinedWarDefenderMsg", Domain: DomainWars, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Ally joined the war on the defending side"},
 
 	// ── Corporations (5 = 4 CCP + 1 threshold) ──────────────────────────
 	{Name: "CorpAppNewMsg", Domain: DomainCorporations, Category: CategoryESINotification, DefaultEnabled: true, Summary: "New corporation application"},
-	{Name: "CharAppAcceptMsg", Domain: DomainCorporations, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Corporation application accepted"},
-	{Name: "CharAppWithdrawMsg", Domain: DomainCorporations, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Corporation application withdrawn"},
-	{Name: "CorpNewCEOMsg", Domain: DomainCorporations, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Corporation has a new CEO"},
-	// §4.4's third named threshold example ("extraction due"). The source
-	// route is the SINGULAR /corporation/... form, verbatim from the live
-	// spec — Principle 5; see internal/sync/worker/corporation.go's
-	// pagePaginatedRoutes for the same spelling.
+	{Name: "CharLeftCorpMsg", Domain: DomainCorporations, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Character left the corporation"},
+	{Name: "CorpAllBillMsg", Domain: DomainCorporations, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Corporation or alliance bill issued"},
+	{Name: "BillPaidCorpAllMsg", Domain: DomainCorporations, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Corporation or alliance bill paid"},
+	// HANGAR's equivalent of upstream's observer-computed `inactive_member`:
+	// a member whose last logon has fallen past the configured window,
+	// evaluated from synced member tracking.
 	{
-		Name: "corporation.moon_extraction.due", Domain: DomainCorporations, Category: CategoryThreshold,
-		SourceRoute: "/corporation/{corporation_id}/mining/extractions", SourceMethod: "GET",
-		DefaultEnabled: true, Summary: "Moon extraction chunk arriving",
+		Name: "corporation.member.inactive", Domain: DomainCorporations, Category: CategoryThreshold,
+		SourceRoute: "/corporations/{corporation_id}/membertracking", SourceMethod: "GET",
+		DefaultEnabled: false, Summary: "Corporation member inactive",
 	},
 
 	// ── Sovereignty (4) ─────────────────────────────────────────────────
@@ -184,11 +214,11 @@ var Catalogue = []AlertType{
 	{Name: "SovCommandNodeEventStarted", Domain: DomainSovereignty, Category: CategoryESINotification, DefaultEnabled: true, Summary: "Sovereignty command node event started"},
 
 	// ── Contracts (1) ───────────────────────────────────────────────────
-	// §4.4's second named threshold example ("expiring contracts"). The
-	// corporation contract list is the source rather than the character
-	// one because a contract lapsing unnoticed is a corporation-level
-	// operational failure; both routes are in the sync set, so either
-	// would satisfy the build-time check.
+	// HANGAR's equivalent of upstream's observer-computed `contract_created`,
+	// and §4.4's "expiring contracts" threshold example. The corporation
+	// contract list is the source rather than the character one because a
+	// contract lapsing unnoticed is a corporation-level operational
+	// failure; both routes are in the sync set.
 	{
 		Name: "corporation.contract.expiring", Domain: DomainContracts, Category: CategoryThreshold,
 		SourceRoute: "/corporations/{corporation_id}/contracts", SourceMethod: "GET",

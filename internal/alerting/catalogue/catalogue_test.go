@@ -19,30 +19,18 @@ import (
 // exit criterion: "exact per-domain counts including Wars 6 and Skyhooks
 // 5".
 //
-// ── WHY THIS TEST ASSERTS 53, NOT 54 ────────────────────────────────────
-// The eight per-domain counts this test enforces are 00_SRS_v3.1.md
-// §4.4's own, verbatim: Structures 22 (incl. 5 Skyhook), Characters 7,
-// platform 7, Wars 6, Corporations 5, Sovereignty 4, Contracts 1,
-// Alliances 1. They sum to 53. The same sentence in §4.4 — and
-// 03_IMPLEMENTATION_ROADMAP.md's Phase 14 design note, and this phase's
-// prompt seed, and migration 00008's header — states the total is 54.
-// Both cannot hold; this is a genuine specification defect, reported in
-// full on catalogue.DocumentedTotal rather than silently reconciled.
+// ── THE COUNTS THIS ENFORCES, AND WHERE THEY COME FROM ──────────────────
+// Seven of the eight are 00_SRS_v3.1.md §4.4's own, verbatim. The eighth,
+// Structures, is 23 rather than the 22 §4.4 states — a specification
+// defect Phase 14 REPORTED (its eight numbers summed to 53 against a
+// stated total of 54) and Phase 14.1 RESOLVED by measuring the upstream
+// directly: BASELINE.md §4's own pipeline, applied to the pinned commit,
+// reproduces the total of 54 and puts 23 in Structures.
 //
-// The defect is in the BREAKDOWN, not the total: docs/BASELINE.md §4
-// records Phase 0 measuring 54 concrete types against a real clone of
-// eveseat/notifications at a pinned commit, so one domain count is
-// understated by one. Which one is not determinable here (BASELINE.md
-// recorded only the total, and the upstream is not fetchable from this
-// build environment), and inventing a 54th type into a guessed domain
-// would replace a documented shortfall with a silent, wrong assignment.
-//
-// The fix, once someone with a clone re-runs BASELINE.md §4's pipeline
-// grouped per category (the exact command is in catalogue.DocumentedTotal's
-// doc comment), is one line: correct the short domain in
-// catalogue.ExpectedCounts and add the type it names. At that point this
-// test's arithmetic check starts agreeing with DocumentedTotal on its own,
-// and the require.Equal(53) below is what will fail to say so.
+// So the total the test asserts is now 54 — DocumentedTotal — and it
+// agrees with SeededTotal() rather than contradicting it. See
+// catalogue.DocumentedTotal for the full account and
+// testdata/upstream/eveseat_notifications_alerts.txt for the measurement.
 func TestAlertCatalogueSeeds54AcrossEightDomains(t *testing.T) {
 	counts := catalogue.CountByDomain()
 
@@ -65,9 +53,10 @@ func TestAlertCatalogueSeeds54AcrossEightDomains(t *testing.T) {
 
 	require.Len(t, catalogue.Catalogue, catalogue.SeededTotal(),
 		"the catalogue must seed exactly the sum of the per-domain counts")
-	require.Equal(t, 53, catalogue.SeededTotal(),
-		"the per-domain counts sum to 53 while docs/BASELINE.md §4 measured 54 upstream — see "+
-			"catalogue.DocumentedTotal for the reported defect and the command that settles which domain is short")
+	require.Equal(t, catalogue.DocumentedTotal, catalogue.SeededTotal(),
+		"the per-domain counts must sum to the documented total of 54 — Phase 14.1 resolved the "+
+			"53-vs-54 defect by measuring the upstream; see catalogue.DocumentedTotal")
+	require.Equal(t, 54, catalogue.SeededTotal())
 
 	// §4.4 names the Skyhook subset explicitly; a Structures count of 22
 	// with four or six Skyhook types would pass the domain total while
@@ -177,13 +166,29 @@ func TestLiveSpecEnumWhitespaceQuirk(t *testing.T) {
 	require.Equal(t, []string{"WarAdopted "}, quirky,
 		"the live spec's notification type enum is expected to contain exactly one whitespace-bearing value")
 
-	entry, ok := catalogue.ByName("WarAdopted ")
-	require.True(t, ok, "CCP's literal spelling (with the trailing space) must resolve to the catalogue entry")
-	require.Equal(t, "WarAdopted", entry.Name, "the catalogue stores the trimmed name")
+	// WarAdopted is not one of the upstream's six war types, so it is not
+	// in this catalogue (Phase 14 included it on a guess; 14.1's
+	// measurement replaced the guessed set with the upstream's actual
+	// one). The quirk still matters: Normalize is what stops ANY type
+	// being keyed on an invisible character, and an unseeded type reaches
+	// the open-vocabulary path, where the name it registers under must be
+	// the trimmed one — otherwise the unknown-types board would show two
+	// indistinguishable entries and an operator's routing rule could never
+	// match the one carrying the space.
+	require.Equal(t, "WarAdopted", catalogue.Normalize("WarAdopted "),
+		"the trailing space must be trimmed before any lookup or registration")
+	require.Equal(t, "WarAdopted", catalogue.Normalize("WarAdopted"),
+		"trimming must be idempotent, so the fix survives CCP correcting the spec")
 
-	entry, ok = catalogue.ByName("WarAdopted")
-	require.True(t, ok, "the trimmed spelling must resolve too, so the fix survives CCP correcting the spec")
-	require.Equal(t, catalogue.DomainWars, entry.Domain)
+	_, ok := catalogue.ByName("WarAdopted ")
+	require.False(t, ok, "WarAdopted is not in the measured upstream's war set, so it is not seeded")
+
+	// Every seeded name must already be in normal form — a catalogue entry
+	// whose own name needed trimming could never be matched.
+	for _, entry := range catalogue.Catalogue {
+		require.Equal(t, entry.Name, catalogue.Normalize(entry.Name),
+			"seeded alert type %q must be in normal form", entry.Name)
+	}
 }
 
 // TestSeedSQLMatchesGoCatalogue keeps db/seed/alert_types.sql and this
@@ -253,4 +258,136 @@ func liveSpecNotificationTypes(t *testing.T) map[string]bool {
 		set[v] = true
 	}
 	return set
+}
+
+// TestCatalogueMatchesMeasuredUpstream is Phase 14.1's provenance check:
+// the catalogue is tied to a committed MEASUREMENT of eveseat/notifications
+// rather than to judgement.
+//
+// Phase 14 could not do this — the upstream was unreachable from its build
+// environment, so every domain assignment shipped flagged as unverified.
+// 14.1 measured the tree at the commit docs/BASELINE.md already pins and
+// committed the result to testdata/upstream/. This test reads that file and
+// asserts three things:
+//
+//  1. the per-domain counts match the measurement exactly;
+//  2. every CCP notification type HANGAR seeds is one the upstream also
+//     carries, in the SAME domain;
+//  3. HANGAR's divergences from the upstream are EXACTLY the documented
+//     substitutions — a new one fails the build instead of passing quietly.
+func TestCatalogueMatchesMeasuredUpstream(t *testing.T) {
+	upstream := readMeasuredUpstream(t)
+	require.Len(t, upstream, catalogue.DocumentedTotal,
+		"the committed measurement must carry all %d upstream entries", catalogue.DocumentedTotal)
+
+	// Upstream's directory names map onto HANGAR's domain vocabulary. Only
+	// the spellings differ; the sets are the same eight.
+	domainOf := map[string]catalogue.Domain{
+		"Structures":    catalogue.DomainStructures,
+		"Characters":    catalogue.DomainCharacters,
+		"Seat":          catalogue.DomainPlatform,
+		"Wars":          catalogue.DomainWars,
+		"Corporations":  catalogue.DomainCorporations,
+		"Sovereignties": catalogue.DomainSovereignty,
+		"Contracts":     catalogue.DomainContracts,
+		"Alliances":     catalogue.DomainAlliances,
+	}
+
+	// (1) per-domain counts.
+	upstreamCounts := map[catalogue.Domain]int{}
+	upstreamCCP := map[catalogue.Domain]map[string]bool{}
+	for _, entry := range upstream {
+		domain, ok := domainOf[entry.domain]
+		require.True(t, ok, "measurement names an upstream domain %q with no HANGAR equivalent", entry.domain)
+		upstreamCounts[domain]++
+		if entry.kind == "ccp" {
+			if upstreamCCP[domain] == nil {
+				upstreamCCP[domain] = map[string]bool{}
+			}
+			upstreamCCP[domain][entry.name] = true
+		}
+	}
+	for _, domain := range catalogue.Domains {
+		require.Equal(t, upstreamCounts[domain], catalogue.ExpectedCounts[domain],
+			"domain %q: HANGAR's count must equal the measured upstream's", domain)
+	}
+	require.Equal(t, 23, upstreamCounts[catalogue.DomainStructures],
+		"the measurement is what corrects §4.4's Structures figure from 22 to 23")
+
+	// (2) every seeded CCP type is the upstream's, in the same domain.
+	seededCCP := map[catalogue.Domain]map[string]bool{}
+	for _, entry := range catalogue.Catalogue {
+		if entry.Category != catalogue.CategoryESINotification {
+			continue
+		}
+		require.True(t, upstreamCCP[entry.Domain][entry.Name],
+			"alert type %q is seeded in domain %q but the measured upstream has no such CCP entry there",
+			entry.Name, entry.Domain)
+		if seededCCP[entry.Domain] == nil {
+			seededCCP[entry.Domain] = map[string]bool{}
+		}
+		seededCCP[entry.Domain][entry.Name] = true
+	}
+
+	// (3) the divergences are exactly the documented ones. Anything the
+	// upstream carries as a CCP type that HANGAR does not seed must appear
+	// here with its reason.
+	documentedOmissions := map[string]string{
+		"StructureFuelAlert":    "superseded by the corporation.structure.fuel_low threshold (§4.4 mandates it and names its source route)",
+		"TowerResourceAlertMsg": "superseded by the corporation.starbase.fuel_low threshold (§4.4 mandates it and names its source route)",
+	}
+	for domain, names := range upstreamCCP {
+		for name := range names {
+			if seededCCP[domain][name] {
+				continue
+			}
+			reason, documented := documentedOmissions[name]
+			require.True(t, documented,
+				"upstream CCP type %q (domain %q) is not seeded and not listed as a documented omission — "+
+					"either seed it or document why it is displaced", name, domain)
+			require.NotEmpty(t, reason)
+		}
+	}
+
+	// And no documented omission may be stale: if one gets seeded again,
+	// the entry here must go.
+	for name := range documentedOmissions {
+		_, seeded := catalogue.ByName(name)
+		require.False(t, seeded, "%q is documented as omitted but is now seeded — remove the omission entry", name)
+	}
+
+	// The non-CCP slots are HANGAR's own substitutions. Each must be a
+	// threshold or a domain event — never an esi_notification, which would
+	// mean HANGAR is claiming a CCP type the upstream does not have.
+	for _, entry := range catalogue.Catalogue {
+		if entry.Category == catalogue.CategoryESINotification {
+			continue
+		}
+		require.Contains(t,
+			[]catalogue.Category{catalogue.CategoryThreshold, catalogue.CategoryDomainEvent},
+			entry.Category, "alert type %q", entry.Name)
+	}
+}
+
+type upstreamEntry struct{ domain, name, kind string }
+
+// readMeasuredUpstream parses testdata/upstream/eveseat_notifications_alerts.txt
+// — the committed measurement, comments stripped.
+func readMeasuredUpstream(t *testing.T) []upstreamEntry {
+	t.Helper()
+
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "testdata", "upstream", "eveseat_notifications_alerts.txt"))
+	require.NoError(t, err)
+
+	var out []upstreamEntry
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		require.Len(t, fields, 3, "malformed measurement line: %q", line)
+		out = append(out, upstreamEntry{domain: fields[0], name: fields[1], kind: fields[2]})
+	}
+	return out
 }
