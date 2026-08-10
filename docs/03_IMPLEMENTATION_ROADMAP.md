@@ -832,6 +832,77 @@ ordering and automatic fallback on 403.
 
 ---
 
+## Phase 8.1 — Skyhook & sovereignty-hub reagent fixup
+
+**Objective.** Correct a Phase 8 schema defect before it becomes load-bearing for Phase 14's
+alert catalogue: skyhooks and sovereignty hubs are reagent-powered structures, not fuel-powered
+ones, and Phase 8 modeled both with the same `fuel_expires` column
+`corporation_structure`/`corporation_starbase` legitimately use.
+
+**Depends on.** Phase 8.
+
+**Trigger.** A post-Phase-8 review of the worker wiring found two compounding issues in the same
+area: (1) neither `GET .../structures/skyhooks/{skyhook_id}` nor
+`.../sovereignty-hubs/{sovereignty_hub_id}` returns anything resembling a fuel-expiry timestamp
+anywhere in the live embedded spec — both use a **reagent bay** instead
+(`reagents: [{type_id, secured_stock, unsecured_stock, last_cycle}]`); `fuel_expires` would have
+sat permanently `NULL`, which is worse than merely unpopulated because it implies a fuel-low
+alert capability that could never fire. (2) Phase 8 never wired the skyhook/sovereignty-hub
+**list** routes into `CorporationWorker` at all, and left the starbase/skyhook/sovereignty-hub
+**detail** and mining-observer-record routes — each needing a dynamic per-item path/query
+parameter — unwired ("scoped out... handlers exist, dispatch doesn't"). Since Phase 14's
+build-time check depends on `app.starbase_detail.fuels` actually being populated at runtime, and
+no later phase revisits corporation structures, this could not be deferred to Phase 9.
+
+**Scope.**
+
+* `app.corporation_skyhook`/`app.corporation_sovereignty_hub`: drop `fuel_expires`, add
+  `reagents jsonb NOT NULL DEFAULT '[]'` (mirroring `starbase_detail.fuels`'s existing shape);
+  add `corporation_skyhook.is_active boolean`.
+* Relax `corporation_skyhook.type_id`/`system_id` and `corporation_sovereignty_hub.type_id` to
+  nullable — none of the three is obtainable from ESI pre-SDE (a skyhook/sovereignty-hub has
+  exactly one real type in EVE, but neither list nor detail ever echoes it; skyhook `system_id`
+  needs the `planet_id -> planet -> system` SDE join). Left `NULL` rather than guessed —
+  Principle 13 forbids a silent hardcoded constant with no verifiable source.
+  `corporation_sovereignty_hub.system_id` has no such problem (the list gives `solar_system_id`
+  directly) and stays `NOT NULL`.
+* Wire the four previously-unwired fan-outs into `CorporationWorker`: starbase detail (the named
+  Phase 14 prerequisite), skyhook list + detail, sovereignty-hub list + detail, and
+  mining-observer-records detail. Each detail fan-out reads the already-synced parent list from
+  the database and makes one call per known id — a 403 on the first item aborts the remaining
+  calls (role failures are homogeneous across a corporation's own items), a 404 on any one item
+  is data (the item vanished between list and detail calls), never a failure.
+
+**Files.**
+
+```
+db/migrations/00033_phase8_1_skyhook_reagent_fixup.sql
+db/queries/corporation_structure.sql                    (skyhook/sovereignty-hub queries rewritten)
+internal/sync/handlers/corporation_deployables.go        (reagent DTOs, list+detail Sync functions)
+internal/sync/worker/corporation.go                      (fanoutDetail + four fan-out methods)
+testdata/esi/corporation/skyhook_detail.json              (updated)
+testdata/esi/corporation/sovereignty_hub_detail.json       (new)
+```
+
+**Exit criteria.**
+
+| Test | Assertion |
+| :-- | :-- |
+| `TestStarbaseDetailPopulatesFuelBay` | `app.starbase_detail.fuels` populates from a recorded fixture |
+| `TestSkyhookAndSovereigntyHubRoundTrip` | both detail endpoints round-trip through a real database, including a second-sync idempotency check |
+| `TestCorporationDTOsMatchLiveSpec` (extended) | skyhook/sovereignty-hub detail DTOs carry `reagents`/`reagent_bay`, never `fuel_expires` |
+| `TestSingularMiningPathsUsedVerbatim` (extended) | the mining-observer-records detail fan-out also uses the singular `/corporation/...` form |
+
+**Prompt seed.**
+> Implement HANGAR Phase 8.1: correct `app.corporation_skyhook`/`app.corporation_sovereignty_hub`
+> to model a reagent bay instead of a fuel expiry (neither structure type has a fuel-expiry
+> concept in the live spec), relax the three genuinely SDE-blocked identifier columns to
+> nullable rather than guessing at them, and wire the starbase/skyhook/sovereignty-hub detail
+> and mining-observer-record fan-outs `CorporationWorker` left unwired. Exit on the four named
+> tests.
+
+---
+
 ## Phase 9 — Route Handlers III (Assets, contracts, market, notifications, SDE)
 
 **Objective.** The remaining complex datasets plus SDE streaming.

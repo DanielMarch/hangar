@@ -1,0 +1,17 @@
+{
+  "fuel_access_list_id": 99887766,
+  "id": 1050000000001,
+  "reagent_bay": {
+    "last_updated": "2026-08-08T00:00:00Z",
+    "reagents": [
+      {"last_cycle": "2026-08-08T00:00:00Z", "secured_stock": 1200, "type_id": 16275, "unsecured_stock": 300}
+    ]
+  },
+  "resources": {"power": 0.85, "workforce": 0.62},
+  "solar_system_id": 30000142,
+  "upgrades": [
+    {"power_state": "online", "type_id": 81845}
+  ],
+  "vulnerability_window": {"end": "2026-08-10T04:00:00Z", "start": "2026-08-10T02:00:00Z"},
+  "workforce_transport": {"configuration": "standard", "state": "active"}
+}

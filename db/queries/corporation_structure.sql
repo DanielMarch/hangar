@@ -180,23 +180,55 @@ RETURNING *;
 -- name: GetStarbaseDetail :one
 SELECT * FROM app.starbase_detail WHERE corporation_id = $1 AND starbase_id = $2;
 
--- name: UpsertCorporationSkyhook :one
-INSERT INTO app.corporation_skyhook AS t (corporation_id, skyhook_id, type_id, system_id, planet_id, state, fuel_expires)
-VALUES ($1,$2,$3,$4,$5,$6,$7)
+-- name: UpsertCorporationSkyhookStub :one
+-- PHASE 8.1: GET .../structures/skyhooks (the LIST endpoint) gives only
+-- id + planet_id — type_id/system_id are unresolvable pre-SDE (see
+-- 00033_phase8_1_skyhook_reagent_fixup.sql) and state/reagents/is_active
+-- only appear on the DETAIL call. This upsert seeds the row's identity;
+-- UpsertCorporationSkyhookDetail (below) fills in the rest once the
+-- worker fans out to the per-skyhook detail call.
+INSERT INTO app.corporation_skyhook AS t (corporation_id, skyhook_id, planet_id)
+VALUES ($1,$2,$3)
+ON CONFLICT (corporation_id, skyhook_id) DO UPDATE SET planet_id = EXCLUDED.planet_id
+ WHERE t.planet_id IS DISTINCT FROM EXCLUDED.planet_id
+RETURNING *;
+
+-- name: DeleteCorporationSkyhooksNotIn :exec
+DELETE FROM app.corporation_skyhook
+ WHERE corporation_id = $1 AND NOT (skyhook_id = ANY(sqlc.arg(keep_skyhook_ids)::bigint[]));
+
+-- name: UpsertCorporationSkyhookDetail :one
+INSERT INTO app.corporation_skyhook AS t (corporation_id, skyhook_id, state, is_active, reagents)
+VALUES ($1,$2,$3,$4,$5)
 ON CONFLICT (corporation_id, skyhook_id) DO UPDATE
-   SET state = EXCLUDED.state, fuel_expires = EXCLUDED.fuel_expires, updated_at = now()
- WHERE (t.state, t.fuel_expires) IS DISTINCT FROM (EXCLUDED.state, EXCLUDED.fuel_expires)
+   SET state = EXCLUDED.state, is_active = EXCLUDED.is_active, reagents = EXCLUDED.reagents, updated_at = now()
+ WHERE (t.state, t.is_active, t.reagents) IS DISTINCT FROM (EXCLUDED.state, EXCLUDED.is_active, EXCLUDED.reagents)
 RETURNING *;
 
 -- name: ListCorporationSkyhooks :many
 SELECT * FROM app.corporation_skyhook WHERE corporation_id = $1 ORDER BY skyhook_id;
 
 -- name: UpsertCorporationSovereigntyHub :one
-INSERT INTO app.corporation_sovereignty_hub AS t (corporation_id, hub_id, type_id, system_id, fuel_expires)
-VALUES ($1,$2,$3,$4,$5)
+-- PHASE 8.1: type_id dropped from this list-endpoint upsert — it is
+-- unresolvable pre-SDE (00033_phase8_1_skyhook_reagent_fixup.sql) and the
+-- live list response never carries it; system_id has no such problem
+-- (solar_system_id is direct on the list entry).
+INSERT INTO app.corporation_sovereignty_hub AS t (corporation_id, hub_id, system_id)
+VALUES ($1,$2,$3)
+ON CONFLICT (corporation_id, hub_id) DO UPDATE SET system_id = EXCLUDED.system_id
+ WHERE t.system_id IS DISTINCT FROM EXCLUDED.system_id
+RETURNING *;
+
+-- name: DeleteCorporationSovereigntyHubsNotIn :exec
+DELETE FROM app.corporation_sovereignty_hub
+ WHERE corporation_id = $1 AND NOT (hub_id = ANY(sqlc.arg(keep_hub_ids)::bigint[]));
+
+-- name: UpsertCorporationSovereigntyHubDetail :one
+INSERT INTO app.corporation_sovereignty_hub AS t (corporation_id, hub_id, system_id, reagents)
+VALUES ($1,$2,$3,$4)
 ON CONFLICT (corporation_id, hub_id) DO UPDATE
-   SET fuel_expires = EXCLUDED.fuel_expires, updated_at = now()
- WHERE t.fuel_expires IS DISTINCT FROM EXCLUDED.fuel_expires
+   SET reagents = EXCLUDED.reagents, updated_at = now()
+ WHERE t.reagents IS DISTINCT FROM EXCLUDED.reagents
 RETURNING *;
 
 -- name: ListCorporationSovereigntyHubs :many

@@ -31,6 +31,7 @@ var corporationGoldenParsers = map[string]func([]byte) (any, error){
 	"skyhook_list":             func(b []byte) (any, error) { return handlers.ParseCorporationSkyhookList(b) },
 	"skyhook_detail":           func(b []byte) (any, error) { return handlers.ParseCorporationSkyhookDetail(b) },
 	"sovereignty_hub_list":     func(b []byte) (any, error) { return handlers.ParseCorporationSovereigntyHubList(b) },
+	"sovereignty_hub_detail":   func(b []byte) (any, error) { return handlers.ParseCorporationSovereigntyHubDetail(b) },
 	"alliance_history":         func(b []byte) (any, error) { return handlers.ParseCorporationAllianceHistory(b) },
 	"medals":                   func(b []byte) (any, error) { return handlers.ParseCorporationMedals(b) },
 	"medals_issued":            func(b []byte) (any, error) { return handlers.ParseCorporationMedalsIssued(b) },

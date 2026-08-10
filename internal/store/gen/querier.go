@@ -145,6 +145,8 @@ type Querier interface {
 	DeleteContactLabelsNotIn(ctx context.Context, ownerKind string, ownerID int64, keepLabelIds []int64) error
 	DeleteContactsNotIn(ctx context.Context, ownerKind string, ownerID int64, keepContactIds []int64) error
 	DeleteCorporationMembersNotIn(ctx context.Context, corporationID int64, keepCharacterIds []int64) error
+	DeleteCorporationSkyhooksNotIn(ctx context.Context, corporationID int64, keepSkyhookIds []int64) error
+	DeleteCorporationSovereigntyHubsNotIn(ctx context.Context, corporationID int64, keepHubIds []int64) error
 	// Flagged by sqlc's flag-delete rule for review: this is a cache, never a
 	// source of truth (§4.3), so an expired row has nothing worth a soft delete.
 	// Intended as a periodic housekeeping sweep (a later phase's River job);
@@ -629,8 +631,20 @@ type Querier interface {
 	UpsertCorporationProjectContribution(ctx context.Context, projectID uuid.UUID, characterID int64, amount decimal.Decimal) (AppCorporationProjectContribution, error)
 	UpsertCorporationProjectContributor(ctx context.Context, projectID uuid.UUID, characterID int64, joinedAt *time.Time) (AppCorporationProjectContributor, error)
 	UpsertCorporationShareholder(ctx context.Context, arg UpsertCorporationShareholderParams) (AppCorporationShareholder, error)
-	UpsertCorporationSkyhook(ctx context.Context, arg UpsertCorporationSkyhookParams) (AppCorporationSkyhook, error)
-	UpsertCorporationSovereigntyHub(ctx context.Context, arg UpsertCorporationSovereigntyHubParams) (AppCorporationSovereigntyHub, error)
+	UpsertCorporationSkyhookDetail(ctx context.Context, arg UpsertCorporationSkyhookDetailParams) (AppCorporationSkyhook, error)
+	// PHASE 8.1: GET .../structures/skyhooks (the LIST endpoint) gives only
+	// id + planet_id — type_id/system_id are unresolvable pre-SDE (see
+	// 00033_phase8_1_skyhook_reagent_fixup.sql) and state/reagents/is_active
+	// only appear on the DETAIL call. This upsert seeds the row's identity;
+	// UpsertCorporationSkyhookDetail (below) fills in the rest once the
+	// worker fans out to the per-skyhook detail call.
+	UpsertCorporationSkyhookStub(ctx context.Context, corporationID int64, skyhookID int64, planetID *int64) (AppCorporationSkyhook, error)
+	// PHASE 8.1: type_id dropped from this list-endpoint upsert — it is
+	// unresolvable pre-SDE (00033_phase8_1_skyhook_reagent_fixup.sql) and the
+	// live list response never carries it; system_id has no such problem
+	// (solar_system_id is direct on the list entry).
+	UpsertCorporationSovereigntyHub(ctx context.Context, corporationID int64, hubID int64, systemID int32) (AppCorporationSovereigntyHub, error)
+	UpsertCorporationSovereigntyHubDetail(ctx context.Context, arg UpsertCorporationSovereigntyHubDetailParams) (AppCorporationSovereigntyHub, error)
 	UpsertCorporationStarbase(ctx context.Context, arg UpsertCorporationStarbaseParams) (AppCorporationStarbase, error)
 	UpsertCorporationStructure(ctx context.Context, arg UpsertCorporationStructureParams) (AppCorporationStructure, error)
 	// app.character, app.character_token, app.character_token_scope

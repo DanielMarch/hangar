@@ -153,6 +153,13 @@ func SyncCorporationStarbaseDetail(ctx context.Context, s *store.Store, corporat
 }
 
 // ---- GET /corporations/{corporation_id}/structures/skyhooks (list, wrapped) ----
+//
+// PHASE 8.1 FIX (00033_phase8_1_skyhook_reagent_fixup.sql): skyhooks are
+// reagent-powered, not fuel-powered — the whole reason fuel_expires was
+// dropped from app.corporation_skyhook. type_id/system_id are genuinely
+// unresolvable pre-SDE (see that migration's header) and are now nullable;
+// this list sync only ever seeds identity (id, planet_id), never guesses
+// at either.
 
 type CorporationSkyhookListDTO struct {
 	Skyhooks []CorporationSkyhookListEntryDTO `json:"skyhooks"`
@@ -171,17 +178,60 @@ func ParseCorporationSkyhookList(body []byte) (CorporationSkyhookListDTO, error)
 	return dto, nil
 }
 
+// SyncCorporationSkyhooks seeds/prunes app.corporation_skyhook's identity
+// rows from the LIST response — the worker.go fan-out then calls
+// SyncCorporationSkyhookDetail per id to fill in state/reagents/is_active
+// (mirroring corporation_starbase's list-then-starbase_detail pattern,
+// except detail lives in the SAME table here, not a separate one).
+func SyncCorporationSkyhooks(ctx context.Context, s *store.Store, corporationID int64, skyhooks []CorporationSkyhookListEntryDTO) (SyncResult, error) {
+	ids := make([]int64, len(skyhooks))
+	for i, sh := range skyhooks {
+		ids[i] = sh.ID
+		planetID := sh.PlanetID
+		if _, err := s.UpsertCorporationSkyhookStub(ctx, corporationID, sh.ID, &planetID); ignoreUnchanged(err) != nil {
+			return SyncResult{}, fmt.Errorf("handlers: seeding skyhook %d for corp %d: %w", sh.ID, corporationID, err)
+		}
+	}
+	if err := s.DeleteCorporationSkyhooksNotIn(ctx, corporationID, ids); err != nil {
+		return SyncResult{}, fmt.Errorf("handlers: pruning stale skyhooks for corp %d: %w", corporationID, err)
+	}
+	return SyncResult{RowsAffected: int32(len(skyhooks))}, nil
+}
+
 // ---- GET /corporations/{corporation_id}/structures/skyhooks/{skyhook_id} (detail) ----
-// The list endpoint carries only id/planet_id — type_id, system_id and
-// fuel_expires (app.corporation_skyhook's other required columns) only
-// appear on the detail call, so the sync driver (worker/corporation.go)
-// fans out list -> one detail call per id, mirroring the starbase pattern.
+
+// CorporationSkyhookReagentDTO is one element of the detail response's
+// `reagents` array — the skyhook's actual power source (replacing the
+// fuel_expires concept dropped in Phase 8.1).
+type CorporationSkyhookReagentDTO struct {
+	LastCycle      time.Time `json:"last_cycle,omitempty"`
+	SecuredStock   int64     `json:"secured_stock"`
+	TypeID         int32     `json:"type_id"`
+	UnsecuredStock int64     `json:"unsecured_stock"`
+}
 
 type CorporationSkyhookDetailDTO struct {
-	ID       int64  `json:"id"`
-	IsActive bool   `json:"is_active"`
-	PlanetID int64  `json:"planet_id"`
-	State    string `json:"state"`
+	EffectiveWorkforce int64                          `json:"effective_workforce,omitempty"`
+	ID                 int64                          `json:"id"`
+	IsActive           bool                           `json:"is_active"`
+	PlanetID           int64                          `json:"planet_id"`
+	Reagents           []CorporationSkyhookReagentDTO `json:"reagents,omitempty"`
+	// ReinforcementTimer/TheftVulnerability are parsed for field-loss
+	// coverage but not persisted — no capability in Appendix A needs the
+	// raw timer windows independent of `state`, and adding columns for
+	// them is outside this fixup's scope (the fuel/reagent mismatch).
+	ReinforcementTimer *CorporationSkyhookTimerDTO  `json:"reinforcement_timer,omitempty"`
+	State              string                       `json:"state"`
+	TheftVulnerability *CorporationSkyhookWindowDTO `json:"theft_vulnerability,omitempty"`
+}
+
+type CorporationSkyhookTimerDTO struct {
+	End time.Time `json:"end,omitempty"`
+}
+
+type CorporationSkyhookWindowDTO struct {
+	Start time.Time `json:"start,omitempty"`
+	End   time.Time `json:"end,omitempty"`
 }
 
 func ParseCorporationSkyhookDetail(body []byte) (CorporationSkyhookDetailDTO, error) {
@@ -192,36 +242,33 @@ func ParseCorporationSkyhookDetail(body []byte) (CorporationSkyhookDetailDTO, er
 	return dto, nil
 }
 
-// SyncCorporationSkyhook upserts app.corporation_skyhook from the detail
-// call. typeID/systemID/fuelExpires come from the worker's own knowledge
-// (the structure catalogue / a separate resolution step) because the
-// skyhook detail response itself carries neither type_id nor system_id —
-// documented as a further gap below.
-//
-// SPEC GAP: app.corporation_skyhook requires type_id and system_id
-// (00010_domain_corporation_structure.sql, table #15) and fuel_expires is
-// its whole fuel-tracking purpose, but NEITHER the list endpoint
-// (id/planet_id only) NOR the detail endpoint (id/planet_id/state/is_active/
-// reagents/timers) returns type_id, system_id, or fuel_expires anywhere.
-// A skyhook is a planetary structure (its type is always the one skyhook
-// type, and its system is resolvable via planet_id -> planet -> system,
-// which is Phase 9/25's SDE join, not data ESI hands back here). Reported
-// rather than worked around: typeID/systemID are accepted as caller-
-// supplied parameters (resolved elsewhere) so this function does not
-// silently write zero values; fuel_expires has no source at all and is
-// always persisted NULL until CCP's skyhook response schema adds it.
-func SyncCorporationSkyhook(ctx context.Context, s *store.Store, corporationID, skyhookID int64, typeID, systemID int32, dto CorporationSkyhookDetailDTO) (SyncResult, error) {
-	state := dto.State
-	if _, err := s.UpsertCorporationSkyhook(ctx, gen.UpsertCorporationSkyhookParams{
-		CorporationID: corporationID, SkyhookID: skyhookID, TypeID: typeID, SystemID: systemID,
-		PlanetID: &dto.PlanetID, State: &state, FuelExpires: nil,
+// SyncCorporationSkyhookDetail updates state/is_active/reagents on the row
+// SyncCorporationSkyhooks already seeded. type_id/system_id are never
+// touched here — see this file's Phase 8.1 header comment.
+func SyncCorporationSkyhookDetail(ctx context.Context, s *store.Store, corporationID, skyhookID int64, dto CorporationSkyhookDetailDTO) (SyncResult, error) {
+	reagents := dto.Reagents
+	if reagents == nil {
+		reagents = []CorporationSkyhookReagentDTO{}
+	}
+	reagentsJSON, err := json.Marshal(reagents)
+	if err != nil {
+		return SyncResult{}, fmt.Errorf("handlers: marshalling reagents for skyhook %d: %w", skyhookID, err)
+	}
+	state, isActive := dto.State, dto.IsActive
+	if _, err := s.UpsertCorporationSkyhookDetail(ctx, gen.UpsertCorporationSkyhookDetailParams{
+		CorporationID: corporationID, SkyhookID: skyhookID, State: &state, IsActive: &isActive, Reagents: reagentsJSON,
 	}); ignoreUnchanged(err) != nil {
-		return SyncResult{}, fmt.Errorf("handlers: upserting skyhook %d for corp %d: %w", skyhookID, corporationID, err)
+		return SyncResult{}, fmt.Errorf("handlers: upserting skyhook detail %d for corp %d: %w", skyhookID, corporationID, err)
 	}
 	return SyncResult{RowsAffected: 1}, nil
 }
 
 // ---- GET /corporations/{corporation_id}/structures/sovereignty-hubs (list, wrapped) ----
+//
+// PHASE 8.1 FIX: same reagent-not-fuel correction as skyhooks. Unlike
+// skyhooks, the list response DOES carry solar_system_id directly, so
+// system_id is never a gap here — only type_id (unresolvable pre-SDE,
+// same reasoning as skyhooks) and fuel_expires (replaced by reagents) changed.
 
 type CorporationSovereigntyHubListDTO struct {
 	SovereigntyHubs []CorporationSovereigntyHubListEntryDTO `json:"sovereignty_hubs"`
@@ -240,21 +287,88 @@ func ParseCorporationSovereigntyHubList(body []byte) (CorporationSovereigntyHubL
 	return dto, nil
 }
 
-// SyncCorporationSovereigntyHubs upserts every hub from the LIST response
-// directly — unlike skyhooks, the list already carries every column
-// app.corporation_sovereignty_hub models (id, solar_system_id); type_id has
-// no source here either (a sovereignty hub, like a skyhook, has exactly one
-// possible type in EVE, but ESI's list schema doesn't echo it) and
-// fuel_expires is on neither list nor detail — the detail response
-// (upgrades/resources/reagent_bay/workforce_transport) is a richer payload
-// this phase does not have a table for and is out of Phase 8's scope.
-func SyncCorporationSovereigntyHubs(ctx context.Context, s *store.Store, corporationID int64, typeID int32, hubs []CorporationSovereigntyHubListEntryDTO) (SyncResult, error) {
-	for _, h := range hubs {
-		if _, err := s.UpsertCorporationSovereigntyHub(ctx, gen.UpsertCorporationSovereigntyHubParams{
-			CorporationID: corporationID, HubID: h.ID, TypeID: typeID, SystemID: h.SolarSystemID, FuelExpires: nil,
-		}); ignoreUnchanged(err) != nil {
+// SyncCorporationSovereigntyHubs upserts every hub's identity from the
+// LIST response (id, solar_system_id — both directly available, unlike
+// skyhooks). SyncCorporationSovereigntyHubDetail (below) fills in reagents.
+func SyncCorporationSovereigntyHubs(ctx context.Context, s *store.Store, corporationID int64, hubs []CorporationSovereigntyHubListEntryDTO) (SyncResult, error) {
+	ids := make([]int64, len(hubs))
+	for i, h := range hubs {
+		ids[i] = h.ID
+		if _, err := s.UpsertCorporationSovereigntyHub(ctx, corporationID, h.ID, h.SolarSystemID); ignoreUnchanged(err) != nil {
 			return SyncResult{}, fmt.Errorf("handlers: upserting sovereignty hub %d for corp %d: %w", h.ID, corporationID, err)
 		}
 	}
+	if err := s.DeleteCorporationSovereigntyHubsNotIn(ctx, corporationID, ids); err != nil {
+		return SyncResult{}, fmt.Errorf("handlers: pruning stale sovereignty hubs for corp %d: %w", corporationID, err)
+	}
 	return SyncResult{RowsAffected: int32(len(hubs))}, nil
+}
+
+// ---- GET /corporations/{corporation_id}/structures/sovereignty-hubs/{sovereignty_hub_id} (detail) ----
+
+// CorporationSovereigntyHubReagentBayDTO mirrors the skyhook reagents
+// concept — a sovereignty hub is also reagent-powered, not fuel-powered.
+type CorporationSovereigntyHubReagentBayDTO struct {
+	LastUpdated time.Time                      `json:"last_updated,omitempty"`
+	Reagents    []CorporationSkyhookReagentDTO `json:"reagents,omitempty"`
+}
+
+// CorporationSovereigntyHubDetailDTO. `upgrades`/`resources`/
+// `workforce_transport`/`vulnerability_window`/`fuel_access_list_id` are
+// parsed for field-loss coverage but not persisted — a richer payload than
+// this fixup's scope (the fuel/reagent mismatch) covers; no Appendix A
+// capability needs them yet.
+type CorporationSovereigntyHubDetailDTO struct {
+	FuelAccessListID    *int64                                 `json:"fuel_access_list_id,omitempty"`
+	ID                  int64                                  `json:"id"`
+	ReagentBay          CorporationSovereigntyHubReagentBayDTO `json:"reagent_bay"`
+	Resources           CorporationSovereigntyHubResourcesDTO  `json:"resources"`
+	SolarSystemID       int32                                  `json:"solar_system_id"`
+	Upgrades            []CorporationSovereigntyHubUpgradeDTO  `json:"upgrades,omitempty"`
+	VulnerabilityWindow *CorporationSkyhookWindowDTO           `json:"vulnerability_window,omitempty"`
+	WorkforceTransport  CorporationSovereigntyHubWorkforceDTO  `json:"workforce_transport"`
+}
+
+type CorporationSovereigntyHubResourcesDTO struct {
+	Power     float64 `json:"power,omitempty"`
+	Workforce float64 `json:"workforce,omitempty"`
+}
+
+type CorporationSovereigntyHubUpgradeDTO struct {
+	PowerState string `json:"power_state,omitempty"`
+	TypeID     int32  `json:"type_id"`
+}
+
+type CorporationSovereigntyHubWorkforceDTO struct {
+	Configuration string `json:"configuration,omitempty"`
+	State         string `json:"state,omitempty"`
+}
+
+func ParseCorporationSovereigntyHubDetail(body []byte) (CorporationSovereigntyHubDetailDTO, error) {
+	var dto CorporationSovereigntyHubDetailDTO
+	if err := json.Unmarshal(body, &dto); err != nil {
+		return CorporationSovereigntyHubDetailDTO{}, fmt.Errorf("handlers: parsing corporation sovereignty hub detail: %w", err)
+	}
+	return dto, nil
+}
+
+// SyncCorporationSovereigntyHubDetail updates reagents on the row
+// SyncCorporationSovereigntyHubs already seeded. system_id is re-supplied
+// from the detail response itself (it's authoritative and directly
+// available, unlike skyhooks) rather than trusting the earlier list call.
+func SyncCorporationSovereigntyHubDetail(ctx context.Context, s *store.Store, corporationID int64, dto CorporationSovereigntyHubDetailDTO) (SyncResult, error) {
+	reagents := dto.ReagentBay.Reagents
+	if reagents == nil {
+		reagents = []CorporationSkyhookReagentDTO{}
+	}
+	reagentsJSON, err := json.Marshal(reagents)
+	if err != nil {
+		return SyncResult{}, fmt.Errorf("handlers: marshalling reagents for sovereignty hub %d: %w", dto.ID, err)
+	}
+	if _, err := s.UpsertCorporationSovereigntyHubDetail(ctx, gen.UpsertCorporationSovereigntyHubDetailParams{
+		CorporationID: corporationID, HubID: dto.ID, SystemID: dto.SolarSystemID, Reagents: reagentsJSON,
+	}); ignoreUnchanged(err) != nil {
+		return SyncResult{}, fmt.Errorf("handlers: upserting sovereignty hub detail %d for corp %d: %w", dto.ID, corporationID, err)
+	}
+	return SyncResult{RowsAffected: 1}, nil
 }

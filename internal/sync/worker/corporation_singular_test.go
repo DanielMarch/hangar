@@ -21,6 +21,14 @@ func TestSingularMiningPathsUsedVerbatim(t *testing.T) {
 		}
 	}
 
+	// The observer-records DETAIL route is fanned out separately
+	// (doMiningObserverRecordsFanout, not corporationDispatch) but must
+	// still be the singular form — checked directly against the constant
+	// Work's switch dispatches on.
+	if miningObserverRecordsPath != "/corporation/{corporation_id}/mining/observers/{observer_id}" {
+		t.Errorf("miningObserverRecordsPath must be the singular form, got %q", miningObserverRecordsPath)
+	}
+
 	pluralImposters := []string{
 		"/corporations/{corporation_id}/mining/extractions",
 		"/corporations/{corporation_id}/mining/observers",

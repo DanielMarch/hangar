@@ -1,1 +1,12 @@
-{"id": 1040000000001, "is_active": true, "planet_id": 40000123, "state": "active"}
+{
+  "effective_workforce": 850,
+  "id": 1040000000001,
+  "is_active": true,
+  "planet_id": 40000123,
+  "reagents": [
+    {"last_cycle": "2026-08-08T00:00:00Z", "secured_stock": 500, "type_id": 16274, "unsecured_stock": 100}
+  ],
+  "reinforcement_timer": {"end": "2026-08-15T00:00:00Z"},
+  "state": "active",
+  "theft_vulnerability": {"end": "2026-08-10T02:00:00Z", "start": "2026-08-10T00:00:00Z"}
+}

@@ -21,6 +21,26 @@ func (q *Queries) DeleteCorporationMembersNotIn(ctx context.Context, corporation
 	return err
 }
 
+const deleteCorporationSkyhooksNotIn = `-- name: DeleteCorporationSkyhooksNotIn :exec
+DELETE FROM app.corporation_skyhook
+ WHERE corporation_id = $1 AND NOT (skyhook_id = ANY($2::bigint[]))
+`
+
+func (q *Queries) DeleteCorporationSkyhooksNotIn(ctx context.Context, corporationID int64, keepSkyhookIds []int64) error {
+	_, err := q.db.Exec(ctx, deleteCorporationSkyhooksNotIn, corporationID, keepSkyhookIds)
+	return err
+}
+
+const deleteCorporationSovereigntyHubsNotIn = `-- name: DeleteCorporationSovereigntyHubsNotIn :exec
+DELETE FROM app.corporation_sovereignty_hub
+ WHERE corporation_id = $1 AND NOT (hub_id = ANY($2::bigint[]))
+`
+
+func (q *Queries) DeleteCorporationSovereigntyHubsNotIn(ctx context.Context, corporationID int64, keepHubIds []int64) error {
+	_, err := q.db.Exec(ctx, deleteCorporationSovereigntyHubsNotIn, corporationID, keepHubIds)
+	return err
+}
+
 const getStarbaseDetail = `-- name: GetStarbaseDetail :one
 SELECT corporation_id, starbase_id, system_id, state, fuel_bay_view, allow_alliance_members, allow_corporation_members, use_alliance_standings, attack_standing_threshold, fuels, reinforced_until, updated_at FROM app.starbase_detail WHERE corporation_id = $1 AND starbase_id = $2
 `
@@ -468,7 +488,7 @@ func (q *Queries) ListCorporationShareholders(ctx context.Context, corporationID
 }
 
 const listCorporationSkyhooks = `-- name: ListCorporationSkyhooks :many
-SELECT corporation_id, skyhook_id, type_id, system_id, planet_id, state, fuel_expires, updated_at FROM app.corporation_skyhook WHERE corporation_id = $1 ORDER BY skyhook_id
+SELECT corporation_id, skyhook_id, type_id, system_id, planet_id, state, updated_at, reagents, is_active FROM app.corporation_skyhook WHERE corporation_id = $1 ORDER BY skyhook_id
 `
 
 func (q *Queries) ListCorporationSkyhooks(ctx context.Context, corporationID int64) ([]AppCorporationSkyhook, error) {
@@ -487,8 +507,9 @@ func (q *Queries) ListCorporationSkyhooks(ctx context.Context, corporationID int
 			&i.SystemID,
 			&i.PlanetID,
 			&i.State,
-			&i.FuelExpires,
 			&i.UpdatedAt,
+			&i.Reagents,
+			&i.IsActive,
 		); err != nil {
 			return nil, err
 		}
@@ -501,7 +522,7 @@ func (q *Queries) ListCorporationSkyhooks(ctx context.Context, corporationID int
 }
 
 const listCorporationSovereigntyHubs = `-- name: ListCorporationSovereigntyHubs :many
-SELECT corporation_id, hub_id, type_id, system_id, fuel_expires, updated_at FROM app.corporation_sovereignty_hub WHERE corporation_id = $1 ORDER BY hub_id
+SELECT corporation_id, hub_id, type_id, system_id, updated_at, reagents FROM app.corporation_sovereignty_hub WHERE corporation_id = $1 ORDER BY hub_id
 `
 
 func (q *Queries) ListCorporationSovereigntyHubs(ctx context.Context, corporationID int64) ([]AppCorporationSovereigntyHub, error) {
@@ -518,8 +539,8 @@ func (q *Queries) ListCorporationSovereigntyHubs(ctx context.Context, corporatio
 			&i.HubID,
 			&i.TypeID,
 			&i.SystemID,
-			&i.FuelExpires,
 			&i.UpdatedAt,
+			&i.Reagents,
 		); err != nil {
 			return nil, err
 		}
@@ -931,34 +952,30 @@ func (q *Queries) UpsertCorporationShareholder(ctx context.Context, arg UpsertCo
 	return i, err
 }
 
-const upsertCorporationSkyhook = `-- name: UpsertCorporationSkyhook :one
-INSERT INTO app.corporation_skyhook AS t (corporation_id, skyhook_id, type_id, system_id, planet_id, state, fuel_expires)
-VALUES ($1,$2,$3,$4,$5,$6,$7)
+const upsertCorporationSkyhookDetail = `-- name: UpsertCorporationSkyhookDetail :one
+INSERT INTO app.corporation_skyhook AS t (corporation_id, skyhook_id, state, is_active, reagents)
+VALUES ($1,$2,$3,$4,$5)
 ON CONFLICT (corporation_id, skyhook_id) DO UPDATE
-   SET state = EXCLUDED.state, fuel_expires = EXCLUDED.fuel_expires, updated_at = now()
- WHERE (t.state, t.fuel_expires) IS DISTINCT FROM (EXCLUDED.state, EXCLUDED.fuel_expires)
-RETURNING corporation_id, skyhook_id, type_id, system_id, planet_id, state, fuel_expires, updated_at
+   SET state = EXCLUDED.state, is_active = EXCLUDED.is_active, reagents = EXCLUDED.reagents, updated_at = now()
+ WHERE (t.state, t.is_active, t.reagents) IS DISTINCT FROM (EXCLUDED.state, EXCLUDED.is_active, EXCLUDED.reagents)
+RETURNING corporation_id, skyhook_id, type_id, system_id, planet_id, state, updated_at, reagents, is_active
 `
 
-type UpsertCorporationSkyhookParams struct {
+type UpsertCorporationSkyhookDetailParams struct {
 	CorporationID int64
 	SkyhookID     int64
-	TypeID        int32
-	SystemID      int32
-	PlanetID      *int64
 	State         *string
-	FuelExpires   *time.Time
+	IsActive      *bool
+	Reagents      json.RawMessage
 }
 
-func (q *Queries) UpsertCorporationSkyhook(ctx context.Context, arg UpsertCorporationSkyhookParams) (AppCorporationSkyhook, error) {
-	row := q.db.QueryRow(ctx, upsertCorporationSkyhook,
+func (q *Queries) UpsertCorporationSkyhookDetail(ctx context.Context, arg UpsertCorporationSkyhookDetailParams) (AppCorporationSkyhook, error) {
+	row := q.db.QueryRow(ctx, upsertCorporationSkyhookDetail,
 		arg.CorporationID,
 		arg.SkyhookID,
-		arg.TypeID,
-		arg.SystemID,
-		arg.PlanetID,
 		arg.State,
-		arg.FuelExpires,
+		arg.IsActive,
+		arg.Reagents,
 	)
 	var i AppCorporationSkyhook
 	err := row.Scan(
@@ -968,36 +985,92 @@ func (q *Queries) UpsertCorporationSkyhook(ctx context.Context, arg UpsertCorpor
 		&i.SystemID,
 		&i.PlanetID,
 		&i.State,
-		&i.FuelExpires,
 		&i.UpdatedAt,
+		&i.Reagents,
+		&i.IsActive,
+	)
+	return i, err
+}
+
+const upsertCorporationSkyhookStub = `-- name: UpsertCorporationSkyhookStub :one
+INSERT INTO app.corporation_skyhook AS t (corporation_id, skyhook_id, planet_id)
+VALUES ($1,$2,$3)
+ON CONFLICT (corporation_id, skyhook_id) DO UPDATE SET planet_id = EXCLUDED.planet_id
+ WHERE t.planet_id IS DISTINCT FROM EXCLUDED.planet_id
+RETURNING corporation_id, skyhook_id, type_id, system_id, planet_id, state, updated_at, reagents, is_active
+`
+
+// PHASE 8.1: GET .../structures/skyhooks (the LIST endpoint) gives only
+// id + planet_id — type_id/system_id are unresolvable pre-SDE (see
+// 00033_phase8_1_skyhook_reagent_fixup.sql) and state/reagents/is_active
+// only appear on the DETAIL call. This upsert seeds the row's identity;
+// UpsertCorporationSkyhookDetail (below) fills in the rest once the
+// worker fans out to the per-skyhook detail call.
+func (q *Queries) UpsertCorporationSkyhookStub(ctx context.Context, corporationID int64, skyhookID int64, planetID *int64) (AppCorporationSkyhook, error) {
+	row := q.db.QueryRow(ctx, upsertCorporationSkyhookStub, corporationID, skyhookID, planetID)
+	var i AppCorporationSkyhook
+	err := row.Scan(
+		&i.CorporationID,
+		&i.SkyhookID,
+		&i.TypeID,
+		&i.SystemID,
+		&i.PlanetID,
+		&i.State,
+		&i.UpdatedAt,
+		&i.Reagents,
+		&i.IsActive,
 	)
 	return i, err
 }
 
 const upsertCorporationSovereigntyHub = `-- name: UpsertCorporationSovereigntyHub :one
-INSERT INTO app.corporation_sovereignty_hub AS t (corporation_id, hub_id, type_id, system_id, fuel_expires)
-VALUES ($1,$2,$3,$4,$5)
-ON CONFLICT (corporation_id, hub_id) DO UPDATE
-   SET fuel_expires = EXCLUDED.fuel_expires, updated_at = now()
- WHERE t.fuel_expires IS DISTINCT FROM EXCLUDED.fuel_expires
-RETURNING corporation_id, hub_id, type_id, system_id, fuel_expires, updated_at
+INSERT INTO app.corporation_sovereignty_hub AS t (corporation_id, hub_id, system_id)
+VALUES ($1,$2,$3)
+ON CONFLICT (corporation_id, hub_id) DO UPDATE SET system_id = EXCLUDED.system_id
+ WHERE t.system_id IS DISTINCT FROM EXCLUDED.system_id
+RETURNING corporation_id, hub_id, type_id, system_id, updated_at, reagents
 `
 
-type UpsertCorporationSovereigntyHubParams struct {
-	CorporationID int64
-	HubID         int64
-	TypeID        int32
-	SystemID      int32
-	FuelExpires   *time.Time
+// PHASE 8.1: type_id dropped from this list-endpoint upsert — it is
+// unresolvable pre-SDE (00033_phase8_1_skyhook_reagent_fixup.sql) and the
+// live list response never carries it; system_id has no such problem
+// (solar_system_id is direct on the list entry).
+func (q *Queries) UpsertCorporationSovereigntyHub(ctx context.Context, corporationID int64, hubID int64, systemID int32) (AppCorporationSovereigntyHub, error) {
+	row := q.db.QueryRow(ctx, upsertCorporationSovereigntyHub, corporationID, hubID, systemID)
+	var i AppCorporationSovereigntyHub
+	err := row.Scan(
+		&i.CorporationID,
+		&i.HubID,
+		&i.TypeID,
+		&i.SystemID,
+		&i.UpdatedAt,
+		&i.Reagents,
+	)
+	return i, err
 }
 
-func (q *Queries) UpsertCorporationSovereigntyHub(ctx context.Context, arg UpsertCorporationSovereigntyHubParams) (AppCorporationSovereigntyHub, error) {
-	row := q.db.QueryRow(ctx, upsertCorporationSovereigntyHub,
+const upsertCorporationSovereigntyHubDetail = `-- name: UpsertCorporationSovereigntyHubDetail :one
+INSERT INTO app.corporation_sovereignty_hub AS t (corporation_id, hub_id, system_id, reagents)
+VALUES ($1,$2,$3,$4)
+ON CONFLICT (corporation_id, hub_id) DO UPDATE
+   SET reagents = EXCLUDED.reagents, updated_at = now()
+ WHERE t.reagents IS DISTINCT FROM EXCLUDED.reagents
+RETURNING corporation_id, hub_id, type_id, system_id, updated_at, reagents
+`
+
+type UpsertCorporationSovereigntyHubDetailParams struct {
+	CorporationID int64
+	HubID         int64
+	SystemID      int32
+	Reagents      json.RawMessage
+}
+
+func (q *Queries) UpsertCorporationSovereigntyHubDetail(ctx context.Context, arg UpsertCorporationSovereigntyHubDetailParams) (AppCorporationSovereigntyHub, error) {
+	row := q.db.QueryRow(ctx, upsertCorporationSovereigntyHubDetail,
 		arg.CorporationID,
 		arg.HubID,
-		arg.TypeID,
 		arg.SystemID,
-		arg.FuelExpires,
+		arg.Reagents,
 	)
 	var i AppCorporationSovereigntyHub
 	err := row.Scan(
@@ -1005,8 +1078,8 @@ func (q *Queries) UpsertCorporationSovereigntyHub(ctx context.Context, arg Upser
 		&i.HubID,
 		&i.TypeID,
 		&i.SystemID,
-		&i.FuelExpires,
 		&i.UpdatedAt,
+		&i.Reagents,
 	)
 	return i, err
 }

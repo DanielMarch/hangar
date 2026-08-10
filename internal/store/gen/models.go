@@ -618,21 +618,22 @@ type AppCorporationShareholder struct {
 type AppCorporationSkyhook struct {
 	CorporationID int64
 	SkyhookID     int64
-	TypeID        int32
-	SystemID      int32
+	TypeID        *int32
+	SystemID      *int32
 	PlanetID      *int64
 	State         *string
-	FuelExpires   *time.Time
 	UpdatedAt     time.Time
+	Reagents      json.RawMessage
+	IsActive      *bool
 }
 
 type AppCorporationSovereigntyHub struct {
 	CorporationID int64
 	HubID         int64
-	TypeID        int32
+	TypeID        *int32
 	SystemID      int32
-	FuelExpires   *time.Time
 	UpdatedAt     time.Time
+	Reagents      json.RawMessage
 }
 
 type AppCorporationStarbase struct {

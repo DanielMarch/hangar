@@ -67,4 +67,14 @@ func TestCorporationDTOsMatchLiveSpec(t *testing.T) {
 		tags := jsonTags(t, handlers.CorporationMiningExtractionDTO{})
 		require.Contains(t, tags, "structure_id", "see 00032_phase8_mining_extraction_structure_id.sql — a required field the original migration lacked a column for")
 	})
+
+	t.Run("skyhooks and sovereignty hubs are reagent-powered, not fuel-powered (Phase 8.1 fixup)", func(t *testing.T) {
+		skyhookTags := jsonTags(t, handlers.CorporationSkyhookDetailDTO{})
+		require.Contains(t, skyhookTags, "reagents", "skyhook detail carries a reagents array, not a fuel expiry")
+		require.NotContains(t, skyhookTags, "fuel_expires", "GET .../structures/skyhooks/{skyhook_id} has no such field in the live spec")
+
+		hubTags := jsonTags(t, handlers.CorporationSovereigntyHubDetailDTO{})
+		require.Contains(t, hubTags, "reagent_bay", "sovereignty-hub detail carries a reagent_bay, not a fuel expiry")
+		require.NotContains(t, hubTags, "fuel_expires", "GET .../structures/sovereignty-hubs/{sovereignty_hub_id} has no such field in the live spec")
+	})
 }

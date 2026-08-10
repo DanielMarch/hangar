@@ -46,13 +46,14 @@ func wrapCorp[T any](parse func([]byte) (T, error), syncFn func(context.Context,
 // handler that syncs it — every "simple" route from Phase 8's scope
 // (members, titles, roles, role history, divisions, shareholders,
 // facilities, customs offices, container logs, structures, starbases,
-// alliance history, medals, standings, contacts, industry jobs,
-// blueprints, mining extractions/observers, market orders). Wallets are
-// registered separately (walletDispatch) because they need a `division`
-// path parameter this map's signature doesn't carry; starbase/skyhook/
-// sovereignty-hub DETAIL and mining-observer-record routes are registered
-// in fanoutDispatch for the same reason (an id per parent-list row, not a
-// single fixed URL per corporation).
+// skyhook/sovereignty-hub LISTS, alliance history, medals, standings,
+// contacts, industry jobs, blueprints, mining extractions/observers,
+// market orders). Wallet division routes and the four DETAIL/per-item
+// routes (starbase, skyhook, sovereignty-hub, mining-observer-record) each
+// need a dynamic path/query parameter this map's signature can't carry —
+// they're special-cased in Work's switch on route.UpstreamPath instead
+// (doWalletDivisionSync / doStarbaseDetailFanout / doSkyhookDetailFanout /
+// doSovereigntyHubDetailFanout / doMiningObserverRecordsFanout, all below).
 //
 // The mining routes are deliberately singular — "/corporation/..." not
 // "/corporations/..." — copied verbatim from the live spec
@@ -73,6 +74,28 @@ var corporationDispatch = map[string]corporationHandler{
 	"/corporations/{corporation_id}/containers/logs": wrapCorp(handlers.ParseCorporationContainerLog, handlers.SyncCorporationContainerLog),
 	"/corporations/{corporation_id}/structures":      wrapCorp(handlers.ParseCorporationStructures, handlers.SyncCorporationStructures),
 	"/corporations/{corporation_id}/starbases":       wrapCorp(handlers.ParseCorporationStarbases, handlers.SyncCorporationStarbases),
+	"/corporations/{corporation_id}/structures/skyhooks": func(ctx context.Context, s *store.Store, corporationID int64, body []byte) (int32, error) {
+		dto, err := handlers.ParseCorporationSkyhookList(body)
+		if err != nil {
+			return 0, err
+		}
+		res, err := handlers.SyncCorporationSkyhooks(ctx, s, corporationID, dto.Skyhooks)
+		if err != nil {
+			return 0, err
+		}
+		return res.RowsAffected, nil
+	},
+	"/corporations/{corporation_id}/structures/sovereignty-hubs": func(ctx context.Context, s *store.Store, corporationID int64, body []byte) (int32, error) {
+		dto, err := handlers.ParseCorporationSovereigntyHubList(body)
+		if err != nil {
+			return 0, err
+		}
+		res, err := handlers.SyncCorporationSovereigntyHubs(ctx, s, corporationID, dto.SovereigntyHubs)
+		if err != nil {
+			return 0, err
+		}
+		return res.RowsAffected, nil
+	},
 	"/corporations/{corporation_id}/alliancehistory": wrapCorp(handlers.ParseCorporationAllianceHistory, handlers.SyncCorporationAllianceHistory),
 	"/corporations/{corporation_id}/medals":          wrapCorp(handlers.ParseCorporationMedals, handlers.SyncCorporationMedals),
 	"/corporations/{corporation_id}/medals/issued":   wrapCorp(handlers.ParseCorporationMedalsIssued, handlers.SyncCorporationMedalsIssued),
@@ -255,6 +278,14 @@ func (w *CorporationWorker) Work(ctx context.Context, job *river.Job[planner.Syn
 		// doesn't carry — fanned out here rather than forcing every other
 		// simple route through a signature only two routes need.
 		rowsAffected, outcome, syncErr = w.doWalletDivisionSync(ctx, s, sub, route, args.EntityID, characterID, tok.Value)
+	case starbaseDetailPath:
+		rowsAffected, outcome, syncErr = w.doStarbaseDetailFanout(ctx, s, sub, route, args.EntityID, characterID, tok.Value)
+	case skyhookDetailPath:
+		rowsAffected, outcome, syncErr = w.doSkyhookDetailFanout(ctx, s, sub, route, args.EntityID, characterID, tok.Value)
+	case sovereigntyHubDetailPath:
+		rowsAffected, outcome, syncErr = w.doSovereigntyHubDetailFanout(ctx, s, sub, route, args.EntityID, characterID, tok.Value)
+	case miningObserverRecordsPath:
+		rowsAffected, outcome, syncErr = w.doMiningObserverRecordsFanout(ctx, s, sub, route, args.EntityID, characterID, tok.Value)
 	default:
 		handler, isSimple := corporationDispatch[route.UpstreamPath]
 		if !isSimple {
@@ -283,6 +314,17 @@ func (w *CorporationWorker) Work(ctx context.Context, job *river.Job[planner.Syn
 const (
 	walletJournalPath      = "/corporations/{corporation_id}/wallets/{division}/journal"
 	walletTransactionsPath = "/corporations/{corporation_id}/wallets/{division}/transactions"
+
+	// Phase 8.1: the detail routes Phase 8 left unwired (see this file's
+	// original corporationDispatch comment, which described a
+	// "fanoutDispatch" that never actually existed). Each needs a
+	// dynamic per-item path/query param the simple corporationHandler
+	// shape can't carry, so — like the wallet division routes above —
+	// they're special-cased here rather than forced through that shape.
+	starbaseDetailPath        = "/corporations/{corporation_id}/starbases/{starbase_id}"
+	skyhookDetailPath         = "/corporations/{corporation_id}/structures/skyhooks/{skyhook_id}"
+	sovereigntyHubDetailPath  = "/corporations/{corporation_id}/structures/sovereignty-hubs/{sovereignty_hub_id}"
+	miningObserverRecordsPath = "/corporation/{corporation_id}/mining/observers/{observer_id}"
 )
 
 func strPtr(s string) *string { return &s }
@@ -586,4 +628,217 @@ func joinJSONArray(elements []json.RawMessage) []byte {
 	}
 	out = append(out, ']')
 	return out
+}
+
+// fanoutDetailItem is one candidate detail call fanoutDetail should make:
+// the id substituted into the route's own {id-param} placeholder, plus any
+// extra path/query values that specific detail route needs beyond
+// {corporation_id} and the id itself (e.g. starbase detail's system_id
+// query parameter).
+type fanoutDetailItem struct {
+	id              int64
+	extraPathParams map[string]string
+	extraQuery      map[string]string
+}
+
+// fanoutDetail is the shared engine behind
+// doStarbaseDetailFanout/doSkyhookDetailFanout/doSovereigntyHubDetailFanout/
+// doMiningObserverRecordsFanout: for each already-known parent-list id,
+// make one detail call and sync it. A 403 on the FIRST item aborts the
+// remaining calls immediately (per-role 403s are almost always
+// homogeneous across every item of the same corporation/route -- see
+// doSync's 403 case comment) rather than burning the whole item set before
+// discovering the token can't do this at all; a 404 on any one item is
+// data (the structure/observer vanished between the list and detail
+// calls), not a failure, and simply skips that item.
+func (w *CorporationWorker) fanoutDetail(
+	ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute,
+	corporationID, characterID int64, accessToken, idPathParamName string,
+	items []fanoutDetailItem,
+	syncOne func(ctx context.Context, s *store.Store, id int64, body []byte) (int32, error),
+) (rowsAffected int32, outcome string, err error) {
+	outcome = "200"
+	for _, item := range items {
+		pathParams := map[string]string{
+			"corporation_id": strconv.FormatInt(corporationID, 10),
+			idPathParamName:  strconv.FormatInt(item.id, 10),
+		}
+		for k, v := range item.extraPathParams {
+			pathParams[k] = v
+		}
+		var query map[string][]string
+		if len(item.extraQuery) > 0 {
+			query = make(map[string][]string, len(item.extraQuery))
+			for k, v := range item.extraQuery {
+				query[k] = []string{v}
+			}
+		}
+
+		resp, doErr := w.Gateway.Do(ctx, esi.Request{
+			Method: route.Method, UpstreamPath: route.UpstreamPath,
+			PathParams: pathParams, Query: query, AccessToken: accessToken,
+			CacheMode:       derefStr(route.CacheMode),
+			RateLimitGroup:  derefStr(route.RateLimitGroup),
+			RateLimitMax:    int(derefInt32(route.RateLimitMax)),
+			RateLimitWindow: sync.IntervalToDuration(route.RateLimitWindow),
+			UserKey:         fmt.Sprintf("hangar:%d", characterID),
+		})
+		if doErr != nil {
+			return rowsAffected, normalize.Outcome(0, true), fmt.Errorf("worker: fetching detail for id %d of %s: %w", item.id, route.UpstreamPath, doErr)
+		}
+
+		switch resp.StatusCode {
+		case http.StatusOK:
+			n, syncErr := syncOne(ctx, s, item.id, resp.Body)
+			if syncErr != nil {
+				return rowsAffected, normalize.Outcome(resp.StatusCode, false), syncErr
+			}
+			rowsAffected += n
+			outcome = normalize.Outcome(resp.StatusCode, false)
+		case http.StatusNotFound:
+			continue
+		case http.StatusForbidden:
+			if err := s.RecordSync403(ctx, sub.SubscriptionID); err != nil {
+				return rowsAffected, normalize.Outcome(resp.StatusCode, false), err
+			}
+			if err := s.RecordActingCharacter403(ctx, gen.RecordActingCharacter403Params{
+				EntityKind: string(sync.EntityCorporation), EntityID: corporationID, RouteID: route.RouteID, CharacterID: characterID,
+			}); err != nil {
+				return rowsAffected, normalize.Outcome(resp.StatusCode, false), err
+			}
+			return rowsAffected, normalize.Outcome(resp.StatusCode, false), nil
+		default:
+			return rowsAffected, normalize.Outcome(resp.StatusCode, false), fmt.Errorf("worker: detail id %d of %s returned status %d", item.id, route.UpstreamPath, resp.StatusCode)
+		}
+	}
+
+	next, err := sync.PlanNextDueAt(sync.DueTimeInput{
+		Route:  sync.RouteCacheConfig{CacheMode: derefStr(route.CacheMode), CacheAge: sync.IntervalToDuration(route.CacheAge), BlockedByPin: route.BlockedByPin},
+		Policy: w.Policy, LastSuccess: time.Now(), Consecutive304: 0, OptInNoCache: sub.OptInNoCache, Now: time.Now(),
+	})
+	if err != nil {
+		return rowsAffected, outcome, err
+	}
+	if err := s.RecordSyncSuccess(ctx, gen.RecordSyncSuccessParams{
+		SubscriptionID: sub.SubscriptionID, LastStatus: statusOf(outcome), CursorAfter: sub.CursorAfter,
+		NextDueAt: next, Consecutive304: 0,
+	}); err != nil {
+		return rowsAffected, outcome, err
+	}
+	if err := s.ResetActingCharacter403(ctx, gen.ResetActingCharacter403Params{
+		EntityKind: string(sync.EntityCorporation), EntityID: corporationID, RouteID: route.RouteID, CharacterID: characterID,
+	}); err != nil {
+		return rowsAffected, outcome, err
+	}
+	return rowsAffected, outcome, nil
+}
+
+// doStarbaseDetailFanout fans out over every starbase
+// app.corporation_starbase's own list sync (an earlier subscription)
+// already knows about -- Phase 14's fuel-low alert depends on the
+// resulting app.starbase_detail.fuels (00010's header comment). system_id
+// is a required QUERY parameter on this route the list rows already
+// carry, never guessed.
+func (w *CorporationWorker) doStarbaseDetailFanout(ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute, corporationID, characterID int64, accessToken string) (int32, string, error) {
+	starbases, err := s.ListCorporationStarbases(ctx, corporationID)
+	if err != nil {
+		return 0, "", fmt.Errorf("worker: listing known starbases for corp %d: %w", corporationID, err)
+	}
+	items := make([]fanoutDetailItem, len(starbases))
+	systemByID := make(map[int64]int32, len(starbases))
+	for i, sb := range starbases {
+		items[i] = fanoutDetailItem{id: sb.StarbaseID, extraQuery: map[string]string{"system_id": strconv.FormatInt(int64(sb.SystemID), 10)}}
+		systemByID[sb.StarbaseID] = sb.SystemID
+	}
+	return w.fanoutDetail(ctx, s, sub, route, corporationID, characterID, accessToken, "starbase_id", items,
+		func(ctx context.Context, s *store.Store, starbaseID int64, body []byte) (int32, error) {
+			dto, err := handlers.ParseCorporationStarbaseDetail(body)
+			if err != nil {
+				return 0, err
+			}
+			res, err := handlers.SyncCorporationStarbaseDetail(ctx, s, corporationID, starbaseID, systemByID[starbaseID], dto)
+			if err != nil {
+				return 0, err
+			}
+			return res.RowsAffected, nil
+		})
+}
+
+// doSkyhookDetailFanout fans out over every skyhook this corporation's
+// list sync already knows about, filling in state/reagents/is_active
+// (Phase 8.1 -- see corporation_deployables.go's header comment on this
+// domain for the fuel-to-reagent correction).
+func (w *CorporationWorker) doSkyhookDetailFanout(ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute, corporationID, characterID int64, accessToken string) (int32, string, error) {
+	skyhooks, err := s.ListCorporationSkyhooks(ctx, corporationID)
+	if err != nil {
+		return 0, "", fmt.Errorf("worker: listing known skyhooks for corp %d: %w", corporationID, err)
+	}
+	items := make([]fanoutDetailItem, len(skyhooks))
+	for i, sh := range skyhooks {
+		items[i] = fanoutDetailItem{id: sh.SkyhookID}
+	}
+	return w.fanoutDetail(ctx, s, sub, route, corporationID, characterID, accessToken, "skyhook_id", items,
+		func(ctx context.Context, s *store.Store, skyhookID int64, body []byte) (int32, error) {
+			dto, err := handlers.ParseCorporationSkyhookDetail(body)
+			if err != nil {
+				return 0, err
+			}
+			res, err := handlers.SyncCorporationSkyhookDetail(ctx, s, corporationID, skyhookID, dto)
+			if err != nil {
+				return 0, err
+			}
+			return res.RowsAffected, nil
+		})
+}
+
+// doSovereigntyHubDetailFanout mirrors doSkyhookDetailFanout for
+// sovereignty hubs (Phase 8.1's same fuel-to-reagent correction).
+func (w *CorporationWorker) doSovereigntyHubDetailFanout(ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute, corporationID, characterID int64, accessToken string) (int32, string, error) {
+	hubs, err := s.ListCorporationSovereigntyHubs(ctx, corporationID)
+	if err != nil {
+		return 0, "", fmt.Errorf("worker: listing known sovereignty hubs for corp %d: %w", corporationID, err)
+	}
+	items := make([]fanoutDetailItem, len(hubs))
+	for i, h := range hubs {
+		items[i] = fanoutDetailItem{id: h.HubID}
+	}
+	return w.fanoutDetail(ctx, s, sub, route, corporationID, characterID, accessToken, "sovereignty_hub_id", items,
+		func(ctx context.Context, s *store.Store, hubID int64, body []byte) (int32, error) {
+			dto, err := handlers.ParseCorporationSovereigntyHubDetail(body)
+			if err != nil {
+				return 0, err
+			}
+			res, err := handlers.SyncCorporationSovereigntyHubDetail(ctx, s, corporationID, dto)
+			if err != nil {
+				return 0, err
+			}
+			return res.RowsAffected, nil
+		})
+}
+
+// doMiningObserverRecordsFanout fans out over every observer
+// /corporation/{corporation_id}/mining/observers (already synced) knows
+// about -- the singular upstream path is used verbatim, same as its
+// parent list route (TestSingularMiningPathsUsedVerbatim).
+func (w *CorporationWorker) doMiningObserverRecordsFanout(ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute, corporationID, characterID int64, accessToken string) (int32, string, error) {
+	observers, err := s.ListMiningObserversByCorporation(ctx, corporationID)
+	if err != nil {
+		return 0, "", fmt.Errorf("worker: listing known mining observers for corp %d: %w", corporationID, err)
+	}
+	items := make([]fanoutDetailItem, len(observers))
+	for i, o := range observers {
+		items[i] = fanoutDetailItem{id: o.ObserverID}
+	}
+	return w.fanoutDetail(ctx, s, sub, route, corporationID, characterID, accessToken, "observer_id", items,
+		func(ctx context.Context, s *store.Store, observerID int64, body []byte) (int32, error) {
+			dto, err := handlers.ParseCorporationMiningObserverRecords(body)
+			if err != nil {
+				return 0, err
+			}
+			res, err := handlers.SyncCorporationMiningObserverRecords(ctx, s, corporationID, observerID, dto)
+			if err != nil {
+				return 0, err
+			}
+			return res.RowsAffected, nil
+		})
 }

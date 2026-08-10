@@ -554,7 +554,7 @@ an asset transfer between owners is an insert plus a soft delete rather than a P
 
 | Group | Tables | Phase |
 | :-- | :-- | :-- |
-| **Corporation structure** (16) | `corporation_member`, `corporation_member_tracking`, `corporation_title`, `corporation_member_title`, `corporation_role`, `corporation_role_history`, `corporation_division`, `corporation_shareholder`, `corporation_facility`, `corporation_customs_office`, `corporation_container_log`, `corporation_structure`, `corporation_starbase`, `starbase_detail`, `corporation_skyhook`, `corporation_sovereignty_hub` | 8 |
+| **Corporation structure** (16) | `corporation_member`, `corporation_member_tracking`, `corporation_title`, `corporation_member_title`, `corporation_role`, `corporation_role_history`, `corporation_division`, `corporation_shareholder`, `corporation_facility`, `corporation_customs_office`, `corporation_container_log`, `corporation_structure`, `corporation_starbase`, `starbase_detail`, `corporation_skyhook`ᴿ, `corporation_sovereignty_hub`ᴿ | 8 |
 | **Corporation projects** (3, UUID-keyed) | `corporation_project`, `corporation_project_contributor`, `corporation_project_contribution` | 9 |
 | **History** (2) | `character_corporation_history`, `corporation_alliance_history` | 7/8 |
 | **Assets** (2) | `asset`, `asset_location` | 9 |
@@ -576,7 +576,18 @@ an asset transfer between owners is an insert plus a soft delete rather than a P
 
 ᴾ = `PARTITION BY RANGE`, monthly.
 
-**Tier 2 total: 78.** Combined with Tier 1: **129 tables**, matching SRS v3.1 §5.2.
+ᴿ = **Phase 8.1 fixup** (`00033_phase8_1_skyhook_reagent_fixup.sql`): the live spec models both
+structures as reagent-powered, not fuel-powered — `fuel_expires` was dropped in favour of a
+`reagents jsonb` column mirroring `starbase_detail.fuels`'s shape, and `type_id`
+(both tables) plus `corporation_skyhook.system_id` were relaxed to nullable, since none of the
+three is obtainable from ESI pre-SDE (Phase 9/25) and Principle 13 forbids guessing at a
+plausible-looking constant with no verifiable source.
+
+**Tier 2 total: 78.** Combined with Tier 1: **129 tables**, matching SRS v3.1 §5.2 — plus Phase
+8's own platform-tier addition, `app.sync_acting_character_history`
+(`00031_phase8_acting_character_history.sql`, §6.3's per-candidate 403 history — see that
+migration's header), for **135 tables** as actually migrated. `db/migrations_integration_test.go`
+and `db/migrations_domain_integration_test.go` assert the corrected total.
 
 Every table in this map traces to at least one §6 endpoint and at least one Appendix A
 capability. `docs/03_IMPLEMENTATION_ROADMAP.md` carries the phase mapping; a table with no
