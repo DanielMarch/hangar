@@ -23,6 +23,13 @@ const (
 	VocabRequiredRole     OpenVocabulary = "required_role"
 )
 
+// SuperuserPermission is the one permission internal/rbac.Resolve treats
+// specially: holding it (without an explicit deny on it) implicitly
+// allows every other permission that is not itself explicitly denied.
+// Named here, not in internal/rbac, because domain is the owner of the
+// closed permission vocabulary — internal/rbac only consumes it.
+const SuperuserPermission = "superuser"
+
 // Permission is one row of app.permission — HANGAR's own closed RBAC
 // vocabulary (the deliberate exception carved out by SRS v3.1 defect B11:
 // Principle 14 scopes openness to *external* vocabularies only).
@@ -41,6 +48,18 @@ type Permission struct {
 //
 //go:generate go run ../../tools/gen-permission-seed
 var Permissions = []Permission{
+	// -- superuser --
+	// Phase 10 spec gap, reported rather than silently papered over: the
+	// roadmap's RBAC design notes require "Superuser is a permission, not
+	// a bypass branch in code. A bypass branch cannot be denied" — but no
+	// such permission existed in this closed set before Phase 10. Added
+	// here so it is deniable like anything else (internal/rbac.Resolve
+	// treats it as an implicit fallback allow for every OTHER permission,
+	// but never overrides an explicit deny on the specific permission
+	// being checked, and is itself denied/revoked exactly like any other
+	// permission — see internal/rbac/resolve.go's doc comment).
+	{SuperuserPermission, "admin", "Bypass every permission check unless the specific permission is itself denied"},
+
 	// -- characters --
 	{"characters.view", "characters", "View character sheets, skills and clones"},
 	{"characters.manage_tokens", "characters", "Add or refresh a character's ESI token"},

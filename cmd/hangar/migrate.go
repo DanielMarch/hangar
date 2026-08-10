@@ -92,6 +92,15 @@ func runMigrateUp(ctx context.Context) error {
 		return fmt.Errorf("migrate: goose up: %w", err)
 	}
 	fmt.Println("migrate up: app/sde schema current")
+
+	// Phase 10 fix: db/seed/*.sql existed since Phase 1a with nothing
+	// applying it — harmless until app.role_grant's FK to app.permission
+	// made an empty app.permission table load-bearing. See db/seed.go's
+	// doc comment.
+	if err := hangardb.ApplySeeds(ctx, pool); err != nil {
+		return fmt.Errorf("migrate: applying seed data: %w", err)
+	}
+	fmt.Println("migrate up: seed data applied")
 	return nil
 }
 

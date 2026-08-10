@@ -4,6 +4,7 @@
 -- TestPermissionSeedMatchesGoSet fails CI if this file and the Go slice diverge.
 
 INSERT INTO app.permission (permission, description, category) VALUES
+    ('superuser', 'Bypass every permission check unless the specific permission is itself denied', 'admin'),
     ('characters.view', 'View character sheets, skills and clones', 'characters'),
     ('characters.manage_tokens', 'Add or refresh a character''s ESI token', 'characters'),
     ('characters.revoke_tokens', 'Revoke a character''s ESI token', 'characters'),

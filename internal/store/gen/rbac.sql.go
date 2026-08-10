@@ -43,16 +43,54 @@ func (q *Queries) AssignUserRole(ctx context.Context, userID uuid.UUID, roleID u
 }
 
 const checkPermission = `-- name: CheckPermission :one
-SELECT NOT bool_or(g.effect = 'deny') AND bool_or(g.effect = 'allow') AS permitted
-  FROM app.user_role ur
-  JOIN app.role_grant g USING (role_id)
- WHERE ur.user_id = $1 AND g.permission = $2
+WITH role_ids AS (
+    SELECT role_id FROM app.user_role WHERE user_id = $3::uuid
+    UNION
+    SELECT sr.role_id
+      FROM app.squad_role sr
+      JOIN app.squad_member sm ON sm.squad_id = sr.squad_id
+      JOIN app.character c ON c.character_id = sm.character_id
+     WHERE c.user_id = $3::uuid
+), grants AS (
+    SELECT g.permission, g.effect FROM app.role_grant g WHERE g.role_id IN (SELECT role_id FROM role_ids)
+)
+SELECT
+    COALESCE(NOT bool_or(effect = 'deny') FILTER (WHERE permission = $1::text), true)
+    AND (
+        COALESCE(bool_or(effect = 'allow') FILTER (WHERE permission = $1::text), false)
+        OR (
+            COALESCE(bool_or(effect = 'allow') FILTER (WHERE permission = $2::text), false)
+            AND COALESCE(NOT bool_or(effect = 'deny') FILTER (WHERE permission = $2::text), true)
+        )
+    ) AS permitted
+FROM grants
 `
 
+// PHASE 10: extended from the Phase 1a stub, which only ever looked at
+// app.user_role — a role granted via squad membership contributed
+// nothing to a permission check. `role_ids` is every role this user
+// holds via EITHER path: directly (app.user_role) or through a squad
+// they belong to (app.squad_member -> app.character.user_id ->
+// app.squad_role) — 02_DATABASE_SCHEMA.md §4.2 has exactly these two
+// paths, not the seven-source split that belongs to Phase 11's
+// entitlement engine (01_ARCHITECTURE.md §9.1 is a different model over
+// app.entitlement_rule; do not conflate the two).
+//
 // Deny precedence: a deny anywhere wins regardless of allow count
-// (02_DATABASE_SCHEMA.md §4.2, Phase 10 truth table).
-func (q *Queries) CheckPermission(ctx context.Context, userID uuid.UUID, permission string) (*bool, error) {
-	row := q.db.QueryRow(ctx, checkPermission, userID, permission)
+// (02_DATABASE_SCHEMA.md §4.2, Phase 10 truth table), computed with
+// FILTER rather than a second query so this stays one round trip.
+// `sqlc.arg(superuser_permission)` is passed in by the caller
+// (domain.SuperuserPermission) rather than hardcoded here, so the SQL
+// and the Go closed set can never drift on the magic string. Superuser
+// is resolved through this SAME grant path — never a code bypass — and
+// is itself deniable: a deny on the checked permission always wins even
+// when the user also holds an allowed, non-denied superuser grant; a
+// deny on `superuser` itself simply removes it as a fallback.
+// COALESCE(..., true/false) makes an empty grant set (a user with zero
+// roles via either path) resolve to NOT permitted, never NULL
+// ("A user with zero roles gets zero permissions — not default allow").
+func (q *Queries) CheckPermission(ctx context.Context, permission string, superuserPermission string, userID uuid.UUID) (*bool, error) {
+	row := q.db.QueryRow(ctx, checkPermission, permission, superuserPermission, userID)
 	var permitted *bool
 	err := row.Scan(&permitted)
 	return permitted, err
@@ -78,6 +116,54 @@ func (q *Queries) CreateRole(ctx context.Context, name string, description *stri
 	return i, err
 }
 
+const deleteRole = `-- name: DeleteRole :exec
+DELETE FROM app.role WHERE role_id = $1 AND NOT is_system
+`
+
+// Guards system roles (`admin`, `member`, db/seed/roles.sql) at the SQL
+// level, not just by Go-side convention — NOT is_system in the WHERE
+// clause means a DELETE against a system role's role_id affects zero
+// rows rather than erroring, so the caller must check rows-affected (or
+// re-GetRole) to detect a no-op deletion attempt.
+func (q *Queries) DeleteRole(ctx context.Context, roleID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteRole, roleID)
+	return err
+}
+
+const getCharacterUserID = `-- name: GetCharacterUserID :one
+SELECT user_id FROM app.character WHERE character_id = $1
+`
+
+// Affected set for a squad_member change (one character joining or
+// leaving a squad): just that character's own user, if linked.
+func (q *Queries) GetCharacterUserID(ctx context.Context, characterID int64) (uuid.NullUUID, error) {
+	row := q.db.QueryRow(ctx, getCharacterUserID, characterID)
+	var user_id uuid.NullUUID
+	err := row.Scan(&user_id)
+	return user_id, err
+}
+
+const getEffectivePermission = `-- name: GetEffectivePermission :one
+SELECT user_id, permission, permitted, refreshed_at FROM app.effective_permission WHERE user_id = $1 AND permission = $2
+`
+
+// The middleware's hot path (02_DATABASE_SCHEMA.md §4.2: "the hot path
+// is a single indexed lookup"): one row from the materialised table,
+// never a live role_grant join. A missing row (this user was never
+// materialized) is the caller's job to treat as not-permitted — see
+// internal/api/middleware/authorize.go.
+func (q *Queries) GetEffectivePermission(ctx context.Context, userID uuid.UUID, permission string) (AppEffectivePermission, error) {
+	row := q.db.QueryRow(ctx, getEffectivePermission, userID, permission)
+	var i AppEffectivePermission
+	err := row.Scan(
+		&i.UserID,
+		&i.Permission,
+		&i.Permitted,
+		&i.RefreshedAt,
+	)
+	return i, err
+}
+
 const getRole = `-- name: GetRole :one
 SELECT role_id, name, description, is_system, created_at, updated_at FROM app.role WHERE role_id = $1
 `
@@ -92,6 +178,26 @@ func (q *Queries) GetRole(ctx context.Context, roleID uuid.UUID) (AppRole, error
 		&i.IsSystem,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getRoleGrant = `-- name: GetRoleGrant :one
+SELECT grant_id, role_id, permission, effect, created_at FROM app.role_grant WHERE grant_id = $1
+`
+
+// Needed by internal/rbac/grant.go's RemoveRoleGrant wrapper: the
+// affected-user-set computation (UsersAffectedByRole) needs role_id,
+// which the grant_id-only DELETE below doesn't carry back to the caller.
+func (q *Queries) GetRoleGrant(ctx context.Context, grantID uuid.UUID) (AppRoleGrant, error) {
+	row := q.db.QueryRow(ctx, getRoleGrant, grantID)
+	var i AppRoleGrant
+	err := row.Scan(
+		&i.GrantID,
+		&i.RoleID,
+		&i.Permission,
+		&i.Effect,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -208,6 +314,51 @@ func (q *Queries) ListRoles(ctx context.Context) ([]AppRole, error) {
 	return items, nil
 }
 
+const listUserGrants = `-- name: ListUserGrants :many
+SELECT DISTINCT g.permission, g.effect
+  FROM app.role_grant g
+ WHERE g.role_id IN (
+    SELECT role_id FROM app.user_role WHERE user_id = $1::uuid
+    UNION
+    SELECT sr.role_id
+      FROM app.squad_role sr
+      JOIN app.squad_member sm ON sm.squad_id = sr.squad_id
+      JOIN app.character c ON c.character_id = sm.character_id
+     WHERE c.user_id = $1::uuid
+ )
+`
+
+type ListUserGrantsRow struct {
+	Permission string
+	Effect     string
+}
+
+// The raw (permission, effect) tuples reachable by a user via either
+// grant path (same role_ids union as CheckPermission above). This is
+// what internal/rbac.Resolve/ResolveAll fetch ONCE per user and then
+// resolve entirely in Go — the "no I/O beyond the query it's built on"
+// contract — rather than issuing one CheckPermission round trip per
+// permission when materializing the whole closed set for one user.
+func (q *Queries) ListUserGrants(ctx context.Context, userID uuid.UUID) ([]ListUserGrantsRow, error) {
+	rows, err := q.db.Query(ctx, listUserGrants, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUserGrantsRow
+	for rows.Next() {
+		var i ListUserGrantsRow
+		if err := rows.Scan(&i.Permission, &i.Effect); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserRoles = `-- name: ListUserRoles :many
 SELECT r.role_id, r.name, r.description, r.is_system, r.created_at, r.updated_at FROM app.role r
   JOIN app.user_role ur ON ur.role_id = r.role_id
@@ -235,6 +386,100 @@ func (q *Queries) ListUserRoles(ctx context.Context, userID uuid.UUID) ([]AppRol
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUsersInSquad = `-- name: ListUsersInSquad :many
+SELECT DISTINCT c.user_id AS user_id
+  FROM app.squad_member sm
+  JOIN app.character c ON c.character_id = sm.character_id
+ WHERE sm.squad_id = $1 AND c.user_id IS NOT NULL
+`
+
+// Affected set for a squad_role change (a role added/removed from a
+// squad): every user with a character in that squad.
+func (q *Queries) ListUsersInSquad(ctx context.Context, squadID uuid.UUID) ([]uuid.NullUUID, error) {
+	rows, err := q.db.Query(ctx, listUsersInSquad, squadID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.NullUUID
+	for rows.Next() {
+		var user_id uuid.NullUUID
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUsersWithRoleDirect = `-- name: ListUsersWithRoleDirect :many
+
+SELECT user_id FROM app.user_role WHERE role_id = $1
+`
+
+// Phase 10 materialize.go affected-user-set queries. Each mutation kind
+// that can change a user's effective permissions needs its own
+// "who is affected" query — recomputing effective_permission for every
+// user on every grant change would blow the 5000-user < 2ms benchmark.
+// Affected set for a role_grant change (permission/effect added or
+// removed on a role) or a role deletion: every user holding that role
+// directly.
+func (q *Queries) ListUsersWithRoleDirect(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listUsersWithRoleDirect, roleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var user_id uuid.UUID
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUsersWithRoleViaSquad = `-- name: ListUsersWithRoleViaSquad :many
+SELECT DISTINCT c.user_id AS user_id
+  FROM app.squad_role sr
+  JOIN app.squad_member sm ON sm.squad_id = sr.squad_id
+  JOIN app.character c ON c.character_id = sm.character_id
+ WHERE sr.role_id = $1 AND c.user_id IS NOT NULL
+`
+
+// The other half of a role_grant change's / role deletion's affected
+// set: every user reachable through a squad that grants this role.
+// DISTINCT + user_id IS NOT NULL because a squad can have many
+// characters belonging to the same user, and a character need not be
+// linked to a user account at all.
+func (q *Queries) ListUsersWithRoleViaSquad(ctx context.Context, roleID uuid.UUID) ([]uuid.NullUUID, error) {
+	rows, err := q.db.Query(ctx, listUsersWithRoleViaSquad, roleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.NullUUID
+	for rows.Next() {
+		var user_id uuid.NullUUID
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

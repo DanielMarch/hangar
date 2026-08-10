@@ -57,9 +57,30 @@ type Querier interface {
 	// before any further request is admitted. Called once per in-memory entry;
 	// entry_id is supplied by the caller so a retried flush is idempotent.
 	BulkInsertLedgerEntry(ctx context.Context, arg BulkInsertLedgerEntryParams) error
+	// PHASE 10: extended from the Phase 1a stub, which only ever looked at
+	// app.user_role — a role granted via squad membership contributed
+	// nothing to a permission check. `role_ids` is every role this user
+	// holds via EITHER path: directly (app.user_role) or through a squad
+	// they belong to (app.squad_member -> app.character.user_id ->
+	// app.squad_role) — 02_DATABASE_SCHEMA.md §4.2 has exactly these two
+	// paths, not the seven-source split that belongs to Phase 11's
+	// entitlement engine (01_ARCHITECTURE.md §9.1 is a different model over
+	// app.entitlement_rule; do not conflate the two).
+	//
 	// Deny precedence: a deny anywhere wins regardless of allow count
-	// (02_DATABASE_SCHEMA.md §4.2, Phase 10 truth table).
-	CheckPermission(ctx context.Context, userID uuid.UUID, permission string) (*bool, error)
+	// (02_DATABASE_SCHEMA.md §4.2, Phase 10 truth table), computed with
+	// FILTER rather than a second query so this stays one round trip.
+	// `sqlc.arg(superuser_permission)` is passed in by the caller
+	// (domain.SuperuserPermission) rather than hardcoded here, so the SQL
+	// and the Go closed set can never drift on the magic string. Superuser
+	// is resolved through this SAME grant path — never a code bypass — and
+	// is itself deniable: a deny on the checked permission always wins even
+	// when the user also holds an allowed, non-denied superuser grant; a
+	// deny on `superuser` itself simply removes it as a fallback.
+	// COALESCE(..., true/false) makes an empty grant set (a user with zero
+	// roles via either path) resolve to NOT permitted, never NULL
+	// ("A user with zero roles gets zero permissions — not default allow").
+	CheckPermission(ctx context.Context, permission string, superuserPermission string, userID uuid.UUID) (*bool, error)
 	// The 5-second planner claim loop (Phase 6, internal/sync/planner/claim.go).
 	// §4.3's illustrative index predicate couldn't include `now()` (not
 	// IMMUTABLE — see 00006_platform_esi_gateway.sql); this query reproduces
@@ -185,6 +206,12 @@ type Querier interface {
 	// is projected into market_order_history by the sync engine before this
 	// runs, so removing it from the open-orders table is not a data-loss delete.
 	DeleteMarketOrdersNotIn(ctx context.Context, ownerKind string, ownerID int64, keepOrderIds []int64) error
+	// Guards system roles (`admin`, `member`, db/seed/roles.sql) at the SQL
+	// level, not just by Go-side convention — NOT is_system in the WHERE
+	// clause means a DELETE against a system role's role_id affects zero
+	// rows rather than erroring, so the caller must check rows-affected (or
+	// re-GetRole) to detect a no-op deletion attempt.
+	DeleteRole(ctx context.Context, roleID uuid.UUID) error
 	// Explicit logout. Flagged by sqlc's flag-delete rule for review: a
 	// terminated session carries no data worth retaining.
 	DeleteSession(ctx context.Context, sessionID uuid.UUID) error
@@ -230,12 +257,21 @@ type Querier interface {
 	GetCharacterAttributes(ctx context.Context, characterID int64) (AppCharacterAttribute, error)
 	GetCharacterLocation(ctx context.Context, characterID int64) (AppCharacterLocation, error)
 	GetCharacterToken(ctx context.Context, characterID int64) (AppCharacterToken, error)
+	// Affected set for a squad_member change (one character joining or
+	// leaving a squad): just that character's own user, if linked.
+	GetCharacterUserID(ctx context.Context, characterID int64) (uuid.NullUUID, error)
 	GetContract(ctx context.Context, ownerKind string, ownerID int64, contractID int64) (AppContract, error)
 	GetCorporation(ctx context.Context, corporationID int64) (AppCorporation, error)
 	GetCorporationProject(ctx context.Context, projectID uuid.UUID) (AppCorporationProject, error)
 	// Backs GET /corporations/{id}/projects/{project_id}/contribution/{character_id} —
 	// the uuid PK joining a bigint FK in one row without coercion (Gate 6).
 	GetCorporationProjectContribution(ctx context.Context, projectID uuid.UUID, characterID int64) (AppCorporationProjectContribution, error)
+	// The middleware's hot path (02_DATABASE_SCHEMA.md §4.2: "the hot path
+	// is a single indexed lookup"): one row from the materialised table,
+	// never a live role_grant join. A missing row (this user was never
+	// materialized) is the caller's job to treat as not-permitted — see
+	// internal/api/middleware/authorize.go.
+	GetEffectivePermission(ctx context.Context, userID uuid.UUID, permission string) (AppEffectivePermission, error)
 	// app.esi_error_budget — Governor 2's installation-wide budget, one row
 	// (02_DATABASE_SCHEMA.md §4.3 #27, SRS v3.1 §4.1.3). Read through a
 	// one-second in-process cache by the caller; every non-2XX/3XX response
@@ -286,6 +322,10 @@ type Querier interface {
 	GetPlatform(ctx context.Context, platformID uuid.UUID) (AppPlatform, error)
 	GetProvisioningState(ctx context.Context, platformID uuid.UUID, userID uuid.UUID) (AppProvisioningState, error)
 	GetRole(ctx context.Context, roleID uuid.UUID) (AppRole, error)
+	// Needed by internal/rbac/grant.go's RemoveRoleGrant wrapper: the
+	// affected-user-set computation (UsersAffectedByRole) needs role_id,
+	// which the grant_id-only DELETE below doesn't carry back to the caller.
+	GetRoleGrant(ctx context.Context, grantID uuid.UUID) (AppRoleGrant, error)
 	GetSession(ctx context.Context, sessionID uuid.UUID) (AppSession, error)
 	// ---- settings ----
 	GetSetting(ctx context.Context, key string) (AppSetting, error)
@@ -462,9 +502,33 @@ type Querier interface {
 	// The unknown-types board's YAML-parse-failure view (Principle 14 applied
 	// to a whole payload shape, not just one field — see 00035's header).
 	ListUnparseableCharacterNotifications(ctx context.Context, characterID int64) ([]AppCharacterNotification, error)
+	// The raw (permission, effect) tuples reachable by a user via either
+	// grant path (same role_ids union as CheckPermission above). This is
+	// what internal/rbac.Resolve/ResolveAll fetch ONCE per user and then
+	// resolve entirely in Go — the "no I/O beyond the query it's built on"
+	// contract — rather than issuing one CheckPermission round trip per
+	// permission when materializing the whole closed set for one user.
+	ListUserGrants(ctx context.Context, userID uuid.UUID) ([]ListUserGrantsRow, error)
 	ListUserRoles(ctx context.Context, userID uuid.UUID) ([]AppRole, error)
+	// Affected set for a squad_role change (a role added/removed from a
+	// squad): every user with a character in that squad.
+	ListUsersInSquad(ctx context.Context, squadID uuid.UUID) ([]uuid.NullUUID, error)
 	// Keyset pagination — OFFSET is prohibited (sqlc no-offset rule).
 	ListUsersPage(ctx context.Context, afterUserID uuid.UUID, pageSize int32) ([]AppUser, error)
+	// Phase 10 materialize.go affected-user-set queries. Each mutation kind
+	// that can change a user's effective permissions needs its own
+	// "who is affected" query — recomputing effective_permission for every
+	// user on every grant change would blow the 5000-user < 2ms benchmark.
+	// Affected set for a role_grant change (permission/effect added or
+	// removed on a role) or a role deletion: every user holding that role
+	// directly.
+	ListUsersWithRoleDirect(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
+	// The other half of a role_grant change's / role deletion's affected
+	// set: every user reachable through a squad that grants this role.
+	// DISTINCT + user_id IS NOT NULL because a squad can have many
+	// characters belonging to the same user, and a character need not be
+	// linked to a user account at all.
+	ListUsersWithRoleViaSquad(ctx context.Context, roleID uuid.UUID) ([]uuid.NullUUID, error)
 	ListWalletBalances(ctx context.Context, ownerKind string, ownerID int64) ([]AppWalletBalance, error)
 	ListWalletJournalPage(ctx context.Context, arg ListWalletJournalPageParams) ([]AppWalletJournal, error)
 	ListWalletTransactionsPage(ctx context.Context, arg ListWalletTransactionsPageParams) ([]AppWalletTransaction, error)
