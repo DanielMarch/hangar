@@ -105,6 +105,14 @@ var characterDispatch = map[string]characterHandler{
 		}
 		return res.RowsAffected, nil
 	},
+	// KNOWN GAP: this route is page-paginated the same way the corporation
+	// journal is (X-Pages), but CharacterWorker's doSync (Phase 7) does not
+	// page-walk — none of Phase 7's own routes needed it. Only the
+	// single-page case (ESI's default page=1 response) is wired, so the
+	// route has real, tested coverage rather than none at all. Flagged
+	// rather than silently accepted as "good enough":
+	// worker/corporation.go's fetchAllPages is the correct mechanism and
+	// this route should eventually call it too.
 	"/characters/{character_id}/wallet/journal": func(ctx context.Context, s *store.Store, characterID int64, body []byte) (int32, error) {
 		dto, err := handlers.ParseWalletJournalPage(body)
 		if err != nil {
@@ -199,17 +207,6 @@ var characterDispatch = map[string]characterHandler{
 	"/characters/{character_id}/calendar/events": wrap(handlers.ParseCalendarEvents, handlers.SyncCalendarEvents),
 	"/characters/{character_id}/notifications":   wrap(handlers.ParseCharacterNotifications, handlers.SyncCharacterNotifications),
 }
-
-// walletJournalCharacterPath is page-paginated the same way the
-// corporation journal route is (X-Pages) — CharacterWorker's doSync
-// (Phase 7) does not page-walk, since none of Phase 7's own routes needed
-// it. Full multi-page correctness for the character wallet journal is left
-// to a future pass; this phase wires the single-page case (ESI's default
-// page=1 response) so the route has real, tested coverage rather than none
-// at all. Flagged here rather than silently accepted as "good enough":
-// worker/corporation.go's fetchAllPages is the correct mechanism and this
-// route should eventually call it too.
-const walletJournalCharacterPath = "/characters/{character_id}/wallet/journal"
 
 // dataLevel404Routes marks the routes where the roadmap's edge case
 // applies literally: a 404 is DATA (e.g. no ship info while podded/some

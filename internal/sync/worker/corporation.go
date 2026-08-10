@@ -511,8 +511,8 @@ func (w *CorporationWorker) doSync(ctx context.Context, s *store.Store, sub gen.
 	outcome = normalize.Outcome(resp.StatusCode, false)
 	routeCfg := sync.RouteCacheConfig{CacheMode: derefStr(route.CacheMode), CacheAge: sync.IntervalToDuration(route.CacheAge), BlockedByPin: route.BlockedByPin}
 
-	switch {
-	case resp.StatusCode == http.StatusNotModified:
+	switch resp.StatusCode {
+	case http.StatusNotModified:
 		next, err := sync.PlanNextDueAt(sync.DueTimeInput{
 			Route: routeCfg, Policy: w.Policy, LastSuccess: derefTime(sub.LastSuccessAt),
 			Consecutive304: int(sub.Consecutive304) + 1, OptInNoCache: sub.OptInNoCache, Now: time.Now(),
@@ -525,7 +525,7 @@ func (w *CorporationWorker) doSync(ctx context.Context, s *store.Store, sub gen.
 		}
 		return 0, outcome, nil
 
-	case resp.StatusCode == http.StatusOK:
+	case http.StatusOK:
 		n, syncErr := handler(ctx, s, corporationID, resp.Body)
 		if syncErr != nil {
 			return 0, outcome, syncErr
@@ -551,7 +551,7 @@ func (w *CorporationWorker) doSync(ctx context.Context, s *store.Store, sub gen.
 		}
 		return n, outcome, nil
 
-	case resp.StatusCode == http.StatusForbidden:
+	case http.StatusForbidden:
 		// A 403 on THIS route for THIS character does not mean every corp
 		// route is broken (roadmap edge case: election is per (subscription,
 		// route), a structure/starbase route can 403 for a character who

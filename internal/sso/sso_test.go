@@ -219,9 +219,9 @@ func newFakeSSOServer(t *testing.T, clientID string) *fakeSSOServer {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/oauth/jwks", func(w http.ResponseWriter, r *http.Request) {
-		n := base64.RawURLEncoding.EncodeToString(f.priv.PublicKey.N.Bytes())
+		n := base64.RawURLEncoding.EncodeToString(f.priv.N.Bytes())
 		e := base64.RawURLEncoding.EncodeToString([]byte{0x01, 0x00, 0x01})
-		fmt.Fprintf(w, `{"keys":[{"kty":"RSA","kid":%q,"use":"sig","n":%q,"e":%q}]}`, f.kid, n, e)
+		_, _ = fmt.Fprintf(w, `{"keys":[{"kty":"RSA","kid":%q,"use":"sig","n":%q,"e":%q}]}`, f.kid, n, e)
 	})
 	mux.HandleFunc("/v2/oauth/token", func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, r.ParseForm())
@@ -245,7 +245,7 @@ func newFakeSSOServer(t *testing.T, clientID string) *fakeSSOServer {
 
 		if forcedGrantErr != "" {
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": forcedGrantErr, "error_description": "forced by test"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": forcedGrantErr, "error_description": "forced by test"})
 			return
 		}
 
@@ -254,7 +254,7 @@ func newFakeSSOServer(t *testing.T, clientID string) *fakeSSOServer {
 			"access_token": access, "refresh_token": "refresh-" + uuid.NewString(),
 			"expires_in": 1200, "token_type": "Bearer",
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 	f.srv = httptest.NewServer(mux)
 	return f
@@ -266,12 +266,22 @@ func (f *fakeSSOServer) setOwnerHash(h string) {
 	f.ownerHash = h
 }
 
+// forceNextGrantError and callCount are used ONLY by
+// refresh_integration_test.go, which is behind the `integration` build tag.
+// golangci-lint's `unused` linter runs untagged and therefore reports both
+// as dead — they are not. Deleting them (as that report invites) breaks
+// `go build -tags=integration`, which is how this was caught. The
+// //nolint directives below record that, so the next lint sweep does not
+// repeat the mistake.
+//
+//nolint:unused // used by refresh_integration_test.go (build tag: integration)
 func (f *fakeSSOServer) forceNextGrantError(code string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.grantResponses = append(f.grantResponses, code)
 }
 
+//nolint:unused // used by refresh_integration_test.go (build tag: integration)
 func (f *fakeSSOServer) callCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()

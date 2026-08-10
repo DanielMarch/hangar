@@ -111,10 +111,7 @@ func (s *fakeStore) BulkInsertLedgerEntry(ctx context.Context, arg gen.BulkInser
 	if _, exists := s.entries[arg.EntryID]; exists {
 		return nil // ON CONFLICT DO NOTHING
 	}
-	s.entries[arg.EntryID] = gen.AppEsiLedgerEntry{
-		EntryID: arg.EntryID, RateLimitGroup: arg.RateLimitGroup, UserKey: arg.UserKey,
-		Cost: arg.Cost, ConsumedAt: arg.ConsumedAt, State: arg.State, ExpiresAt: arg.ExpiresAt,
-	}
+	s.entries[arg.EntryID] = gen.AppEsiLedgerEntry(arg)
 	return nil
 }
 

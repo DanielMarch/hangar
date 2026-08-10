@@ -137,8 +137,8 @@ func (w *GlobalWorker) doSync(ctx context.Context, s *store.Store, sub gen.AppSy
 	outcome = normalize.Outcome(resp.StatusCode, false)
 	routeCfg := sync.RouteCacheConfig{CacheMode: derefStr(route.CacheMode), CacheAge: sync.IntervalToDuration(route.CacheAge), BlockedByPin: route.BlockedByPin}
 
-	switch {
-	case resp.StatusCode == http.StatusNotModified:
+	switch resp.StatusCode {
+	case http.StatusNotModified:
 		next, err := sync.PlanNextDueAt(sync.DueTimeInput{
 			Route: routeCfg, Policy: w.Policy, LastSuccess: derefTime(sub.LastSuccessAt),
 			Consecutive304: int(sub.Consecutive304) + 1, OptInNoCache: sub.OptInNoCache, Now: time.Now(),
@@ -151,7 +151,7 @@ func (w *GlobalWorker) doSync(ctx context.Context, s *store.Store, sub gen.AppSy
 		}
 		return 0, outcome, nil
 
-	case resp.StatusCode == http.StatusOK:
+	case http.StatusOK:
 		n, syncErr := handler(ctx, s, resp.Body)
 		if syncErr != nil {
 			return 0, outcome, syncErr

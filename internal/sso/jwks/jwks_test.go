@@ -149,7 +149,7 @@ func TestJWTValidatedOfflineNoNetwork(t *testing.T) {
 	// instead we persist to app.setting and Load from there, which is
 	// exactly the cold-boot-with-no-network path §7.2 describes.
 	seedSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(jwksJSON(kid, &priv.PublicKey))
+		_, _ = w.Write(jwksJSON(kid, &priv.PublicKey))
 	}))
 	defer seedSrv.Close()
 	seedCache := jwks.NewCache(seedSrv.URL, store, seedSrv.Client(), clock)
@@ -181,7 +181,7 @@ func TestJWKSUnknownKidRefetchThrottled(t *testing.T) {
 	var hits int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt64(&hits, 1)
-		w.Write(jwksJSON(kid, &priv.PublicKey))
+		_, _ = w.Write(jwksJSON(kid, &priv.PublicKey))
 	}))
 	defer srv.Close()
 
@@ -223,7 +223,7 @@ func TestScpClaimAcceptsStringAndArray(t *testing.T) {
 	const kid = "key-scp"
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(jwksJSON(kid, &priv.PublicKey))
+		_, _ = w.Write(jwksJSON(kid, &priv.PublicKey))
 	}))
 	defer srv.Close()
 
@@ -254,7 +254,7 @@ func TestVerifyRejectsNoneAlgAndHSAlg(t *testing.T) {
 	const kid = "key-alg"
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(jwksJSON(kid, &priv.PublicKey))
+		_, _ = w.Write(jwksJSON(kid, &priv.PublicKey))
 	}))
 	defer srv.Close()
 	store := newFakeSettingStore()
@@ -285,7 +285,7 @@ func TestVerifyRejectsWrongIssuerAudienceAndSub(t *testing.T) {
 	priv := genKey(t)
 	const kid = "key-checks"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(jwksJSON(kid, &priv.PublicKey))
+		_, _ = w.Write(jwksJSON(kid, &priv.PublicKey))
 	}))
 	defer srv.Close()
 	store := newFakeSettingStore()

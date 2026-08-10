@@ -46,6 +46,9 @@ func TestCorporationDTOsMatchLiveSpec(t *testing.T) {
 		// that signature (e.g. wrapping it in a struct to "look like" the
 		// other list endpoints) fails loudly at compile time via the line
 		// below rather than silently drifting from the live spec.
+		//nolint:staticcheck // QF1011: the explicit type IS the assertion —
+		// omitting it (as the linter suggests) would let the signature drift
+		// silently, which is exactly what this subtest exists to prevent.
 		var _ func([]byte) ([]int64, error) = handlers.ParseCorporationMembers
 	})
 

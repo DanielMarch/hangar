@@ -139,7 +139,7 @@ func (c *Cache) Refresh(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("jwks: refresh: fetching %s: %w", c.url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("jwks: refresh: %s returned %d", c.url, resp.StatusCode)
 	}

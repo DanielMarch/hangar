@@ -63,7 +63,7 @@ func DownloadZip(ctx context.Context, client *http.Client, url string) (ZipSourc
 	if err != nil {
 		return ZipSource{}, "", fmt.Errorf("sde: downloading %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return ZipSource{}, "", fmt.Errorf("sde: download of %s returned status %d", url, resp.StatusCode)
 	}
@@ -74,18 +74,18 @@ func DownloadZip(ctx context.Context, client *http.Client, url string) (ZipSourc
 	}
 	path := tmp.Name()
 	if _, err := io.Copy(tmp, resp.Body); err != nil {
-		tmp.Close()
-		os.Remove(path)
+		_ = tmp.Close()
+		_ = os.Remove(path)
 		return ZipSource{}, "", fmt.Errorf("sde: streaming download to %s: %w", path, err)
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(path)
+		_ = os.Remove(path)
 		return ZipSource{}, "", fmt.Errorf("sde: closing downloaded file: %w", err)
 	}
 
 	zr, err := zip.OpenReader(path)
 	if err != nil {
-		os.Remove(path)
+		_ = os.Remove(path)
 		return ZipSource{}, "", fmt.Errorf("sde: opening downloaded zip: %w", err)
 	}
 	return ZipSource{Reader: &zr.Reader}, path, nil

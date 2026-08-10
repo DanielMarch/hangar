@@ -78,7 +78,7 @@ func FetchManifest(ctx context.Context, client *http.Client, manifestURL string)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("sde: fetching manifest: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return Manifest{}, fmt.Errorf("sde: manifest fetch returned status %d", resp.StatusCode)
 	}

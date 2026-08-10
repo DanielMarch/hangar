@@ -363,7 +363,7 @@ func Build(ctx context.Context, pool *pgxpool.Pool, src SourceProvider) (Result,
 
 		spec, hasSpec := specByTable[table]
 		if !hasSpec {
-			fmt.Fprintf(hasher, "%s:0\n", table)
+			_, _ = fmt.Fprintf(hasher, "%s:0\n", table)
 			continue // structure-only clone; not yet populated (see doc comment above)
 		}
 
@@ -413,7 +413,7 @@ func Build(ctx context.Context, pool *pgxpool.Pool, src SourceProvider) (Result,
 		}
 
 		result.RowCounts[spec.table] = n
-		fmt.Fprintf(hasher, "%s:%d\n", spec.table, n)
+		_, _ = fmt.Fprintf(hasher, "%s:%d\n", spec.table, n)
 	}
 
 	result.Checksum = hex.EncodeToString(hasher.Sum(nil))

@@ -47,10 +47,10 @@ func (d *esiDate) UnmarshalJSON(b []byte) error {
 }
 
 func (d esiDate) MarshalJSON() ([]byte, error) {
-	if d.Time.IsZero() {
+	if d.IsZero() {
 		return []byte("null"), nil
 	}
-	return json.Marshal(d.Time.Format("2006-01-02"))
+	return json.Marshal(d.Format("2006-01-02"))
 }
 
 // ---- GET /characters/{character_id}/mining ----

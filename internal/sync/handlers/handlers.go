@@ -52,7 +52,7 @@ func nilIfZero(t time.Time) *time.Time {
 func syntheticRecordID(parts ...any) int64 {
 	h := fnv.New64a()
 	for _, p := range parts {
-		_, _ = h.Write([]byte(fmt.Sprint(p)))
+		_, _ = fmt.Fprint(h, p)
 		_, _ = h.Write([]byte{0})
 	}
 	// Mask off the sign bit: app.corporation_role_history.record_id is

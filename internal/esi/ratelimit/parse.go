@@ -139,7 +139,7 @@ func ClassifyResponse(status int, header http.Header, transportErr bool, ttlFloo
 		return out
 	}
 
-	out.IsErrorForGovernor2 = !(status >= 200 && status < 400)
+	out.IsErrorForGovernor2 = status < 200 || status >= 400
 
 	if remaining, ok := ParseRemaining(header.Get("X-Ratelimit-Remaining")); ok {
 		out.ServerRemaining, out.ServerRemainingOK = remaining, true

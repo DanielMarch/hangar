@@ -174,8 +174,7 @@ func (f *Flow) HandleCallback(ctx context.Context, sessionID uuid.UUID, code, st
 // matches the token's (§7.2's transfer edge case).
 func (f *Flow) resolveUser(ctx context.Context, characterID int64, claims *jwks.Claims) (userID uuid.UUID, isNew bool, err error) {
 	existing, err := f.Store.GetCharacter(ctx, characterID)
-	switch {
-	case err == nil:
+	if err == nil {
 		if existing.OwnerHash != claims.Owner && f.OnOwnerHashChanged != nil {
 			f.OnOwnerHashChanged(ctx, characterID)
 		}
@@ -184,9 +183,9 @@ func (f *Flow) resolveUser(ctx context.Context, characterID int64, claims *jwks.
 		}
 		// Character row exists (e.g. seeded by an earlier sync) but has
 		// no owning user yet — fall through to create one below.
-	default:
-		// No existing row: brand-new character to this installation.
 	}
+	// Otherwise there is no existing row at all: a character brand new to
+	// this installation, created below.
 
 	user, err := f.Store.CreateUser(ctx, claims.Name)
 	if err != nil {

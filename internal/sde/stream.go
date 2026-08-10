@@ -78,11 +78,6 @@ func asInt64(v any) (int64, bool) {
 	return int64(f), true
 }
 
-func asInt32(v any) (int32, bool) {
-	i, ok := asInt64(v)
-	return int32(i), ok
-}
-
 func asFloat64(v any) (float64, bool) {
 	f, ok := v.(float64)
 	return f, ok
