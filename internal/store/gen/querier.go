@@ -30,6 +30,29 @@ type Querier interface {
 	// and the query must degrade to a truncated tree, not run unbounded.
 	AssetTree(ctx context.Context, arg AssetTreeParams) ([]AssetTreeRow, error)
 	AssignUserRole(ctx context.Context, userID uuid.UUID, roleID uuid.UUID, grantedBy uuid.NullUUID) error
+	// Phase 9 backfill (closing 00033_phase8_1_skyhook_reagent_fixup.sql's
+	// gap): app.corporation_skyhook.system_id/type_id and
+	// app.corporation_sovereignty_hub.type_id were left nullable pre-SDE.
+	// Now that `sde.planet`/`sde.type` exist and are populated (Phase 9's
+	// atomic swap), these three UPDATEs resolve them wherever possible and
+	// are safe to run unconditionally on every sync — a scalar subquery
+	// (never a JOIN fan-out) so a name that happens to match more than one
+	// sde.type row can't produce a nondeterministic multi-row UPDATE, and
+	// `IS NULL` on the target column makes every one of them a no-op once
+	// resolved once. Before any SDE import has ever run, `sde.type`/
+	// `sde.planet` exist (00036's DDL) but are empty, so the subqueries
+	// simply find nothing and these UPDATEs affect zero rows — never an
+	// error, never a guess.
+	// planet_id -> sde.planet -> solar_system_id, per roadmap.
+	BackfillSkyhookSystemIDFromSDE(ctx context.Context, corporationID int64) error
+	// The skyhook structure type resolved by NAME against sde.type, never a
+	// hardcoded numeric constant (Principle 13: no guessing at a
+	// plausible-looking id with no verifiable source).
+	BackfillSkyhookTypeIDFromSDE(ctx context.Context, corporationID int64) error
+	// Same name-resolved lookup as the skyhook type_id backfill above;
+	// system_id needs no equivalent here (00033's header: the list endpoint
+	// already gives solar_system_id directly).
+	BackfillSovereigntyHubTypeIDFromSDE(ctx context.Context, corporationID int64) error
 	// solo -> clustered: flush the in-process ledger into the shared table
 	// before any further request is admitted. Called once per in-memory entry;
 	// entry_id is supplied by the caller so a retried flush is idempotent.

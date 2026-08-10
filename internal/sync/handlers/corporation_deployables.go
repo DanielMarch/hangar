@@ -183,6 +183,13 @@ func ParseCorporationSkyhookList(body []byte) (CorporationSkyhookListDTO, error)
 // SyncCorporationSkyhookDetail per id to fill in state/reagents/is_active
 // (mirroring corporation_starbase's list-then-starbase_detail pattern,
 // except detail lives in the SAME table here, not a separate one).
+//
+// PHASE 9 BACKFILL: once planet_id is seeded above, system_id/type_id are
+// resolved against the (by now, hopefully imported) sde schema — closing
+// the gap 00033_phase8_1_skyhook_reagent_fixup.sql left open pre-SDE. Run
+// unconditionally, once per list sync rather than once per detail item;
+// see corporation_structure.sql's BackfillSkyhook*FromSDE doc comment for
+// why this is always safe to call, including before any SDE import has run.
 func SyncCorporationSkyhooks(ctx context.Context, s *store.Store, corporationID int64, skyhooks []CorporationSkyhookListEntryDTO) (SyncResult, error) {
 	ids := make([]int64, len(skyhooks))
 	for i, sh := range skyhooks {
@@ -194,6 +201,14 @@ func SyncCorporationSkyhooks(ctx context.Context, s *store.Store, corporationID 
 	}
 	if err := s.DeleteCorporationSkyhooksNotIn(ctx, corporationID, ids); err != nil {
 		return SyncResult{}, fmt.Errorf("handlers: pruning stale skyhooks for corp %d: %w", corporationID, err)
+	}
+	if len(skyhooks) > 0 {
+		if err := s.BackfillSkyhookSystemIDFromSDE(ctx, corporationID); err != nil {
+			return SyncResult{}, fmt.Errorf("handlers: backfilling skyhook system_id from sde for corp %d: %w", corporationID, err)
+		}
+		if err := s.BackfillSkyhookTypeIDFromSDE(ctx, corporationID); err != nil {
+			return SyncResult{}, fmt.Errorf("handlers: backfilling skyhook type_id from sde for corp %d: %w", corporationID, err)
+		}
 	}
 	return SyncResult{RowsAffected: int32(len(skyhooks))}, nil
 }
@@ -290,6 +305,9 @@ func ParseCorporationSovereigntyHubList(body []byte) (CorporationSovereigntyHubL
 // SyncCorporationSovereigntyHubs upserts every hub's identity from the
 // LIST response (id, solar_system_id — both directly available, unlike
 // skyhooks). SyncCorporationSovereigntyHubDetail (below) fills in reagents.
+//
+// PHASE 9 BACKFILL: type_id resolved against sde.type once per list sync —
+// see SyncCorporationSkyhooks' equivalent comment above.
 func SyncCorporationSovereigntyHubs(ctx context.Context, s *store.Store, corporationID int64, hubs []CorporationSovereigntyHubListEntryDTO) (SyncResult, error) {
 	ids := make([]int64, len(hubs))
 	for i, h := range hubs {
@@ -300,6 +318,11 @@ func SyncCorporationSovereigntyHubs(ctx context.Context, s *store.Store, corpora
 	}
 	if err := s.DeleteCorporationSovereigntyHubsNotIn(ctx, corporationID, ids); err != nil {
 		return SyncResult{}, fmt.Errorf("handlers: pruning stale sovereignty hubs for corp %d: %w", corporationID, err)
+	}
+	if len(hubs) > 0 {
+		if err := s.BackfillSovereigntyHubTypeIDFromSDE(ctx, corporationID); err != nil {
+			return SyncResult{}, fmt.Errorf("handlers: backfilling sovereignty hub type_id from sde for corp %d: %w", corporationID, err)
+		}
 	}
 	return SyncResult{RowsAffected: int32(len(hubs))}, nil
 }

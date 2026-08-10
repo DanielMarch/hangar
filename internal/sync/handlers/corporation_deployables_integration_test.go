@@ -90,7 +90,7 @@ func TestSkyhookAndSovereigntyHubRoundTrip(t *testing.T) {
 		require.Len(t, rows, 1)
 		require.NotEmpty(t, rows[0].Reagents, "reagents must round-trip through the database")
 		require.Contains(t, string(rows[0].Reagents), `"type_id"`)
-		require.Nil(t, rows[0].TypeID, "type_id stays NULL until Phase 9/25's SDE resolution exists — never guessed")
+		require.Nil(t, rows[0].TypeID, "the detail sync alone never resolves type_id — only the LIST sync's SDE backfill does (TestSkyhookAndSovereigntyHubBackfillFromSDE), and this test never calls it")
 		first := rows[0].UpdatedAt
 
 		_, err = handlers.SyncCorporationSkyhookDetail(ctx, s, corporationID, skyhookID, dto)
@@ -118,7 +118,7 @@ func TestSkyhookAndSovereigntyHubRoundTrip(t *testing.T) {
 		require.Len(t, rows, 1)
 		require.NotEmpty(t, rows[0].Reagents, "reagents must round-trip through the database")
 		require.Contains(t, string(rows[0].Reagents), `"type_id"`)
-		require.Nil(t, rows[0].TypeID, "type_id stays NULL until Phase 9/25's SDE resolution exists — never guessed")
+		require.Nil(t, rows[0].TypeID, "the detail sync alone never resolves type_id — only the LIST sync's SDE backfill does (TestSkyhookAndSovereigntyHubBackfillFromSDE), and this test never calls it")
 		first := rows[0].UpdatedAt
 
 		_, err = handlers.SyncCorporationSovereigntyHubDetail(ctx, s, corporationID, dto)
@@ -126,5 +126,90 @@ func TestSkyhookAndSovereigntyHubRoundTrip(t *testing.T) {
 		rows2, err := s.ListCorporationSovereigntyHubs(ctx, corporationID)
 		require.NoError(t, err)
 		require.Equal(t, first, rows2[0].UpdatedAt, "re-syncing identical sovereignty-hub detail must not change updated_at")
+	})
+}
+
+// TestSkyhookAndSovereigntyHubBackfillFromSDE (closing the gap
+// 00033_phase8_1_skyhook_reagent_fixup.sql's header left open, blocked on
+// Phase 9's sde.planet/sde.type landing): once the sde schema carries a
+// matching planet row and a type row named by CCP's real structure names,
+// the LIST sync resolves corporation_skyhook.system_id/type_id and
+// corporation_sovereignty_hub.type_id — never a hardcoded guess, and never
+// an error before the sde data exists (verified separately below).
+func TestSkyhookAndSovereigntyHubBackfillFromSDE(t *testing.T) {
+	pool := newMigratedPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+	const corporationID int64 = 98000005
+	seedCorporation(t, s, corporationID)
+
+	t.Run("backfill runs safely with no matching sde data yet (empty sde schema, never an error)", func(t *testing.T) {
+		const skyhookID, planetID int64 = 1040000000010, 40000999
+		_, err := handlers.SyncCorporationSkyhooks(ctx, s, corporationID, []handlers.CorporationSkyhookListEntryDTO{
+			{ID: skyhookID, PlanetID: planetID},
+		})
+		require.NoError(t, err, "the backfill must be a safe no-op against an sde schema with no matching rows")
+
+		rows, err := s.ListCorporationSkyhooks(ctx, corporationID)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		require.Nil(t, rows[0].SystemID)
+		require.Nil(t, rows[0].TypeID)
+	})
+
+	t.Run("skyhook system_id and type_id resolve once sde.planet/sde.type are populated", func(t *testing.T) {
+		const skyhookID, planetID int64 = 1040000000011, 40000124
+		const solarSystemID int32 = 30000142
+		const skyhookTypeID int32 = 81826
+
+		_, err := pool.Exec(ctx, `INSERT INTO sde.solar_system (solar_system_id, constellation_id, region_id, name, data) VALUES ($1, 1, 1, 'Jita', '{}'::jsonb)`, solarSystemID)
+		require.NoError(t, err)
+		_, err = pool.Exec(ctx, `INSERT INTO sde.planet (planet_id, solar_system_id, name, data) VALUES ($1, $2, 'Jita I', '{}'::jsonb)`, planetID, solarSystemID)
+		require.NoError(t, err)
+		_, err = pool.Exec(ctx, `INSERT INTO sde.type (type_id, group_id, name, published, data) VALUES ($1, 1, 'Skyhook', true, '{}'::jsonb)`, skyhookTypeID)
+		require.NoError(t, err)
+
+		_, err = handlers.SyncCorporationSkyhooks(ctx, s, corporationID, []handlers.CorporationSkyhookListEntryDTO{
+			{ID: skyhookID, PlanetID: planetID},
+		})
+		require.NoError(t, err)
+
+		rows, err := s.ListCorporationSkyhooks(ctx, corporationID)
+		require.NoError(t, err)
+		var got gen.AppCorporationSkyhook
+		for _, r := range rows {
+			if r.SkyhookID == skyhookID {
+				got = r
+			}
+		}
+		require.NotNil(t, got.SystemID, "planet_id -> sde.planet -> solar_system_id must resolve system_id")
+		require.Equal(t, solarSystemID, *got.SystemID)
+		require.NotNil(t, got.TypeID, "type_id must resolve by name against sde.type, never a hardcoded guess")
+		require.Equal(t, skyhookTypeID, *got.TypeID)
+	})
+
+	t.Run("sovereignty hub type_id resolves once sde.type is populated", func(t *testing.T) {
+		const hubID int64 = 1050000000010
+		const systemID int32 = 30000142
+		const hubTypeID int32 = 81825
+
+		_, err := pool.Exec(ctx, `INSERT INTO sde.type (type_id, group_id, name, published, data) VALUES ($1, 1, 'Sovereignty Hub', true, '{}'::jsonb)`, hubTypeID)
+		require.NoError(t, err)
+
+		_, err = handlers.SyncCorporationSovereigntyHubs(ctx, s, corporationID, []handlers.CorporationSovereigntyHubListEntryDTO{
+			{ID: hubID, SolarSystemID: systemID},
+		})
+		require.NoError(t, err)
+
+		rows, err := s.ListCorporationSovereigntyHubs(ctx, corporationID)
+		require.NoError(t, err)
+		var got gen.AppCorporationSovereigntyHub
+		for _, r := range rows {
+			if r.HubID == hubID {
+				got = r
+			}
+		}
+		require.NotNil(t, got.TypeID, "type_id must resolve by name against sde.type, never a hardcoded guess")
+		require.Equal(t, hubTypeID, *got.TypeID)
 	})
 }

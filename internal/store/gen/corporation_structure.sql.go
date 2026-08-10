@@ -11,6 +11,67 @@ import (
 	"time"
 )
 
+const backfillSkyhookSystemIDFromSDE = `-- name: BackfillSkyhookSystemIDFromSDE :exec
+
+UPDATE app.corporation_skyhook sk
+   SET system_id = (SELECT p.solar_system_id FROM sde.planet p WHERE p.planet_id = sk.planet_id)
+ WHERE sk.corporation_id = $1
+   AND sk.system_id IS NULL
+   AND sk.planet_id IS NOT NULL
+   AND EXISTS (SELECT 1 FROM sde.planet p WHERE p.planet_id = sk.planet_id)
+`
+
+// Phase 9 backfill (closing 00033_phase8_1_skyhook_reagent_fixup.sql's
+// gap): app.corporation_skyhook.system_id/type_id and
+// app.corporation_sovereignty_hub.type_id were left nullable pre-SDE.
+// Now that `sde.planet`/`sde.type` exist and are populated (Phase 9's
+// atomic swap), these three UPDATEs resolve them wherever possible and
+// are safe to run unconditionally on every sync — a scalar subquery
+// (never a JOIN fan-out) so a name that happens to match more than one
+// sde.type row can't produce a nondeterministic multi-row UPDATE, and
+// `IS NULL` on the target column makes every one of them a no-op once
+// resolved once. Before any SDE import has ever run, `sde.type`/
+// `sde.planet` exist (00036's DDL) but are empty, so the subqueries
+// simply find nothing and these UPDATEs affect zero rows — never an
+// error, never a guess.
+// planet_id -> sde.planet -> solar_system_id, per roadmap.
+func (q *Queries) BackfillSkyhookSystemIDFromSDE(ctx context.Context, corporationID int64) error {
+	_, err := q.db.Exec(ctx, backfillSkyhookSystemIDFromSDE, corporationID)
+	return err
+}
+
+const backfillSkyhookTypeIDFromSDE = `-- name: BackfillSkyhookTypeIDFromSDE :exec
+UPDATE app.corporation_skyhook sk
+   SET type_id = (SELECT t.type_id FROM sde.type t WHERE t.name = 'Skyhook' LIMIT 1)
+ WHERE sk.corporation_id = $1
+   AND sk.type_id IS NULL
+   AND EXISTS (SELECT 1 FROM sde.type t WHERE t.name = 'Skyhook')
+`
+
+// The skyhook structure type resolved by NAME against sde.type, never a
+// hardcoded numeric constant (Principle 13: no guessing at a
+// plausible-looking id with no verifiable source).
+func (q *Queries) BackfillSkyhookTypeIDFromSDE(ctx context.Context, corporationID int64) error {
+	_, err := q.db.Exec(ctx, backfillSkyhookTypeIDFromSDE, corporationID)
+	return err
+}
+
+const backfillSovereigntyHubTypeIDFromSDE = `-- name: BackfillSovereigntyHubTypeIDFromSDE :exec
+UPDATE app.corporation_sovereignty_hub sh
+   SET type_id = (SELECT t.type_id FROM sde.type t WHERE t.name = 'Sovereignty Hub' LIMIT 1)
+ WHERE sh.corporation_id = $1
+   AND sh.type_id IS NULL
+   AND EXISTS (SELECT 1 FROM sde.type t WHERE t.name = 'Sovereignty Hub')
+`
+
+// Same name-resolved lookup as the skyhook type_id backfill above;
+// system_id needs no equivalent here (00033's header: the list endpoint
+// already gives solar_system_id directly).
+func (q *Queries) BackfillSovereigntyHubTypeIDFromSDE(ctx context.Context, corporationID int64) error {
+	_, err := q.db.Exec(ctx, backfillSovereigntyHubTypeIDFromSDE, corporationID)
+	return err
+}
+
 const deleteCorporationMembersNotIn = `-- name: DeleteCorporationMembersNotIn :exec
 DELETE FROM app.corporation_member
  WHERE corporation_id = $1 AND NOT (character_id = ANY($2::bigint[]))
