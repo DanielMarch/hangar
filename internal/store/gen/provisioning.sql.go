@@ -207,6 +207,32 @@ func (q *Queries) GetProvisioningState(ctx context.Context, platformID uuid.UUID
 	return i, err
 }
 
+const getProvisioningStateByRemoteIdentity = `-- name: GetProvisioningStateByRemoteIdentity :one
+SELECT platform_id, user_id, remote_identity, challenge_token, desired_groups, actual_groups, linked_at, last_reconciled_at FROM app.provisioning_state WHERE platform_id = $1 AND remote_identity = $2
+`
+
+// The reverse lookup a platform-side identity assertion needs — Phase
+// 13's Mumble external-authenticator path resolves a connecting client's
+// certificate hash back to the HANGAR user it's linked to (remote_identity
+// is unique per platform by construction: UpsertProvisioningState is
+// keyed one row per (platform_id, user_id), and a real link flow never
+// binds the same remote identity to two different users on one platform).
+func (q *Queries) GetProvisioningStateByRemoteIdentity(ctx context.Context, platformID uuid.UUID, remoteIdentity *string) (AppProvisioningState, error) {
+	row := q.db.QueryRow(ctx, getProvisioningStateByRemoteIdentity, platformID, remoteIdentity)
+	var i AppProvisioningState
+	err := row.Scan(
+		&i.PlatformID,
+		&i.UserID,
+		&i.RemoteIdentity,
+		&i.ChallengeToken,
+		&i.DesiredGroups,
+		&i.ActualGroups,
+		&i.LinkedAt,
+		&i.LastReconciledAt,
+	)
+	return i, err
+}
+
 const listAllProvisioningStatesForPlatform = `-- name: ListAllProvisioningStatesForPlatform :many
 SELECT platform_id, user_id, remote_identity, challenge_token, desired_groups, actual_groups, linked_at, last_reconciled_at FROM app.provisioning_state WHERE platform_id = $1
 `

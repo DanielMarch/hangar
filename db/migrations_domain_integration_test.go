@@ -78,8 +78,9 @@ var defaultPartitionTables = []string{
 // partitions that are ordinary tables in information_schema) — PLUS Phase
 // 8's one legitimate platform-table addition, sync_acting_character_history,
 // PLUS Phase 12's one legitimate platform-table addition,
-// discord_invalid_budget (see expectedPlatformTables' PHASE 8/PHASE 12
-// ADDITION comments in migrations_integration_test.go), for 136 total.
+// discord_invalid_budget, PLUS Phase 13's one legitimate platform-table
+// addition, teamspeak_challenge (see expectedPlatformTables' PHASE 8/12/13
+// ADDITION comments in migrations_integration_test.go), for 137 total.
 func TestAllDomainTablesPresent(t *testing.T) {
 	_, sqlDB := newMigratedContainer(t)
 

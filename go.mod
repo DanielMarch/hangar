@@ -43,9 +43,9 @@ require (
 	go.opentelemetry.io/otel/sdk v1.45.0
 	go.opentelemetry.io/otel/trace v1.45.0
 	golang.org/x/sync v0.22.0 // errgroup: bounded page fan-out (§4.1.4)
-	google.golang.org/grpc v1.83.0 // indirect; Mumble MurmurRPC driver
-	google.golang.org/protobuf v1.36.11 // indirect; Mumble MurmurRPC driver
-	gopkg.in/yaml.v3 v3.0.1 // indirect; CCP notification YAML, generic fallback
+	google.golang.org/grpc v1.83.0 // Mumble MurmurRPC driver
+	google.golang.org/protobuf v1.36.11 // Mumble MurmurRPC driver
+	gopkg.in/yaml.v3 v3.0.1 // CCP notification YAML, generic fallback
 )
 
 require (

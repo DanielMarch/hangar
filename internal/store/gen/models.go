@@ -1383,6 +1383,15 @@ type AppSyncSubscription struct {
 	OptInNoCache      bool
 }
 
+type AppTeamspeakChallenge struct {
+	Token                  string
+	UserID                 uuid.UUID
+	IssuedAt               time.Time
+	ExpiresAt              time.Time
+	ConsumedAt             *time.Time
+	ClientUniqueIdentifier *string
+}
+
 type AppUser struct {
 	UserID          uuid.UUID
 	MainCharacterID *int64

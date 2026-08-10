@@ -89,6 +89,18 @@ func Validate(cfg *Config) error {
 		}
 	}
 
+	// TeamSpeak and Mumble are strictly optional, same pattern.
+	if cfg.TeamSpeak.Enabled {
+		requireString("HANGAR_TEAMSPEAK_WEBQUERY_URL", cfg.TeamSpeak.WebQueryURL)
+		requireSecret("HANGAR_TEAMSPEAK_API_KEY", cfg.TeamSpeak.APIKey)
+	}
+	if cfg.Mumble.Enabled {
+		requireString("HANGAR_MUMBLE_GRPC_ADDR", cfg.Mumble.GRPCAddr)
+		if cfg.Mumble.ExternalAuthenticator {
+			requireSecret("HANGAR_MUMBLE_AUTH_SHARED_SECRET", cfg.Mumble.AuthSharedSecret)
+		}
+	}
+
 	if len(errs) > 0 {
 		return fmt.Errorf("config: invalid configuration: %w", errors.Join(errs...))
 	}

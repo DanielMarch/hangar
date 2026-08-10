@@ -72,6 +72,15 @@ ON CONFLICT (platform_id, user_id) DO UPDATE
 -- name: GetProvisioningState :one
 SELECT * FROM app.provisioning_state WHERE platform_id = $1 AND user_id = $2;
 
+-- name: GetProvisioningStateByRemoteIdentity :one
+-- The reverse lookup a platform-side identity assertion needs — Phase
+-- 13's Mumble external-authenticator path resolves a connecting client's
+-- certificate hash back to the HANGAR user it's linked to (remote_identity
+-- is unique per platform by construction: UpsertProvisioningState is
+-- keyed one row per (platform_id, user_id), and a real link flow never
+-- binds the same remote identity to two different users on one platform).
+SELECT * FROM app.provisioning_state WHERE platform_id = $1 AND remote_identity = $2;
+
 -- name: ListExposedProvisioningStates :many
 -- The exposure board: desired and actual groups disagree.
 SELECT * FROM app.provisioning_state

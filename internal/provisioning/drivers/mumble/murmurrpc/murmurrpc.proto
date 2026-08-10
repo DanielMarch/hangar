@@ -1,0 +1,145 @@
+// Phase 13's own minimal reconstruction of the subset of Mumble's
+// MurmurRPC gRPC interface (github.com/mumble-voip/mumble,
+// src/murmur/MurmurRPC.proto) that internal/provisioning/drivers/mumble
+// needs: root-channel discovery (TreeQuery), ACL group membership
+// read-modify-write (ACLQuery/ACLSet), and the bidirectional
+// external-authenticator stream (Authenticate).
+//
+// IMPORTANT CAVEAT, reported per this phase's own instruction to surface
+// spec/upstream uncertainty rather than silently guess: this file was
+// authored from general knowledge of MurmurRPC's documented shape, NOT
+// vendored or copied from Mumble's own source (avoiding reproducing
+// upstream source verbatim). Real MurmurRPC.proto's exact field NUMBERS
+// must match on the wire for a real Murmur server to understand this
+// client — protobuf field numbers are the wire-format identity, not the
+// field names. Before pointing this driver at a real Murmur server, an
+// operator/integrator should diff this file against the target Murmur
+// version's actual MurmurRPC.proto (shipped in Murmur's own source tree)
+// and correct any field-number mismatch. grpc.go's own doc comment
+// repeats this caveat at the call site.
+syntax = "proto3";
+
+package murmurrpc;
+
+option go_package = "github.com/hangar-project/hangar/internal/provisioning/drivers/mumble/murmurrpc";
+
+message Void {}
+
+// Server identifies one Murmur virtual server by its configured id
+// (HANGAR_MUMBLE_SERVER_ID).
+message Server {
+  uint32 id = 1;
+}
+
+// Channel identifies one channel on one server. parent is set on requests
+// that need to disambiguate by hierarchy; responses always carry id.
+message Channel {
+  Server server = 1;
+  uint32 id = 2;
+  string name = 3;
+}
+
+// User is a currently-connected session — NOT a registered account.
+// ACL group membership is keyed on the registered user id (ACL.Group's
+// add/remove lists below), which is a distinct namespace from a
+// connected session's ephemeral id.
+message MumbleUser {
+  Server server = 1;
+  uint32 session = 2;
+  uint32 user_id = 3;
+  string name = 4;
+}
+
+// Tree is the recursive channel/user hierarchy TreeQuery returns —
+// HANGAR only ever reads Tree.channel.id at the root to discover the
+// configured server's root channel id when no explicit channel is
+// configured (01_ARCHITECTURE.md §9.5 / roadmap: "HANGAR manages the root
+// channel unless configured otherwise").
+message Tree {
+  Channel channel = 1;
+  repeated Tree children = 2;
+  repeated MumbleUser users = 3;
+}
+
+// ACL is one channel's full access-control configuration. Group
+// membership is force-add/force-remove: Group.add and Group.remove are
+// explicit registered-user-id lists that override the group's natural
+// membership rule for exactly those users — this is what "ACL group
+// add/remove" (roadmap) actually modifies. Mumble has no single-member
+// add/remove RPC: the whole Group list is read via ACLQuery, one Group's
+// add/remove lists are edited in place, and the WHOLE ACL is written back
+// via ACLSet — acl.go's read-modify-write pattern exists because this is
+// the only mechanism Murmur exposes.
+message ACL {
+  message Group {
+    string name = 1;
+    bool inherited = 2;
+    bool inherit = 3;
+    bool inheritable = 4;
+    repeated uint32 add = 5;
+    repeated uint32 remove = 6;
+    repeated uint32 inherited_members = 7;
+  }
+  message Entry {
+    Channel channel = 1;
+    bool apply_here = 2;
+    bool apply_subs = 3;
+    bool inherited = 4;
+    uint32 user_id = 5;
+    string group = 6;
+    int32 allow = 7;
+    int32 deny = 8;
+  }
+  Channel channel = 1;
+  repeated Entry acls = 2;
+  repeated Group groups = 3;
+  bool inherit = 4;
+}
+
+// Authenticator is the external-authenticator bidirectional stream
+// (01_ARCHITECTURE.md §9.5: "the only mechanism that achieves absolute
+// denial rather than group removal"). HANGAR dials Murmur and calls V1's
+// Authenticate RPC as the gRPC CLIENT, but Murmur is logically the one
+// asking questions: Murmur (the gRPC server for this call) pushes one
+// Request per connecting client down the SERVER->CLIENT direction, and
+// HANGAR answers each over the CLIENT->SERVER direction — the RPC
+// signature below is deliberately "backwards" from a naive
+// request-then-response reading (V1.Authenticate's client stream carries
+// Response messages, its server stream carries Request messages) to
+// match that real interaction shape. Status.STATUS_FAIL denies the
+// connection outright, never merely removing a group.
+message Authenticator {
+  message Request {
+    message Initialize {
+      uint32 uptime = 1;
+    }
+    message Authenticate {
+      string name = 1;
+      string password = 2;
+      repeated bytes certificates = 3;
+      string certificate_hash = 4;
+      bool strong_certificate = 5;
+    }
+    Initialize initialize = 1;
+    Authenticate authenticate = 2;
+  }
+  message Response {
+    enum Status {
+      STATUS_UNKNOWN = 0;
+      STATUS_OK = 1;
+      STATUS_FAIL = 2;
+      STATUS_TEMPORARY = 3;
+    }
+    Status status = 1;
+    int32 user_id = 2;
+    string name = 3;
+  }
+}
+
+// V1 is the gRPC service surface this driver calls.
+service V1 {
+  rpc TreeQuery(Server) returns (Tree);
+  rpc ACLQuery(Channel) returns (ACL);
+  rpc ACLSet(ACL) returns (Void);
+  rpc Authenticate(stream Authenticator.Response) returns (stream Authenticator.Request);
+}

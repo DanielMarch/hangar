@@ -63,6 +63,13 @@ var expectedPlatformTables = []string{
 	// worked-around gap. TestAllDomainTablesPresent's wantTotal is 136, not
 	// 135, for exactly this reason.
 	"discord_invalid_budget",
+	// PHASE 13 ADDITION (1): teamspeak_challenge
+	// (00039_phase13_teamspeak_challenge.sql) — the single-use TS3 linking
+	// token table, alongside session/api_token above; §4.4's original
+	// table map has no slot for this either, for the same "predates the
+	// driver phase" reason as Phase 12's addition. Same shape/reasoning
+	// again. TestAllDomainTablesPresent's wantTotal is 137, not 136.
+	"teamspeak_challenge",
 }
 
 func newMigratedContainer(t *testing.T) (*pgxpool.Pool, *sql.DB) {

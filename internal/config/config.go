@@ -21,13 +21,15 @@ type Config struct {
 	PublicURL      string
 	TrustedProxies []string
 
-	DB      DatabaseConfig
-	Redis   RedisConfig
-	Crypto  CryptoConfig
-	SSO     SSOConfig
-	ESI     ESIConfig
-	Sync    SyncConfig
-	Discord DiscordConfig
+	DB        DatabaseConfig
+	Redis     RedisConfig
+	Crypto    CryptoConfig
+	SSO       SSOConfig
+	ESI       ESIConfig
+	Sync      SyncConfig
+	Discord   DiscordConfig
+	TeamSpeak TeamSpeakConfig
+	Mumble    MumbleConfig
 }
 
 // ESIConfig governs Phase 3/4's outbound gateway: the conditional-cache
@@ -116,6 +118,35 @@ type DiscordConfig struct {
 	InvalidBudgetMax    int
 	InvalidWarnPercent  int
 	InvalidPausePercent int
+}
+
+// TeamSpeakConfig governs Phase 13's TS3 driver
+// (internal/provisioning/drivers/teamspeak) — strictly optional
+// (DiscordConfig's pattern).
+type TeamSpeakConfig struct {
+	Enabled           bool
+	WebQueryURL       string
+	APIKey            Secret
+	VirtualServerID   int
+	ChallengeTokenTTL time.Duration
+}
+
+// MumbleConfig governs Phase 13's Mumble driver
+// (internal/provisioning/drivers/mumble) — strictly optional.
+type MumbleConfig struct {
+	Enabled  bool
+	GRPCAddr string
+	ServerID uint32
+	// TLSCAPath empty means an insecure (plaintext) channel — .env.example:
+	// "empty = insecure channel (LAN only)".
+	TLSCAPath string
+
+	ExternalAuthenticator bool
+	// FailClosed's default (false) is deliberate — see
+	// internal/provisioning/drivers/mumble.Config.FailClosed's doc
+	// comment for why defaulting this to true would be actively harmful.
+	FailClosed       bool
+	AuthSharedSecret Secret
 }
 
 // DatabaseConfig is PostgreSQL 18 connection configuration (SRS §3.1).
@@ -229,6 +260,15 @@ func applyDefaults(v *viper.Viper) {
 	v.SetDefault("discord_invalid_budget", 10000)
 	v.SetDefault("discord_invalid_warn_pct", 50)
 	v.SetDefault("discord_invalid_pause_pct", 80)
+
+	v.SetDefault("teamspeak_enabled", false)
+	v.SetDefault("teamspeak_virtual_server_id", 1)
+	v.SetDefault("teamspeak_token_ttl", "24h")
+
+	v.SetDefault("mumble_enabled", false)
+	v.SetDefault("mumble_server_id", 1)
+	v.SetDefault("mumble_external_authenticator", false)
+	v.SetDefault("mumble_auth_fail_closed", false)
 }
 
 func splitCSV(s string) []string {
@@ -339,6 +379,22 @@ func Load(v *viper.Viper) (*Config, error) {
 			InvalidBudgetMax:    v.GetInt("discord_invalid_budget"),
 			InvalidWarnPercent:  v.GetInt("discord_invalid_warn_pct"),
 			InvalidPausePercent: v.GetInt("discord_invalid_pause_pct"),
+		},
+		TeamSpeak: TeamSpeakConfig{
+			Enabled:           v.GetBool("teamspeak_enabled"),
+			WebQueryURL:       v.GetString("teamspeak_webquery_url"),
+			APIKey:            NewSecret(v.GetString("teamspeak_api_key")),
+			VirtualServerID:   v.GetInt("teamspeak_virtual_server_id"),
+			ChallengeTokenTTL: v.GetDuration("teamspeak_token_ttl"),
+		},
+		Mumble: MumbleConfig{
+			Enabled:               v.GetBool("mumble_enabled"),
+			GRPCAddr:              v.GetString("mumble_grpc_addr"),
+			ServerID:              uint32(v.GetUint("mumble_server_id")),
+			TLSCAPath:             v.GetString("mumble_tls_ca"),
+			ExternalAuthenticator: v.GetBool("mumble_external_authenticator"),
+			FailClosed:            v.GetBool("mumble_auth_fail_closed"),
+			AuthSharedSecret:      NewSecret(v.GetString("mumble_auth_shared_secret")),
 		},
 	}
 

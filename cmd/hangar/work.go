@@ -99,8 +99,14 @@ func runWork(ctx context.Context) error {
 	// — the two queues sharing a river.Client is fine (River schedules
 	// per-queue independently); it is sharing a WORKER POOL that's
 	// prohibited, and QueueConfig below gives each its own.
-	drivers := provisioning.NewDrivers() // TeamSpeak/Mumble drivers register here in Phase 13
+	drivers := provisioning.NewDrivers()
 	if err := registerDiscordDriver(ctx, cfg, pool, drivers); err != nil {
+		return err
+	}
+	if err := registerTeamSpeakDriver(ctx, cfg, pool, drivers); err != nil {
+		return err
+	}
+	if err := registerMumbleDriver(ctx, cfg, pool, drivers, logger); err != nil {
 		return err
 	}
 	river.AddWorker(workers, &provisioning.UrgentWorker{Pool: pool, Drivers: drivers})

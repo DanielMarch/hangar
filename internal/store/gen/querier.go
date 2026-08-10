@@ -338,6 +338,13 @@ type Querier interface {
 	// nothing else from the triggering transaction to drive the platform call.
 	GetProvisioningAudit(ctx context.Context, auditID uuid.UUID) (AppProvisioningAudit, error)
 	GetProvisioningState(ctx context.Context, platformID uuid.UUID, userID uuid.UUID) (AppProvisioningState, error)
+	// The reverse lookup a platform-side identity assertion needs — Phase
+	// 13's Mumble external-authenticator path resolves a connecting client's
+	// certificate hash back to the HANGAR user it's linked to (remote_identity
+	// is unique per platform by construction: UpsertProvisioningState is
+	// keyed one row per (platform_id, user_id), and a real link flow never
+	// binds the same remote identity to two different users on one platform).
+	GetProvisioningStateByRemoteIdentity(ctx context.Context, platformID uuid.UUID, remoteIdentity *string) (AppProvisioningState, error)
 	GetRole(ctx context.Context, roleID uuid.UUID) (AppRole, error)
 	// Needed by internal/rbac/grant.go's RemoveRoleGrant wrapper: the
 	// affected-user-set computation (UsersAffectedByRole) needs role_id,
@@ -350,6 +357,7 @@ type Querier interface {
 	GetSquad(ctx context.Context, squadID uuid.UUID) (AppSquad, error)
 	GetStarbaseDetail(ctx context.Context, corporationID int64, starbaseID int64) (AppStarbaseDetail, error)
 	GetSyncSubscription(ctx context.Context, subscriptionID uuid.UUID) (AppSyncSubscription, error)
+	GetTeamspeakChallenge(ctx context.Context, token string) (AppTeamspeakChallenge, error)
 	GetUser(ctx context.Context, userID uuid.UUID) (AppUser, error)
 	GetUserByMainCharacterID(ctx context.Context, mainCharacterID *int64) (AppUser, error)
 	GetWalletBalance(ctx context.Context, ownerKind string, ownerID int64, division int16) (AppWalletBalance, error)
@@ -378,6 +386,9 @@ type Querier interface {
 	InsertSyntheticLedgerEntry(ctx context.Context, rateLimitGroup string, userKey string, cost int16) error
 	InvalidateCharacterToken(ctx context.Context, characterID int64, invalidReason *string) error
 	IsSquadModerator(ctx context.Context, squadID uuid.UUID, userID uuid.UUID) (bool, error)
+	// app.teamspeak_challenge — Phase 13's single-use TS3 linking token
+	// (01_ARCHITECTURE.md §9.4, db/migrations/00039).
+	IssueTeamspeakChallenge(ctx context.Context, token string, userID uuid.UUID, expiresAt time.Time) (AppTeamspeakChallenge, error)
 	// Advances next_due_at for just-claimed rows so the NEXT 5s tick doesn't
 	// reclaim them before the in-flight attempt (a Phase 7+ worker) records its
 	// real outcome via RecordSyncSuccess/RecordSync304/RecordSync403. Run in
@@ -611,6 +622,14 @@ type Querier interface {
 	RecordSync403(ctx context.Context, subscriptionID uuid.UUID) error
 	RecordSyncSuccess(ctx context.Context, arg RecordSyncSuccessParams) error
 	RecordUnknownNotificationType(ctx context.Context, type_ string, samplePayload []byte) error
+	// The single-use guarantee: this UPDATE only ever affects a row that is
+	// still unconsumed and unexpired, so a second redemption attempt with the
+	// same token — concurrent or sequential — always affects zero rows.
+	// Callers must check for pgx.ErrNoRows (sqlc's :one) and treat it as
+	// "already consumed, expired, or never issued", never distinguishing
+	// those three from the SQL result alone (no timing side-channel about
+	// which reason applies).
+	RedeemTeamspeakChallenge(ctx context.Context, token string, clientUniqueIdentifier *string) (AppTeamspeakChallenge, error)
 	RefreshEffectivePermission(ctx context.Context, userID uuid.UUID, permission string, permitted bool) error
 	RemoveRoleGrant(ctx context.Context, grantID uuid.UUID) error
 	RemoveSquadMember(ctx context.Context, squadID uuid.UUID, characterID int64) error
