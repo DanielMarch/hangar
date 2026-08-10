@@ -68,12 +68,25 @@ func runWork(ctx context.Context) error {
 	}
 	refresher := buildRefresher(cfg, pool, keyring)
 
+	syncPolicy := sync.PolicyConfig{TTLFloor: cfg.ESI.TTLFloor, BackoffCap: cfg.Sync.BackoffCap}
+
 	workers := river.NewWorkers()
-	river.AddWorker(workers, &worker.CharacterWorker{
-		Pool:    pool,
-		Gateway: gateway,
-		Tokens:  refresher,
-		Policy:  sync.PolicyConfig{TTLFloor: cfg.ESI.TTLFloor, BackoffCap: cfg.Sync.BackoffCap},
+	// River allows exactly one Worker per job Kind — Phase 7's
+	// CharacterWorker, Phase 8's CorporationWorker and GlobalWorker are all
+	// registered together behind worker.DispatchWorker, which routes each
+	// "sync_route" job to the matching entity_kind's worker. Each of the
+	// three still has its own directly-callable Work method for tests.
+	river.AddWorker(workers, &worker.DispatchWorker{
+		Character: &worker.CharacterWorker{
+			Pool: pool, Gateway: gateway, Tokens: refresher, Policy: syncPolicy,
+		},
+		Corporation: &worker.CorporationWorker{
+			Pool: pool, Gateway: gateway, Tokens: refresher, Policy: syncPolicy,
+			Elector: sync.DBElector{Store: s},
+		},
+		Global: &worker.GlobalWorker{
+			Pool: pool, Gateway: gateway, Policy: syncPolicy,
+		},
 	})
 
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{

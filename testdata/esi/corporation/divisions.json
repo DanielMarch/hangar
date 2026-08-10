@@ -1,0 +1,4 @@
+{
+  "hangar": [{"division": 1, "name": "Main Hangar"}, {"division": 2}],
+  "wallet": [{"division": 1, "name": "Master Wallet"}]
+}

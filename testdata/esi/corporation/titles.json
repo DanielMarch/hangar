@@ -1,0 +1,3 @@
+[
+  {"title_id": 1, "name": "Director", "roles": ["Director"], "grantable_roles": ["Accountant"], "roles_at_hq": ["Station_Manager"], "grantable_roles_at_base": [], "grantable_roles_at_hq": [], "grantable_roles_at_other": [], "roles_at_base": [], "roles_at_other": []}
+]

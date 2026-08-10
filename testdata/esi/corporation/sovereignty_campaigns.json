@@ -1,0 +1,7 @@
+[
+  {
+    "attackers_score": 0.4, "campaign_id": 1, "constellation_id": 20000020, "defender_id": 98000001,
+    "defender_score": 0.6, "event_type": "ihub_defense", "participants": [{"alliance_id": 434243723, "score": 0.4}],
+    "solar_system_id": 30000142, "start_time": "2026-08-09T18:00:00Z", "structure_id": 1029999999003
+  }
+]

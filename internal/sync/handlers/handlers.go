@@ -15,7 +15,11 @@
 // that atomic.
 package handlers
 
-import "time"
+import (
+	"fmt"
+	"hash/fnv"
+	"time"
+)
 
 // SyncResult reports what one domain sync did, for app.sync_run.rows_affected
 // (via internal/sync/normalize, which counts the source JSON array — this
@@ -37,4 +41,22 @@ func nilIfZero(t time.Time) *time.Time {
 		return nil
 	}
 	return &t
+}
+
+// syntheticRecordID derives a stable, deterministic int64 key for an ESI
+// list element that carries no id of its own (e.g. corporation role
+// history — see corporation_structure.go's SyncCorporationRoleHistory).
+// FNV-1a over the fields' string forms: same inputs always produce the
+// same key, so a re-synced page collides with (and is suppressed by) the
+// row it already inserted, rather than duplicating.
+func syntheticRecordID(parts ...any) int64 {
+	h := fnv.New64a()
+	for _, p := range parts {
+		_, _ = h.Write([]byte(fmt.Sprint(p)))
+		_, _ = h.Write([]byte{0})
+	}
+	// Mask off the sign bit: app.corporation_role_history.record_id is
+	// bigint (signed), and a negative synthetic id is harmless but
+	// needlessly surprising in ad-hoc SQL/log output.
+	return int64(h.Sum64() & 0x7FFFFFFFFFFFFFFF)
 }

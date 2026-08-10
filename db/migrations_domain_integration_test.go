@@ -75,7 +75,10 @@ var defaultPartitionTables = []string{
 // TestAllDomainTablesPresent — schema-diff against 02_… §5.2 (Phase 1b exit
 // criterion). Also proves the combined platform+domain table count matches
 // SRS v3.1 §5.2's ≈129 (51 + 78, plus the five materialised DEFAULT
-// partitions that are ordinary tables in information_schema).
+// partitions that are ordinary tables in information_schema) — PLUS Phase
+// 8's one legitimate platform-table addition, sync_acting_character_history
+// (see expectedPlatformTables' PHASE 8 ADDITION comment in
+// migrations_integration_test.go), for 135 total.
 func TestAllDomainTablesPresent(t *testing.T) {
 	_, sqlDB := newMigratedContainer(t)
 
@@ -99,7 +102,7 @@ func TestAllDomainTablesPresent(t *testing.T) {
 
 	wantTotal := len(expectedPlatformTables) + len(expectedDomainTables) + len(defaultPartitionTables)
 	require.Len(t, got, wantTotal,
-		"table count must match 51 platform + 78 domain + 5 default partitions = %d: %v", wantTotal, got)
+		"table count must match 52 platform (51 + Phase 8's sync_acting_character_history) + 78 domain + 5 default partitions = %d: %v", wantTotal, got)
 }
 
 // TestAssetTreeRecursiveCTE — 5-level nesting resolves; an injected cycle

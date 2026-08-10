@@ -303,6 +303,7 @@ type Querier interface {
 	// (01_ARCHITECTURE.md §6.1), independent of and prior to River's
 	// unique-job option.
 	LeaseSyncSubscriptions(ctx context.Context, leasedUntil time.Time, subscriptionIds []uuid.UUID) error
+	ListActingCharacterHistory(ctx context.Context, entityKind string, entityID int64, routeID uuid.UUID) ([]AppSyncActingCharacterHistory, error)
 	ListAlertChannels(ctx context.Context) ([]AppAlertChannel, error)
 	ListAlertRoutingRulesForType(ctx context.Context, alertType string) ([]AppAlertRoutingRule, error)
 	// app.alert_type, app.alert_channel, app.alert_routing_rule, app.alert_event,
@@ -441,6 +442,12 @@ type Querier interface {
 	MarkOutboxEventDispatched(ctx context.Context, eventID uuid.UUID) error
 	MarkWebhookDeliveryRetry(ctx context.Context, arg MarkWebhookDeliveryRetryParams) error
 	MarkWebhookDeliverySent(ctx context.Context, deliveryID uuid.UUID, responseStatus *int16) error
+	// ---- sync_acting_character_history (Phase 8, 01_ARCHITECTURE.md §6.3) ----
+	// Per-candidate 403 history for the acting-character election, keyed by
+	// (entity_kind, entity_id, route_id, character_id) rather than by
+	// subscription_id — see 00031_phase8_acting_character_history.sql's header
+	// for why app.sync_subscription.consecutive_403 alone can't serve this.
+	RecordActingCharacter403(ctx context.Context, arg RecordActingCharacter403Params) error
 	// dedupe_hash carries the natural key; ON CONFLICT makes re-delivery of an
 	// already-seen CCP notification a no-op rather than a duplicate event.
 	RecordAlertEvent(ctx context.Context, arg RecordAlertEventParams) (AppAlertEvent, error)
@@ -491,6 +498,9 @@ type Querier interface {
 	ReplaceCorporationMemberTitle(ctx context.Context, corporationID int64, titleID int64, characterID int64) (AppCorporationMemberTitle, error)
 	ReplaceCorporationRole(ctx context.Context, arg ReplaceCorporationRoleParams) (AppCorporationRole, error)
 	ReserveLedgerEntry(ctx context.Context, rateLimitGroup string, userKey string, requestTimeout time.Duration) (AppEsiLedgerEntry, error)
+	// Called on a success by the character that just acted, so a candidate
+	// that failed twice and then succeeded once is no longer penalised.
+	ResetActingCharacter403(ctx context.Context, arg ResetActingCharacter403Params) error
 	ResetErrorBudgetWindow(ctx context.Context) error
 	ResolveSquadApplication(ctx context.Context, applicationID uuid.UUID, status string, resolvedBy uuid.NullUUID) error
 	RetireEsiRoute(ctx context.Context, routeID uuid.UUID) error
@@ -699,6 +709,9 @@ type Querier interface {
 	// lets either caller supply real values without a NULL from the OTHER
 	// caller ever clobbering what's already stored.
 	UpsertMedal(ctx context.Context, arg UpsertMedalParams) (AppMedal, error)
+	// PHASE 8 FIX: structure_id added (00032_phase8_mining_extraction_structure_id.sql)
+	// — the live spec declares it required and it was missing from the
+	// Phase 1b column set entirely; see that migration's header.
 	UpsertMiningExtraction(ctx context.Context, arg UpsertMiningExtractionParams) (AppMiningExtraction, error)
 	UpsertMiningLedgerEntry(ctx context.Context, arg UpsertMiningLedgerEntryParams) (AppMiningLedger, error)
 	UpsertMiningObserver(ctx context.Context, arg UpsertMiningObserverParams) (AppMiningObserver, error)

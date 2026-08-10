@@ -74,7 +74,81 @@ var characterDispatch = map[string]characterHandler{
 	"/characters/{character_id}/location":           wrap(handlers.ParseCharacterLocation, handlers.SyncCharacterLocation),
 	"/characters/{character_id}/online":             wrap(handlers.ParseCharacterOnline, handlers.SyncCharacterOnline),
 	"/characters/{character_id}/ship":               wrap(handlers.ParseCharacterShip, handlers.SyncCharacterShip),
+
+	// Phase 8 additions: wallet division 1 and the character's own mining
+	// ledger are character-scoped concepts (02_DATABASE_SCHEMA.md §5.2's
+	// "Wallets" group is wholly Phase 8's regardless of owner; mining_ledger
+	// is a character-only table per 00016_domain_industry_mining.sql's
+	// header) — added here rather than duplicating CharacterWorker's
+	// dispatch/doSync machinery in a second file.
+	"/characters/{character_id}/wallet": func(ctx context.Context, s *store.Store, characterID int64, body []byte) (int32, error) {
+		dto, err := handlers.ParseCharacterWalletBalance(body)
+		if err != nil {
+			return 0, err
+		}
+		res, err := handlers.SyncWalletBalances(ctx, s, "character", characterID, []handlers.WalletBalanceDTO{dto})
+		if err != nil {
+			return 0, err
+		}
+		return res.RowsAffected, nil
+	},
+	"/characters/{character_id}/wallet/journal": func(ctx context.Context, s *store.Store, characterID int64, body []byte) (int32, error) {
+		dto, err := handlers.ParseWalletJournalPage(body)
+		if err != nil {
+			return 0, err
+		}
+		res, err := handlers.SyncWalletJournal(ctx, s, "character", characterID, 1, dto)
+		if err != nil {
+			return 0, err
+		}
+		return res.RowsAffected, nil
+	},
+	"/characters/{character_id}/wallet/transactions": func(ctx context.Context, s *store.Store, characterID int64, body []byte) (int32, error) {
+		dto, err := handlers.ParseWalletTransactionsPage(body)
+		if err != nil {
+			return 0, err
+		}
+		res, err := handlers.SyncWalletTransactions(ctx, s, "character", characterID, 1, dto)
+		if err != nil {
+			return 0, err
+		}
+		return res.RowsAffected, nil
+	},
+	"/characters/{character_id}/mining": wrap(handlers.ParseCharacterMiningLedger, handlers.SyncCharacterMiningLedger),
+	"/characters/{character_id}/industry/jobs": func(ctx context.Context, s *store.Store, characterID int64, body []byte) (int32, error) {
+		dto, err := handlers.ParseIndustryJobs(body)
+		if err != nil {
+			return 0, err
+		}
+		res, err := handlers.SyncIndustryJobs(ctx, s, "character", characterID, dto)
+		if err != nil {
+			return 0, err
+		}
+		return res.RowsAffected, nil
+	},
+	"/characters/{character_id}/blueprints": func(ctx context.Context, s *store.Store, characterID int64, body []byte) (int32, error) {
+		dto, err := handlers.ParseBlueprints(body)
+		if err != nil {
+			return 0, err
+		}
+		res, err := handlers.SyncBlueprints(ctx, s, "character", characterID, dto)
+		if err != nil {
+			return 0, err
+		}
+		return res.RowsAffected, nil
+	},
 }
+
+// walletJournalCharacterPath is page-paginated the same way the
+// corporation journal route is (X-Pages) — CharacterWorker's doSync
+// (Phase 7) does not page-walk, since none of Phase 7's own routes needed
+// it. Full multi-page correctness for the character wallet journal is left
+// to a future pass; this phase wires the single-page case (ESI's default
+// page=1 response) so the route has real, tested coverage rather than none
+// at all. Flagged here rather than silently accepted as "good enough":
+// worker/corporation.go's fetchAllPages is the correct mechanism and this
+// route should eventually call it too.
+const walletJournalCharacterPath = "/characters/{character_id}/wallet/journal"
 
 // dataLevel404Routes marks the routes where the roadmap's edge case
 // applies literally: a 404 is DATA (e.g. no ship info while podded/some

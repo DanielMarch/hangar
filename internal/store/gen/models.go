@@ -1035,6 +1035,7 @@ type AppMiningExtraction struct {
 	ExtractionStartTime time.Time
 	ChunkArrivalTime    time.Time
 	NaturalDecayTime    time.Time
+	StructureID         int64
 }
 
 type AppMiningLedger struct {
@@ -1327,6 +1328,16 @@ type AppStarbaseDetail struct {
 	Fuels                   json.RawMessage
 	ReinforcedUntil         *time.Time
 	UpdatedAt               time.Time
+}
+
+type AppSyncActingCharacterHistory struct {
+	EntityKind     string
+	EntityID       int64
+	RouteID        uuid.UUID
+	CharacterID    int64
+	Consecutive403 int32
+	Last403At      *time.Time
+	UpdatedAt      time.Time
 }
 
 type AppSyncRun struct {

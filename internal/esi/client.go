@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -106,6 +107,14 @@ type Response struct {
 	HasLastModified bool
 	NotModified     bool
 	FromCache       bool
+
+	// Pages is the parsed X-Pages header (§5.9's page-pagination mechanism:
+	// "page" + "X-Pages") — 0 when the header is absent, which callers must
+	// treat as "not page-paginated" or "only one page", never as a literal
+	// page count of zero. Phase 7's callers never needed this (character
+	// routes in that phase's scope are all single-page); Phase 8's wallet
+	// journal is the first consumer.
+	Pages int
 }
 
 // buildURL substitutes {name} placeholders in path with PathParams,
@@ -270,7 +279,21 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 	return &Response{
 		StatusCode: status, Body: body, ETag: etag,
 		LastModified: lastMod, HasLastModified: hasLastMod,
+		Pages: parsePages(header.Get("X-Pages")),
 	}, nil
+}
+
+// parsePages parses the X-Pages header (§5.9). An absent or malformed
+// header yields 0 — "not page-paginated", not a page count.
+func parsePages(raw string) int {
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 func (c *Client) cacheKey(req Request) string {

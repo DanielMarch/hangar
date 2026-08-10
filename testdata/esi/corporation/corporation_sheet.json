@@ -1,0 +1,20 @@
+{
+  "alliance_id": 434243723,
+  "ceo_id": 180548812,
+  "creator_id": 180548812,
+  "date_founded": "2004-11-28T16:42:51Z",
+  "description": "A test corporation.",
+  "enlisted_faction_id": 500001,
+  "friendly_fire": "everyone",
+  "home_station_id": 60003760,
+  "member_count": 25,
+  "name": "Test Corporation",
+  "palette": {"main_color": "#112233", "secondary_color": "#445566", "tertiary_color": "#778899"},
+  "shares": 1000,
+  "state": "normal",
+  "tax_rates": {"isk": 0.1, "loyalty_point": 0.05},
+  "ticker": "TEST",
+  "type": "npc",
+  "url": "http://example.com",
+  "war_eligible": true
+}

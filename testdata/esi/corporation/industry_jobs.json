@@ -1,0 +1,11 @@
+[
+  {
+    "activity_id": 1, "blueprint_id": 1000000000010, "blueprint_location_id": 60003760,
+    "blueprint_type_id": 981, "completed_character_id": 90000001, "completed_date": "2026-08-02T00:00:00Z",
+    "cost": 15000.00, "duration": 3600, "end_date": "2026-08-02T00:00:00Z", "facility_id": 60003760,
+    "installer_id": 90000001, "job_id": 1, "licensed_runs": 10, "location_id": 60003760,
+    "output_location_id": 60003760, "pause_date": "2026-08-01T12:00:00Z", "probability": 0.32,
+    "product_type_id": 982, "runs": 5, "start_date": "2026-08-01T00:00:00Z", "status": "delivered",
+    "successful_runs": 5
+  }
+]

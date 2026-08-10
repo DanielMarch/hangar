@@ -1,0 +1,8 @@
+[
+  {
+    "amount": -100000.00, "balance": 900000.00, "context_id": 30000142, "context_id_type": "system_id",
+    "date": "2026-08-01T00:00:00Z", "description": "Office rental fee", "first_party_id": 98000001,
+    "id": 1, "reason": "rent", "ref_type": "office_rental_fee", "second_party_id": 1000000, "tax": 0,
+    "tax_receiver_id": 1000000
+  }
+]

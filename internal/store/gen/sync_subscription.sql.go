@@ -163,6 +163,39 @@ func (q *Queries) LeaseSyncSubscriptions(ctx context.Context, leasedUntil time.T
 	return err
 }
 
+const listActingCharacterHistory = `-- name: ListActingCharacterHistory :many
+SELECT entity_kind, entity_id, route_id, character_id, consecutive_403, last_403_at, updated_at FROM app.sync_acting_character_history
+ WHERE entity_kind = $1 AND entity_id = $2 AND route_id = $3
+`
+
+func (q *Queries) ListActingCharacterHistory(ctx context.Context, entityKind string, entityID int64, routeID uuid.UUID) ([]AppSyncActingCharacterHistory, error) {
+	rows, err := q.db.Query(ctx, listActingCharacterHistory, entityKind, entityID, routeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppSyncActingCharacterHistory
+	for rows.Next() {
+		var i AppSyncActingCharacterHistory
+		if err := rows.Scan(
+			&i.EntityKind,
+			&i.EntityID,
+			&i.RouteID,
+			&i.CharacterID,
+			&i.Consecutive403,
+			&i.Last403At,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecentSyncRuns = `-- name: ListRecentSyncRuns :many
 SELECT run_id, subscription_id, started_at, finished_at, status, outcome, error, rows_affected FROM app.sync_run
  WHERE subscription_id = $1
@@ -198,6 +231,37 @@ func (q *Queries) ListRecentSyncRuns(ctx context.Context, subscriptionID uuid.UU
 		return nil, err
 	}
 	return items, nil
+}
+
+const recordActingCharacter403 = `-- name: RecordActingCharacter403 :exec
+
+INSERT INTO app.sync_acting_character_history (entity_kind, entity_id, route_id, character_id, consecutive_403, last_403_at)
+VALUES ($1, $2, $3, $4, 1, now())
+ON CONFLICT (entity_kind, entity_id, route_id, character_id) DO UPDATE
+   SET consecutive_403 = app.sync_acting_character_history.consecutive_403 + 1,
+       last_403_at = now(), updated_at = now()
+`
+
+type RecordActingCharacter403Params struct {
+	EntityKind  string
+	EntityID    int64
+	RouteID     uuid.UUID
+	CharacterID int64
+}
+
+// ---- sync_acting_character_history (Phase 8, 01_ARCHITECTURE.md §6.3) ----
+// Per-candidate 403 history for the acting-character election, keyed by
+// (entity_kind, entity_id, route_id, character_id) rather than by
+// subscription_id — see 00031_phase8_acting_character_history.sql's header
+// for why app.sync_subscription.consecutive_403 alone can't serve this.
+func (q *Queries) RecordActingCharacter403(ctx context.Context, arg RecordActingCharacter403Params) error {
+	_, err := q.db.Exec(ctx, recordActingCharacter403,
+		arg.EntityKind,
+		arg.EntityID,
+		arg.RouteID,
+		arg.CharacterID,
+	)
+	return err
 }
 
 const recordSync304 = `-- name: RecordSync304 :exec
@@ -248,6 +312,32 @@ func (q *Queries) RecordSyncSuccess(ctx context.Context, arg RecordSyncSuccessPa
 		arg.CursorAfter,
 		arg.NextDueAt,
 		arg.Consecutive304,
+	)
+	return err
+}
+
+const resetActingCharacter403 = `-- name: ResetActingCharacter403 :exec
+INSERT INTO app.sync_acting_character_history (entity_kind, entity_id, route_id, character_id, consecutive_403)
+VALUES ($1, $2, $3, $4, 0)
+ON CONFLICT (entity_kind, entity_id, route_id, character_id) DO UPDATE
+   SET consecutive_403 = 0, updated_at = now()
+`
+
+type ResetActingCharacter403Params struct {
+	EntityKind  string
+	EntityID    int64
+	RouteID     uuid.UUID
+	CharacterID int64
+}
+
+// Called on a success by the character that just acted, so a candidate
+// that failed twice and then succeeded once is no longer penalised.
+func (q *Queries) ResetActingCharacter403(ctx context.Context, arg ResetActingCharacter403Params) error {
+	_, err := q.db.Exec(ctx, resetActingCharacter403,
+		arg.EntityKind,
+		arg.EntityID,
+		arg.RouteID,
+		arg.CharacterID,
 	)
 	return err
 }

@@ -1,0 +1,6 @@
+{
+  "allow_alliance_members": true, "allow_corporation_members": true,
+  "attack_standing_threshold": -5.0, "fuel_bay_view": "config_starbase_equipment_role",
+  "fuels": [{"quantity": 500, "type_id": 4051}], "reinforced_until": "2026-08-10T00:00:00Z",
+  "use_alliance_standings": true
+}

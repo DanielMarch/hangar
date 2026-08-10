@@ -83,6 +83,31 @@ UPDATE app.sync_subscription SET acting_character_id = $2 WHERE subscription_id 
 -- name: SetSyncNoCacheOptIn :exec
 UPDATE app.sync_subscription SET opt_in_no_cache = $2 WHERE subscription_id = $1;
 
+-- ---- sync_acting_character_history (Phase 8, 01_ARCHITECTURE.md §6.3) ----
+-- Per-candidate 403 history for the acting-character election, keyed by
+-- (entity_kind, entity_id, route_id, character_id) rather than by
+-- subscription_id — see 00031_phase8_acting_character_history.sql's header
+-- for why app.sync_subscription.consecutive_403 alone can't serve this.
+
+-- name: RecordActingCharacter403 :exec
+INSERT INTO app.sync_acting_character_history (entity_kind, entity_id, route_id, character_id, consecutive_403, last_403_at)
+VALUES ($1, $2, $3, $4, 1, now())
+ON CONFLICT (entity_kind, entity_id, route_id, character_id) DO UPDATE
+   SET consecutive_403 = app.sync_acting_character_history.consecutive_403 + 1,
+       last_403_at = now(), updated_at = now();
+
+-- name: ResetActingCharacter403 :exec
+-- Called on a success by the character that just acted, so a candidate
+-- that failed twice and then succeeded once is no longer penalised.
+INSERT INTO app.sync_acting_character_history (entity_kind, entity_id, route_id, character_id, consecutive_403)
+VALUES ($1, $2, $3, $4, 0)
+ON CONFLICT (entity_kind, entity_id, route_id, character_id) DO UPDATE
+   SET consecutive_403 = 0, updated_at = now();
+
+-- name: ListActingCharacterHistory :many
+SELECT * FROM app.sync_acting_character_history
+ WHERE entity_kind = $1 AND entity_id = $2 AND route_id = $3;
+
 -- ---- sync_run ----
 
 -- name: StartSyncRun :one

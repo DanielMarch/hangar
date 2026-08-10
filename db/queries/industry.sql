@@ -53,13 +53,17 @@ RETURNING *;
 SELECT * FROM app.mining_ledger WHERE owner_kind = $1 AND owner_id = $2 ORDER BY date DESC;
 
 -- name: UpsertMiningExtraction :one
+-- PHASE 8 FIX: structure_id added (00032_phase8_mining_extraction_structure_id.sql)
+-- — the live spec declares it required and it was missing from the
+-- Phase 1b column set entirely; see that migration's header.
 INSERT INTO app.mining_extraction AS t (
-    corporation_id, moon_id, extraction_start_time, chunk_arrival_time, natural_decay_time
-) VALUES ($1,$2,$3,$4,$5)
+    corporation_id, moon_id, extraction_start_time, chunk_arrival_time, natural_decay_time, structure_id
+) VALUES ($1,$2,$3,$4,$5,$6)
 ON CONFLICT (corporation_id, moon_id, extraction_start_time) DO UPDATE
-   SET chunk_arrival_time = EXCLUDED.chunk_arrival_time, natural_decay_time = EXCLUDED.natural_decay_time
- WHERE (t.chunk_arrival_time, t.natural_decay_time)
-    IS DISTINCT FROM (EXCLUDED.chunk_arrival_time, EXCLUDED.natural_decay_time)
+   SET chunk_arrival_time = EXCLUDED.chunk_arrival_time, natural_decay_time = EXCLUDED.natural_decay_time,
+       structure_id = EXCLUDED.structure_id
+ WHERE (t.chunk_arrival_time, t.natural_decay_time, t.structure_id)
+    IS DISTINCT FROM (EXCLUDED.chunk_arrival_time, EXCLUDED.natural_decay_time, EXCLUDED.structure_id)
 RETURNING *;
 
 -- name: ListMiningExtractionsByCorporation :many

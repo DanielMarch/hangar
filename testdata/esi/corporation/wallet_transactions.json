@@ -1,0 +1,7 @@
+[
+  {
+    "client_id": 90000005, "date": "2026-08-01T00:00:00Z", "is_buy": true, "is_personal": false,
+    "journal_ref_id": 2, "location_id": 60003760, "quantity": 100, "transaction_id": 1,
+    "type_id": 34, "unit_price": 5.75
+  }
+]

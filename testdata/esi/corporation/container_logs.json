@@ -1,0 +1,8 @@
+[
+  {
+    "action": "add", "character_id": 90000001, "container_id": 1000000000001,
+    "container_type_id": 17366, "location_flag": "Hangar", "location_id": 60003760,
+    "logged_at": "2026-08-01T00:00:00Z", "new_config_bitmask": 15, "old_config_bitmask": 7,
+    "password_type": "config", "quantity": 5, "type_id": 34
+  }
+]

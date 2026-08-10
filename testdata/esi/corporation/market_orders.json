@@ -1,0 +1,8 @@
+[
+  {
+    "duration": 90, "escrow": 1000.00, "is_buy_order": true, "issued": "2026-08-01T00:00:00Z",
+    "issued_by": 90000001, "location_id": 60003760, "min_volume": 1, "order_id": 1,
+    "price": 5.75, "range": "region", "region_id": 10000002, "type_id": 34,
+    "volume_remain": 100, "volume_total": 1000, "wallet_division": 1
+  }
+]

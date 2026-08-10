@@ -39,6 +39,19 @@ var expectedPlatformTables = []string{
 	"webhook_endpoint", "outbox_event", "webhook_delivery",
 	// §4.7 shared reference and open vocabularies (5)
 	"corporation", "alliance", "location", "open_vocabulary", "sde_import",
+	// PHASE 8 ADDITION (1): sync_acting_character_history
+	// (00031_phase8_acting_character_history.sql) — a platform/sync-engine
+	// table alongside sync_subscription/sync_run above, not a domain
+	// projection; §5.2's original table map has no phase-8-specific gap for
+	// it because the gap it fixes (per-candidate 403 history for §6.3
+	// election, which app.sync_subscription.consecutive_403 alone cannot
+	// serve) was only discovered during Phase 8 implementation. Reported as
+	// a specification gap, fixed with a real migration rather than worked
+	// around — see that migration's header for the full account. This is
+	// the one legitimate addition to SRS v3.1 §5.2's "≈129" platform+domain
+	// total; TestAllDomainTablesPresent's wantTotal below is 135, not 134,
+	// for exactly this reason.
+	"sync_acting_character_history",
 }
 
 func newMigratedContainer(t *testing.T) (*pgxpool.Pool, *sql.DB) {

@@ -100,7 +100,7 @@ func (q *Queries) ListIndustryJobsByOwner(ctx context.Context, ownerKind string,
 }
 
 const listMiningExtractionsByCorporation = `-- name: ListMiningExtractionsByCorporation :many
-SELECT corporation_id, moon_id, extraction_start_time, chunk_arrival_time, natural_decay_time FROM app.mining_extraction WHERE corporation_id = $1 ORDER BY extraction_start_time DESC
+SELECT corporation_id, moon_id, extraction_start_time, chunk_arrival_time, natural_decay_time, structure_id FROM app.mining_extraction WHERE corporation_id = $1 ORDER BY extraction_start_time DESC
 `
 
 func (q *Queries) ListMiningExtractionsByCorporation(ctx context.Context, corporationID int64) ([]AppMiningExtraction, error) {
@@ -118,6 +118,7 @@ func (q *Queries) ListMiningExtractionsByCorporation(ctx context.Context, corpor
 			&i.ExtractionStartTime,
 			&i.ChunkArrivalTime,
 			&i.NaturalDecayTime,
+			&i.StructureID,
 		); err != nil {
 			return nil, err
 		}
@@ -390,13 +391,14 @@ func (q *Queries) UpsertIndustryJob(ctx context.Context, arg UpsertIndustryJobPa
 
 const upsertMiningExtraction = `-- name: UpsertMiningExtraction :one
 INSERT INTO app.mining_extraction AS t (
-    corporation_id, moon_id, extraction_start_time, chunk_arrival_time, natural_decay_time
-) VALUES ($1,$2,$3,$4,$5)
+    corporation_id, moon_id, extraction_start_time, chunk_arrival_time, natural_decay_time, structure_id
+) VALUES ($1,$2,$3,$4,$5,$6)
 ON CONFLICT (corporation_id, moon_id, extraction_start_time) DO UPDATE
-   SET chunk_arrival_time = EXCLUDED.chunk_arrival_time, natural_decay_time = EXCLUDED.natural_decay_time
- WHERE (t.chunk_arrival_time, t.natural_decay_time)
-    IS DISTINCT FROM (EXCLUDED.chunk_arrival_time, EXCLUDED.natural_decay_time)
-RETURNING corporation_id, moon_id, extraction_start_time, chunk_arrival_time, natural_decay_time
+   SET chunk_arrival_time = EXCLUDED.chunk_arrival_time, natural_decay_time = EXCLUDED.natural_decay_time,
+       structure_id = EXCLUDED.structure_id
+ WHERE (t.chunk_arrival_time, t.natural_decay_time, t.structure_id)
+    IS DISTINCT FROM (EXCLUDED.chunk_arrival_time, EXCLUDED.natural_decay_time, EXCLUDED.structure_id)
+RETURNING corporation_id, moon_id, extraction_start_time, chunk_arrival_time, natural_decay_time, structure_id
 `
 
 type UpsertMiningExtractionParams struct {
@@ -405,8 +407,12 @@ type UpsertMiningExtractionParams struct {
 	ExtractionStartTime time.Time
 	ChunkArrivalTime    time.Time
 	NaturalDecayTime    time.Time
+	StructureID         int64
 }
 
+// PHASE 8 FIX: structure_id added (00032_phase8_mining_extraction_structure_id.sql)
+// — the live spec declares it required and it was missing from the
+// Phase 1b column set entirely; see that migration's header.
 func (q *Queries) UpsertMiningExtraction(ctx context.Context, arg UpsertMiningExtractionParams) (AppMiningExtraction, error) {
 	row := q.db.QueryRow(ctx, upsertMiningExtraction,
 		arg.CorporationID,
@@ -414,6 +420,7 @@ func (q *Queries) UpsertMiningExtraction(ctx context.Context, arg UpsertMiningEx
 		arg.ExtractionStartTime,
 		arg.ChunkArrivalTime,
 		arg.NaturalDecayTime,
+		arg.StructureID,
 	)
 	var i AppMiningExtraction
 	err := row.Scan(
@@ -422,6 +429,7 @@ func (q *Queries) UpsertMiningExtraction(ctx context.Context, arg UpsertMiningEx
 		&i.ExtractionStartTime,
 		&i.ChunkArrivalTime,
 		&i.NaturalDecayTime,
+		&i.StructureID,
 	)
 	return i, err
 }

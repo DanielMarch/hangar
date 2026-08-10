@@ -1,0 +1,9 @@
+[
+  {
+    "corporation_id": 98000001, "fuel_expires": "2026-09-01T00:00:00Z", "name": "Test Keepstar",
+    "next_reinforce_apply": "2026-08-15T00:00:00Z", "next_reinforce_hour": 12, "profile_id": 101,
+    "reinforce_hour": 12, "services": [{"name": "market", "state": "online"}], "state": "shield_vulnerable",
+    "state_timer_end": "2026-08-10T00:00:00Z", "state_timer_start": "2026-08-09T00:00:00Z",
+    "structure_id": 1029999999001, "system_id": 30000142, "type_id": 35832, "unanchors_at": "2026-10-01T00:00:00Z"
+  }
+]
