@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/hangar-project/hangar/internal/config"
@@ -38,8 +40,33 @@ func validKey() string {
 // previous value on cleanup, so the test stays hermetic, and
 // internal/config treats "" as missing for all five (requireSecret checks
 // Secret.Empty(), requireString checks v == "").
+// setEnv gives the test a HERMETIC environment: every HANGAR_-prefixed
+// variable present in the ambient environment is cleared first, then kv is
+// applied.
+//
+// PHASE 18. This used to clear only requiredSecretEnv, so every OTHER
+// HANGAR_ variable an operator happened to have exported leaked in through
+// viper's AutomaticEnv — and TestConfigLoadsSuccessfullyWithAllRequiredValues
+// asserts that DEFAULTS are applied, which is only true in a clean
+// environment. It had never bitten because nothing else required those
+// variables to be set while running the tests.
+//
+// Phase 18 changed that: `make ci` now runs `make e2e`, which is guarded on
+// HANGAR_DB_URL, so the documented way to run the full gate is with
+// HANGAR_* exported — and `HANGAR_ENV=development` in a developer's shell
+// would fail a config test that has nothing to do with either. Clearing the
+// whole prefix is the fix; enumerating the variables would just be a
+// second copy of applyDefaults' key list, waiting to drift.
 func setEnv(t *testing.T, kv map[string]string) {
 	t.Helper()
+	for _, entry := range os.Environ() {
+		key, _, found := strings.Cut(entry, "=")
+		if found && strings.HasPrefix(key, "HANGAR_") {
+			if _, override := kv[key]; !override {
+				t.Setenv(key, "")
+			}
+		}
+	}
 	for _, k := range requiredSecretEnv {
 		if _, ok := kv[k]; !ok {
 			t.Setenv(k, "")
