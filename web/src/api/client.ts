@@ -48,7 +48,25 @@ export function unwrap<T>(result: {
       problem?.detail,
     );
   }
+  // PHASE 18 DEFECT CLOSURE. A successful response that carries NO BODY is
+  // not an error. Every `EmptyOut` mutation on the Go side answers
+  // 204 No Content — the acknowledge actions, the dead-letter requeue, the
+  // squad member add/remove, unlink-character, revoke-share-link,
+  // revoke-api-token — and openapi-fetch reports those as
+  // `{ data: undefined, error: undefined }`. Throwing here sent every one
+  // of them down the mutation's error path: the write had ALREADY
+  // succeeded server-side, but `onSuccess` never ran, so no query was
+  // invalidated and the screen kept showing the row the operator had just
+  // acted on. Found by clicking Acknowledge in a real browser and watching
+  // the row stay put while the database said otherwise.
+  //
+  // 205 Reset Content is included for completeness; nothing emits it today.
   if (result.data === undefined) {
+    if (result.response.ok) {
+      // 204/205, or any other-bodied success. `undefined` is the honest
+      // value; callers of empty mutations ignore it.
+      return undefined as T;
+    }
     throw new ApiError(result.response.status, "empty response body");
   }
   return result.data;
