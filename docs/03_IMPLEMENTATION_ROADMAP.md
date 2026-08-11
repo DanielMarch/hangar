@@ -1726,7 +1726,7 @@ module inside its own error boundary rendering a local retry.
 
 ## Phase 18 — Frontend III (Admin & observability)
 
-**Objective.** The administrator surfaces.
+**Objective.** The administrator surfaces, **and the backend work they depend on**.
 
 **Depends on.** Phase 17.
 
@@ -1735,9 +1735,38 @@ module inside its own error boundary rendering a local retry.
 blocked-by-pin, unknown scopes, the exposure board — because they exist to surface the SRS's new
 invariants.
 
+**⚠ This is NOT a frontend-only phase. [added at the Phase 17 close-out]** Two of the five exit
+criteria below cannot be satisfied against the API as built. The Phase 17 close-out audit found
+three backend gaps that must be closed *first*; they are recorded as SRS defects **B12** and
+**B13** (§0) and are scoped into this phase:
+
+1. **No pin-advance preview endpoint exists.** Only the mutating
+   `POST /api/v1/admin/esi/catalogue/pin` is registered (`internal/api/v1/admin.go:79`). The
+   criterion requires the diff be shown *before* the pin moves, which one mutating call cannot do.
+   SRS §6.8 now specifies `POST /api/v1/admin/esi/catalogue/pin/preview`.
+2. **The route diff is never computed.** `advancePinHandler` passes `nil` to
+   `catalogue.AdvancePin`, which substitutes `{}` (`internal/esi/catalogue/pin.go:77-79`). Every
+   recorded `route_diff` to date is empty. Nothing diffs the route set across two pin dates.
+3. **No server-side `D_max` validation.** `AdvancePin` accepts any date. The criterion demands
+   rejection *client- and server-side*; only the client half was ever specifiable.
+
+Plus a fourth, broader defect this phase must fix because its own screens are the first to trip
+on it:
+
+4. **`jsonb` columns reach the wire hex-encoded (B12).** `internal/api/dto/row.go:83` hex-encodes
+   any `[]byte`; Go's `json.RawMessage` **is** `[]byte`. 42 generated model fields are affected —
+   including `esi_pin_history.route_diff`, which this phase must *render*. Fixing the converter
+   also repairs starbase `fuels`, skyhook/sov-hub `reagents`, structure `services` and the
+   planetary colony `pins`/`links`/`routes` that Phase 17 had to render as opaque strings.
+
 **Files.**
 
 ```
+internal/api/dto/row.go                     (B12: emit json.RawMessage as nested JSON, not hex)
+internal/api/v1/admin.go                    (B13: register the pin/preview endpoint)
+internal/esi/catalogue/pin.go               (B13: compute the diff; enforce D_max server-side)
+internal/esi/catalogue/diff.go              (B13: route-set diff across two compatibility dates)
+
 web/src/features/admin/sync/**             (Sync Health, Route Catalogue viewer)
 web/src/features/admin/esi/**              (blocked-by-pin board, pin-advance preview,
                                             rate-limit and error-limit dashboards,
@@ -1747,11 +1776,22 @@ web/src/features/admin/provisioning/**     (platforms, rule editor + preview, ex
                                             lockdown)
 web/src/features/admin/alerts/**           (dead-letter viewer, unknown-types board)
 web/src/features/admin/users/**, security/**
+web/e2e/**                                  (Playwright smoke suite — see "Verification gap")
 ```
 
 **Design notes.** These screens are where the architecture becomes operable. The pin-advance
 preview is the mechanism that keeps Principle 12 honest: an administrator must see the route diff
-before the pin can move.
+before the pin can move — which is exactly why B13's separate preview endpoint is a correctness
+requirement and not an API-shape preference.
+
+**Verification gap carried in from Phase 17.** `@playwright/test` and a `pnpm run e2e` script have
+been dependencies since Phase 0 with **no suite behind them**, and no phase owned building one.
+That is why Phase 17 had to verify its 60fps criterion by proxy (bounded DOM window) rather than
+by measurement, and why 21 of its 24 feature components have no direct test. Phase 18's two
+*confirmation-flow* criteria are precisely the kind jsdom verifies weakly, so this phase wires up
+a **small, bounded** Playwright suite covering the pin-advance and rule-editor confirm flows
+against a seeded database. It is not a mandate to retrofit e2e coverage over Phases 16–17; that
+remains an open item for scheduling.
 
 **Edge cases.**
 
@@ -1760,7 +1800,16 @@ before the pin can move.
 * The exposure board lists pending revocations with their **exact ages** computed from
   `event_at`, not from job start.
 * The pin-advance flow must refuse to advance to a date newer than `D_max`, and must show the
-  full route diff including newly *blocked* routes, not only newly unblocked ones.
+  full route diff including newly *blocked* routes, not only newly unblocked ones. **Both halves
+  need backend work first (B13) — see the warning above.** "Rejected client-side" alone is not the
+  criterion and never was: a UI-only bound check is bypassed by any direct API call.
+* A diff of "no routes changed" is a **legitimate, informative answer**, not an empty state. An
+  administrator advancing across a quiet week should see "nothing changes", explicitly — the same
+  empty-vs-unavailable distinction §6 draws for collections. Rendering a blank panel there invites
+  advancing the pin believing the preview simply failed to load.
+* `route_diff` is `jsonb` and, until B12 is fixed, arrives hex-encoded. Do **not** work around
+  this in the client by hex-decoding — fix the converter. A client that decodes a HANGAR response
+  field is the defect, not the workaround.
 * The unknown-scope and unknown-types boards need an "acknowledge" action that writes
   `acknowledged_at` — otherwise they grow unbounded and get ignored.
 * The rate-limit dashboard should surface `esi_ledger_divergence` prominently: sustained
@@ -1776,18 +1825,30 @@ before the pin can move.
 | `TestRuleEditorRequiresPreviewConfirmation` | saving without preview is impossible |
 | `TestExposureBoardShowsExactAges` | ages computed from `event_at` |
 | `TestPinAdvanceShowsRouteDiffBeforeChange` | the diff is displayed and confirmed before the pin moves |
-| `TestPinAdvanceRefusesDateNewerThanDMax` | out-of-range dates rejected client- and server-side |
+| `TestPinAdvanceRefusesDateNewerThanDMax` | out-of-range dates rejected client- **and server-side** |
 | `TestUnknownBoardsAcknowledge` | acknowledging writes `acknowledged_at` and clears the board |
+| `TestJSONBFieldsEmitNestedJSON` | **(B12)** a `json.RawMessage` model field serialises as a JSON object/array, not a hex string; binary columns still hex-encode |
+| `TestPinPreviewIsNonMutating` | **(B13)** calling preview leaves the stored pin and `esi_pin_history` untouched |
+| `TestPinAdvanceRecordsComputedDiff` | **(B13)** the persisted `route_diff` is the real diff, never `{}`; newly blocked and newly unblocked routes both appear |
 
 **Prompt seed.**
-> Implement HANGAR Phase 18: the admin and observability frontend. Sync Health, the Route
+> Implement HANGAR Phase 18: the admin and observability surfaces **and the backend work they
+> depend on**. Close SRS defects B12 and B13 FIRST — they are prerequisites, not cleanup:
+> (a) make `internal/api/dto/row.go` emit `json.RawMessage` as nested JSON instead of hex (it
+> currently hits the `[]byte` path by accident, affecting 42 model fields including the
+> `route_diff` this phase must render); (b) add the non-mutating
+> `POST /api/v1/admin/esi/catalogue/pin/preview`, actually compute the route-set diff across two
+> compatibility dates, and enforce `D_max` server-side in `catalogue.AdvancePin`, which today
+> accepts any date and records `{}` as the diff. Then build the frontend: Sync Health, the Route
 > Catalogue viewer, the blocked-by-pin board with a pin-advance flow that **shows the full route
 > diff and requires confirmation before the pin can move**, the unknown-scope board, rate-limit
 > and error-limit dashboards (surface ledger divergence prominently), access-provisioning
 > platforms with a rule editor that **mandates preview confirmation before saving**, the exposure
-> board listing pending revocations with exact ages from `event_at`, the alert dead-letter
-> viewer and unknown-types board with acknowledge actions, user administration and the security
-> log. Exit on the five named tests.
+> board listing pending revocations with exact ages from `event_at`, the alert dead-letter viewer
+> and unknown-types board with acknowledge actions, user administration and the security log.
+> Reuse Phase 16/17's AppShell, DataTable/CollectionTable, ErrorBoundary and SyncBadge rather than
+> rebuilding them. The replica board is read-only by design — do not add a mode override control;
+> that reintroduces B1. Exit on all eight named tests.
 
 ---
 
@@ -1953,3 +2014,7 @@ Consolidated so the implementing agent can scan for the ones relevant to the cur
 | 40 | Multiple replicas | cluster-shared ledger, mode auto-selected; **no operator divisor**; Gate 1 run at N=1 and N=3 | 4, 20 |
 | 41 | Wars alert domain | notification-derived; no wars route or table may be invented | 14 |
 | 42 | `app.permission` is a closed set | Principle 14 governs *external* vocabularies only | 1a, 10 |
+| 43 | `jsonb` column on the wire **(B12)** | nested JSON, never hex; `json.RawMessage` is `[]byte` and hits the binary path by accident | 18 |
+| 44 | Pin advance without a preview **(B13)** | preview is a separate non-mutating endpoint; advance validates `D_max` server-side and records a real diff, never `{}` | 18 |
+| 45 | Pin preview showing no route changes | "nothing changes" is an answer, not an empty state — render it explicitly | 18 |
+| 46 | SPA deep link on hard navigation | unknown non-asset paths fall back to `index.html`; `/api`, `/auth`, `/healthz` still 404 honestly | 16, 17 |

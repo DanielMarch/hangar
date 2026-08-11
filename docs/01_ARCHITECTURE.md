@@ -234,7 +234,7 @@ sequenceDiagram
 
 | Date | Symbol | Source | Used for | Advanced by |
 | :-- | :-- | :-- | :-- | :-- |
-| App pin | `P` | `app.setting['esi.compatibility_date']`, seeded `2026-08-04` | **Every data request** | Administrator only, via `POST /api/v1/admin/esi/catalogue/pin` |
+| App pin | `P` | `app.setting['esi.compatibility_date']`, seeded `2026-08-04` | **Every data request** | Administrator only, via `POST /api/v1/admin/esi/catalogue/pin`, which **rejects any candidate newer than `D_max`** and records the computed route diff. The administrator must first review that diff via the non-mutating `POST /api/v1/admin/esi/catalogue/pin/preview` (Principle 12; SRS §0 B13, delivered in Phase 18) |
 | Discovery | `D_max` | newest entry from `/meta/compatibility-dates` | **Only** the `openapi.json` fetch | Automatically, every boot |
 
 An absent `X-Compatibility-Date` resolves upstream to the *oldest* date, which is never

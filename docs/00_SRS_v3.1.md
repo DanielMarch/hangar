@@ -17,6 +17,8 @@
 
 Eleven defects were found in v3.0. Seven were structural (B1–B7); four were under-specifications
 that would have produced divergent implementations (B8–B11). All are corrected in this revision.
+Two more (B12–B13) were raised later, against the running system, and are recorded in their own
+subsection below.
 
 | # | Defect in v3.0 | Resolution in v3.1 | Sections |
 | :--- | :--- | :--- | :--- |
@@ -31,6 +33,18 @@ that would have produced divergent implementations (B8–B11). All are corrected
 | **B9** | **Ledger timestamp unspecified.** "One `window-size` after *that individual request*" does not say whether the request is stamped at issue or at response. The two differ by request latency and bias available headroom in opposite directions. | `consumed_at` is the **response** timestamp. Reservations are stamped at issue and expire at the configured request timeout. | §4.1.3 |
 | **B10** | **Wars had no data source.** §4.4 introduced Wars as an alert domain with 6 types, but §6 exposes no wars endpoint and §5.2 defines no wars table. | Recorded explicitly: the six war alerts are **notification-derived**. No wars route and no wars table are required, and none may be invented. | §4.4 |
 | **B11** | **`app.permission` appeared to contradict Principle 14.** §5.2 declared it a closed Go set while Principle 14 forbids closed sets. | Principle 14 is scoped explicitly to **external** vocabularies. Vocabularies HANGAR itself owns and defines may be closed. | Principle 2 (P14), §5.2 |
+
+### Findings raised during implementation **[added at the Phase 17 close-out]**
+
+Two further specification defects were found while implementing Phases 16–17. They continue the
+B-series numbering because they are defects of the same kind — this document under-specifying
+something an implementation then diverged on — but they were raised against the running system
+rather than against v3.0, and are corrected here for Phase 18 to build on.
+
+| # | Defect | Resolution in v3.1 | Sections |
+| :--- | :--- | :--- | :--- |
+| **B12** | **Structured `jsonb` columns had no stated wire representation.** §6 pins down money (a string) and the `_sync` envelope but says nothing about how a `jsonb` column reaches the client. The generic row converter (`internal/api/dto/row.go`) hex-encodes any `[]byte`, and Go's `json.RawMessage` **is** `[]byte`, so every structured column reaches the wire as an opaque hex string: a starbase's `fuels` (the fuel-low alert's own data), a skyhook's and sovereignty hub's `reagents`, a structure's `services`, a planetary colony's `pins`/`links`/`routes`, and an ESI pin advance's `route_diff`. 42 such fields exist across the generated models. No client can render one without first decoding a HANGAR response field, which no part of this document asks it to do. | A `jsonb` column is emitted as **nested JSON**, never as an encoded scalar. Hex-encoding is reserved for genuinely binary columns (hashes, ciphertext, wrapped key material) — none of which may leave the server in the first place. | §6, §7 Phase 18 |
+| **B13** | **The pin-advance preview was named but never specified as an operation.** §6.8 lists a single mutating `POST /api/v1/admin/esi/catalogue/pin` *"(advance the compatibility date, with preview diff)"*. Principle 12 and Phase 18 both require the administrator to see the route diff **before** the pin moves, which one mutating call cannot provide. The delivered handler compounds this: it passes a `nil` diff (recorded as `{}`, so no diff is ever computed) and performs no `D_max` bound check, leaving both of Phase 18's pin exit criteria unsatisfiable against the API as built. | Preview is a **separate, non-mutating endpoint**, `POST /api/v1/admin/esi/catalogue/pin/preview`, returning the full route diff in both directions (newly blocked **and** newly unblocked) for a candidate date without changing state. The advance endpoint validates the candidate against `D_max` server-side and records the computed diff rather than `{}`. | §6.8, §7 Phase 18 |
 
 ### Findings carried forward from v3.0's own revision record
 
@@ -669,6 +683,13 @@ prohibited.
 Data from a `blocked_by_pin` route is rendered as **unavailable with an administrator-facing
 explanation**, never as an empty result. Empty and unavailable are distinct states.
 
+**Structured columns are nested JSON on the wire. [v3.1 — B12]** A PostgreSQL `jsonb` column — a
+starbase's fuel bay, a skyhook's or sovereignty hub's reagents, a structure's service list, a
+planetary colony's pins/links/routes, an ESI pin advance's route diff — is emitted as a nested
+JSON object or array, never as an encoded scalar. A client must never have to decode a field of a
+HANGAR response before it can read it. Hex encoding is reserved for genuinely binary columns
+(hashes, ciphertext, wrapped key material), none of which may be serialised to a client at all.
+
 The endpoint set is unchanged from v3.0 and is reproduced here in full so that this document is
 self-contained. `docs/03_IMPLEMENTATION_ROADMAP.md` records the phase that delivers each group.
 
@@ -787,7 +808,13 @@ self-contained. `docs/03_IMPLEMENTATION_ROADMAP.md` records the phase that deliv
 ### 6.8 Administration & Observability
 * `GET /api/v1/admin/sync/routes`, `/sync/subscriptions`, `/sync/health`
 * **`GET /api/v1/admin/esi/catalogue/blocked`** *(routes gated by the compatibility pin)*
-* **`POST /api/v1/admin/esi/catalogue/pin`** *(advance the compatibility date, with preview diff)*
+* **`POST /api/v1/admin/esi/catalogue/pin/preview`** *(compute the full route diff for a candidate
+  compatibility date — newly blocked **and** newly unblocked routes — without changing any state;
+  new in v3.1, §0 B13)*
+* **`POST /api/v1/admin/esi/catalogue/pin`** *(advance the compatibility date. Rejects a candidate
+  newer than `D_max` server-side, and records the computed route diff — never an empty one.
+  Preview is a separate call above, because Principle 12 requires the administrator to see the
+  diff **before** the pin moves; one mutating endpoint cannot satisfy that. **[v3.1 — B13]**)*
 * `GET /api/v1/admin/esi/ratelimits`, `/esi/errorlimit`
 * **`GET /api/v1/admin/esi/replicas`** *(live replica registry and the resulting ledger mode —
   new in v3.1, §4.1.3)*
