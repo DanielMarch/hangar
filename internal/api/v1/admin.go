@@ -139,7 +139,24 @@ func registerAdmin(hapi huma.API, deps api.Deps) {
 		func(ctx context.Context, _ *EmptyIn) (*ItemOut, error) {
 			row, err := deps.Store.GetErrorBudget(ctx)
 			if err != nil {
-				return nil, api.NotFound("error budget")
+				// PHASE 18 CLOSE-OUT. This was a 404, which is wrong twice
+				// over. app.esi_error_budget is a SINGLETON created by
+				// Governor 2's Init — and Init runs when the ESI gateway is
+				// assembled, which happens in the worker process, not in
+				// `serve`. So on a freshly installed system this route
+				// 404'd, and the rate-limit dashboard's error-budget panel
+				// crashed into its ErrorBoundary showing "Something went
+				// wrong" — for a system that is simply new.
+				//
+				// "Not initialised yet" is UNAVAILABLE WITH AN EXPLANATION,
+				// exactly as §6 requires and exactly as /meta/server-status
+				// already does before its first sync. It is not a missing
+				// resource, and it is certainly not "0 errors", which would
+				// be a false reading of a budget that is not being tracked.
+				return &ItemOut{Body: api.UnavailableItem[map[string]any](
+					"The ESI error budget has not been initialised on this installation yet — " +
+						"Governor 2 creates it when the gateway first runs, which happens in the worker process",
+				)}, nil
 			}
 			data := rowOf(row)
 			return &ItemOut{Body: api.Item[map[string]any]{Data: &data, Sync: api.Sync{}}}, nil
