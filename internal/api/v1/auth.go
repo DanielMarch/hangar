@@ -330,14 +330,24 @@ func apiTokenAccessLogHandler(deps api.Deps) func(context.Context, *UUIDPageIn) 
 // ---- redirect flow (outside /api/v1, outside huma) ----
 
 // RegisterAuthRedirects mounts /auth/login, /auth/callback and
-// /auth/logout directly on mux. flow may be nil in an environment with no
-// SSO configured (e.g. `hangar openapi`'s spec-only build, or a
-// development server without EVE SSO credentials) — the handlers then
-// answer 501 rather than panicking.
+// /auth/logout directly on mux.
+//
+// PHASE 15.1: a nil flow is now a PROGRAMMING ERROR, not a supported
+// deployment state. cmd/hangar/serve.go always builds a real *sso.Flow and
+// aborts startup if it cannot, so a served installation can never reach
+// these guards; they answer 500 rather than 501 for the same reason
+// reauthorizeHandler does. 501 would advertise "this endpoint is not
+// implemented", which is exactly the claim Phase 15.1 exists to stop the
+// API making — the login flow IS implemented, and a nil flow here would
+// mean the process was assembled wrongly.
+//
+// The guards are kept rather than removed because RegisterAuthRedirects is
+// exported and a future caller (a test, a spec-only build) could still pass
+// nil; failing loudly beats a nil-pointer panic in a request handler.
 func RegisterAuthRedirects(mux *http.ServeMux, s *store.Store, flow *sso.Flow) {
 	mux.HandleFunc("GET /auth/login", func(w http.ResponseWriter, r *http.Request) {
 		if flow == nil {
-			http.Error(w, "sso not configured", http.StatusNotImplemented)
+			http.Error(w, "sso flow not assembled — this is a server misconfiguration, not an unimplemented endpoint", http.StatusInternalServerError)
 			return
 		}
 		ip := r.RemoteAddr
@@ -356,7 +366,7 @@ func RegisterAuthRedirects(mux *http.ServeMux, s *store.Store, flow *sso.Flow) {
 
 	mux.HandleFunc("GET /auth/callback", func(w http.ResponseWriter, r *http.Request) {
 		if flow == nil {
-			http.Error(w, "sso not configured", http.StatusNotImplemented)
+			http.Error(w, "sso flow not assembled — this is a server misconfiguration, not an unimplemented endpoint", http.StatusInternalServerError)
 			return
 		}
 		cookie, err := r.Cookie(apimw.SessionCookieName)
