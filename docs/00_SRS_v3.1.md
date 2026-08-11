@@ -609,6 +609,27 @@ Named structures:
 * **RBAC:** `app.role`, `app.permission` (a HANGAR-owned closed set, seeded from Go with a CI
   divergence check — see Principle 14), `app.role_grant`, `app.user_role`,
   `app.effective_permission`.
+
+  > **[v3.1 — Phase 15.1] Every §6 endpoint group must name a permission.**
+  > Phase 15 found that the closed set covered characters, corporations,
+  > squads and the *write* side of administration, but had nothing at all for
+  > §6.4 (alliances/sovereignty), §6.5 (markets), §6.7's reference lookups, or
+  > the *read* side of §6.8 — so those routes shipped gated on "any resolved
+  > session" or on `superuser`, the latter meaning an operator who should only
+  > see sync health had to be handed the one permission that bypasses every
+  > other check. Phase 15.1 added the twelve missing names
+  > (`alliances.view`, `sovereignty.view`, `markets.view`, `tools.view`,
+  > `admin.sync.view`, `admin.esi.view`, `admin.platforms.view`,
+  > `admin.scopes.view`, `provisioning.exposures.view`,
+  > `alerting.unknown_types.view`, `alerting.deadletter.view`,
+  > `alerting.deadletter.requeue`).
+  >
+  > Two groups remain **deliberately** session-only, and this is a design
+  > decision rather than an outstanding gap: the `/api/v1/me*` family is
+  > self-scoped by definition (a permission governing "may this user read
+  > their own account" is meaningless), and `/api/v1/meta/*` is installation
+  > health the SPA shell renders for every signed-in user — gating it would
+  > break the dashboard for ordinary members.
 * **Provisioning:** `app.platform`, `app.platform_group`, `app.entitlement_rule`,
   `app.provisioning_state`, `app.provisioning_audit`. The audit table records both the originating
   `event_at` and `platform_call_completed_at`, because the revocation SLO is measured across queue
@@ -720,6 +741,19 @@ self-contained. `docs/03_IMPLEMENTATION_ROADMAP.md` records the phase that deliv
   `/markets/{region_id}/types`
 * `GET /api/v1/markets/prices`
 
+> **Scope clarification [v3.1 — Phase 15.1].** `/markets/{region_id}/orders`
+> and `/markets/{region_id}/types` return the orders **HANGAR has synced for
+> the characters and corporations it tracks**, region-scoped — not the
+> complete public regional order book. HANGAR syncs orders per tracked owner
+> (`/characters/{id}/orders`, `/corporations/{id}/orders`); ingesting every
+> public order would mean hundreds of thousands of rows per region across
+> ~100 regions, a scale commitment nothing in this document makes.
+> `app.market_order` was designed for the region-scoped read — Phase 1b gave
+> it both a `region_id` column and a dedicated index on it, an index no
+> owner-scoped query can use. Phase 15 misread "no complete public order
+> book" as "no backing table" and answered 501; Phase 15.1 implemented the
+> read and recorded this note so the ambiguity cannot recur.
+
 ### 6.6 Squads
 * `GET /api/v1/squads`, `POST /api/v1/squads`, `PATCH /api/v1/squads/{id}`,
   `DELETE /api/v1/squads/{id}`
@@ -738,6 +772,17 @@ self-contained. `docs/03_IMPLEMENTATION_ROADMAP.md` records the phase that deliv
 * `GET /api/v1/tools/insurance`, `/tools/character/{id}/notes`, `/tools/standings`
 * **`GET /api/v1/meta/esi-status`** *(ESI service health — drives gateway decisions)*
 * **`GET /api/v1/meta/server-status`** *(Tranquility: players online, VIP mode, version)*
+
+> **[v3.1 — Phase 15.1]** `/meta/server-status` is backed by a global sync of
+> ESI's `GET /status/` (upstream `x-cache-age` 30s), stored as a single
+> overwritten row in `app.setting` under `esi.server_status` — one global
+> value with no history, no owner and no foreign keys, which is what
+> `app.setting` is for. Before the first successful sync the route renders
+> **unavailable with an explanation**, never zeroes: "0 players online" would
+> be a false reading, not an empty result. The two status endpoints remain
+> strictly distinct — `/meta/esi-status` is ESI's own service health and
+> drives gateway decisions; this one is the game server's state and drives
+> the dashboard.
 
 ### 6.8 Administration & Observability
 * `GET /api/v1/admin/sync/routes`, `/sync/subscriptions`, `/sync/health`

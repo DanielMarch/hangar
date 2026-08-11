@@ -10,14 +10,15 @@
 INSERT INTO app.corporation AS t (
     corporation_id, name, ticker, member_count, ceo_id, alliance_id,
     description, tax_rate, date_founded, creator_id, url, faction_id,
-    home_station_id, shares, war_eligible, palette
+    home_station_id, shares, war_eligible, palette, member_limit
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
 )
 ON CONFLICT (corporation_id) DO UPDATE
    SET name              = EXCLUDED.name,
        ticker             = EXCLUDED.ticker,
        member_count       = EXCLUDED.member_count,
+       member_limit       = EXCLUDED.member_limit,
        ceo_id             = EXCLUDED.ceo_id,
        alliance_id        = EXCLUDED.alliance_id,
        description        = EXCLUDED.description,
@@ -31,9 +32,13 @@ ON CONFLICT (corporation_id) DO UPDATE
        war_eligible       = EXCLUDED.war_eligible,
        palette            = EXCLUDED.palette,
        updated_at         = now()
- WHERE (t.name, t.ticker, t.member_count, t.ceo_id, t.alliance_id, t.tax_rate, t.shares, t.war_eligible)
+-- member_limit joins the change guard (Phase 15.1): without it a
+-- corporation that trained Corporation Management would keep the stale
+-- limit forever, because no OTHER column changed and the DO UPDATE would
+-- be skipped entirely.
+ WHERE (t.name, t.ticker, t.member_count, t.member_limit, t.ceo_id, t.alliance_id, t.tax_rate, t.shares, t.war_eligible)
     IS DISTINCT FROM
-       (EXCLUDED.name, EXCLUDED.ticker, EXCLUDED.member_count, EXCLUDED.ceo_id,
+       (EXCLUDED.name, EXCLUDED.ticker, EXCLUDED.member_count, EXCLUDED.member_limit, EXCLUDED.ceo_id,
         EXCLUDED.alliance_id, EXCLUDED.tax_rate, EXCLUDED.shares, EXCLUDED.war_eligible)
 RETURNING *;
 
@@ -116,3 +121,13 @@ UPDATE app.sde_import
 
 -- name: GetLatestSdeImport :one
 SELECT * FROM app.sde_import ORDER BY started_at DESC LIMIT 1;
+
+-- name: SetCorporationMemberLimit :exec
+-- PHASE 15.1 — `/corporations/{corporation_id}/members/limit` is its own
+-- ESI route returning a bare integer, not a field of the corporation
+-- sheet, so it needs a targeted write: UpsertCorporation would require
+-- inventing values for every other column just to set this one.
+UPDATE app.corporation
+   SET member_limit = $2, updated_at = now()
+ WHERE corporation_id = $1
+   AND member_limit IS DISTINCT FROM $2;

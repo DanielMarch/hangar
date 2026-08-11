@@ -64,6 +64,7 @@ var corporationDispatch = map[string]corporationHandler{
 	"/corporations/{corporation_id}/members":         wrapCorp(handlers.ParseCorporationMembers, handlers.SyncCorporationMembers),
 	"/corporations/{corporation_id}/membertracking":  wrapCorp(handlers.ParseCorporationMemberTracking, handlers.SyncCorporationMemberTracking),
 	"/corporations/{corporation_id}/members/titles":  wrapCorp(handlers.ParseCorporationMemberTitles, handlers.SyncCorporationMemberTitles),
+	"/corporations/{corporation_id}/members/limit":   wrapCorp(handlers.ParseCorporationMemberLimit, handlers.SyncCorporationMemberLimit),
 	"/corporations/{corporation_id}/titles":          wrapCorp(handlers.ParseCorporationTitles, handlers.SyncCorporationTitles),
 	"/corporations/{corporation_id}/roles":           wrapCorp(handlers.ParseCorporationRoles, handlers.SyncCorporationRoles),
 	"/corporations/{corporation_id}/roles/history":   wrapCorp(handlers.ParseCorporationRoleHistory, handlers.SyncCorporationRoleHistory),

@@ -148,6 +148,73 @@ func (q *Queries) ListMarketOrdersByOwner(ctx context.Context, ownerKind string,
 	return items, nil
 }
 
+const listMarketOrdersByRegion = `-- name: ListMarketOrdersByRegion :many
+SELECT owner_kind, owner_id, order_id, type_id, region_id, location_id, range, is_buy_order, is_corporation, escrow, price, volume_total, volume_remain, min_volume, duration, issued, wallet_division, updated_at, issued_by FROM app.market_order
+ WHERE region_id = $1
+   AND order_id > $2
+ ORDER BY order_id
+ LIMIT $3
+`
+
+// PHASE 15.1 — SRS §6.5 `GET /api/v1/markets/{region_id}/orders`.
+//
+// SCOPE, stated precisely because Phase 15 got this wrong in the other
+// direction: this is NOT the complete public regional order book. HANGAR
+// syncs orders per tracked owner (`/characters/{id}/orders`,
+// `/corporations/{id}/orders`), so app.market_order contains exactly the
+// orders belonging to characters and corporations this installation
+// tracks. Region-scoping that set is a genuinely useful read — "what are
+// our people trading in Domain" — and app.market_order was built for it:
+// Phase 1b gave the table a `region_id` column AND a dedicated
+// `CREATE INDEX ON app.market_order (region_id)`, an index that is useless
+// to every owner-scoped query (they all lead with owner_kind, owner_id)
+// and only pays for itself here.
+//
+// Phase 15 read "no complete public order book" as "no backing table" and
+// answered 501. The table and its index were there the whole time; what is
+// absent is a full-region sync, which nothing in the SRS asks for and
+// which would mean ingesting hundreds of thousands of rows per region
+// across ~100 regions.
+func (q *Queries) ListMarketOrdersByRegion(ctx context.Context, regionID int32, afterOrderID int64, pageSize int32) ([]AppMarketOrder, error) {
+	rows, err := q.db.Query(ctx, listMarketOrdersByRegion, regionID, afterOrderID, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppMarketOrder
+	for rows.Next() {
+		var i AppMarketOrder
+		if err := rows.Scan(
+			&i.OwnerKind,
+			&i.OwnerID,
+			&i.OrderID,
+			&i.TypeID,
+			&i.RegionID,
+			&i.LocationID,
+			&i.Range,
+			&i.IsBuyOrder,
+			&i.IsCorporation,
+			&i.Escrow,
+			&i.Price,
+			&i.VolumeTotal,
+			&i.VolumeRemain,
+			&i.MinVolume,
+			&i.Duration,
+			&i.Issued,
+			&i.WalletDivision,
+			&i.UpdatedAt,
+			&i.IssuedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMarketPrices = `-- name: ListMarketPrices :many
 SELECT type_id, adjusted_price, average_price, updated_at FROM app.market_price ORDER BY type_id
 `
@@ -170,6 +237,35 @@ func (q *Queries) ListMarketPrices(ctx context.Context) ([]AppMarketPrice, error
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMarketTypesByRegion = `-- name: ListMarketTypesByRegion :many
+SELECT DISTINCT type_id FROM app.market_order
+ WHERE region_id = $1
+ ORDER BY type_id
+`
+
+// PHASE 15.1 — SRS §6.5 `GET /api/v1/markets/{region_id}/types`. Same
+// scope note as ListMarketOrdersByRegion: the distinct type_ids present in
+// the orders HANGAR has synced for this region.
+func (q *Queries) ListMarketTypesByRegion(ctx context.Context, regionID int32) ([]int32, error) {
+	rows, err := q.db.Query(ctx, listMarketTypesByRegion, regionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int32
+	for rows.Next() {
+		var type_id int32
+		if err := rows.Scan(&type_id); err != nil {
+			return nil, err
+		}
+		items = append(items, type_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

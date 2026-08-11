@@ -51,6 +51,37 @@ help: ## List targets
 	@grep -hE '^[a-zA-Z0-9_.-]+:.*?## ' $(MAKEFILE_LIST) | sort | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-24s\033[0m %s\n",$$1,$$2}'
 
 # ── generation ───────────────────────────────────────────────────────────────
+# TWO SEPARATE HAZARDS BIT PHASE 15/15.1 HERE. Both are recorded because
+# each cost real debugging time and neither is obvious from the recipes.
+#
+# 1. CONCURRENCY (the sqlc "user-mapped section" error). Do not run
+#    `generate` or `verify-generated` in the background while another one —
+#    or a foreground `sqlc generate` — is also running. Two processes
+#    rewriting internal/store/gen/*.go at once fails on Windows with
+#      The requested operation cannot be performed on a file with a
+#      user-mapped section open.
+#    because the loser hits a file the winner (or a real-time virus scan of
+#    it) currently has memory-mapped. Phase 15 hit this repeatedly and
+#    worked around it by regenerating into a temp directory. It does not
+#    reproduce serially: 34 controlled attempts (serial, post-build,
+#    post-vet, post-lint, and concurrent) all passed.
+#
+# 2. `git diff` HANGING (Phase 15.1). verify-generated's staleness check
+#    used `git diff --exit-code -- <paths>`, and that command hung
+#    indefinitely inside a long-running `make` — twice, ~13+ minutes with
+#    the make processes at near-zero CPU, blocking the whole gate. It does
+#    NOT reproduce standalone (no core.pager, no fsmonitor, no stale
+#    index.lock, 14 MiB repo, diff only ~500 lines), so the mechanism is
+#    NOT proven — do not read the fix below as a diagnosis.
+#
+#    What the fix does is remove the failure surface rather than explain
+#    it: `--quiet` means git writes NO output at all (the check only ever
+#    wanted the exit code), and `--no-pager` means no pager can be spawned
+#    under any tty-detection outcome. On failure a bounded `--name-only`
+#    list is printed instead of a potentially enormous diff, which is also
+#    better CI output. A gate that can hang forever is worse than one that
+#    fails, so if this ever recurs, add a timeout rather than restoring the
+#    old form.
 .PHONY: generate sqlc openapi types verify-generated
 generate: sqlc openapi types ## Run every generator that has inputs
 
@@ -71,9 +102,12 @@ verify-generated: generate ## Principle 10 — generated output must be committe
 	 paths=""; for p in internal/store/gen docs/openapi.json web/src/api/schema.d.ts; do \
 	   [ -e "$$p" ] && paths="$$paths $$p"; done; \
 	 if [ -z "$$paths" ]; then $(call skip,verify-generated,no generated artefacts exist yet); exit 0; fi; \
-	 git diff --exit-code -- $$paths \
-	   || { echo "generated files are stale; run 'make generate' and commit"; exit 1; }; \
-	 untracked="$$(git status --porcelain --untracked-files=all -- $$paths | awk '$$1 == "??" {print}')"; \
+	 if ! git --no-pager diff --quiet -- $$paths; then \
+	   echo "generated files are stale; run 'make generate' and commit. Changed:"; \
+	   git --no-pager diff --name-only -- $$paths; \
+	   exit 1; \
+	 fi; \
+	 untracked="$$(git --no-pager status --porcelain --untracked-files=all -- $$paths | awk '$$1 == "??" {print}')"; \
 	 if [ -n "$$untracked" ]; then \
 	   echo "generated files exist but are not committed (git diff --exit-code is blind to untracked paths):"; \
 	   echo "$$untracked"; \

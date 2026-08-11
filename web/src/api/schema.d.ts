@@ -96,7 +96,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Error budget state (not wired this phase) */
+        /** Installation-wide ESI error budget */
         get: operations["admin-esi-errorlimit"];
         put?: never;
         post?: never;
@@ -166,7 +166,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Lock down a platform (not wired this phase) */
+        /** Freeze or unfreeze outbound provisioning for one platform */
         post: operations["admin-platform-lockdown"];
         delete?: never;
         options?: never;
@@ -234,7 +234,7 @@ export interface paths {
         };
         /** RBAC roles/grants */
         get: operations["admin-scopes"];
-        /** Edit a role's grants (not wired this phase) */
+        /** Replace one role's grant set atomically */
         put: operations["admin-update-scopes"];
         post?: never;
         delete?: never;
@@ -1594,7 +1594,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Bounty ledger */
+        /** Bounty income by member */
         get: operations["list-corporation-ledger-bounties"];
         put?: never;
         post?: never;
@@ -1628,7 +1628,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** PI ledger */
+        /** Planetary interaction tax income by member */
         get: operations["list-corporation-ledger-pi"];
         put?: never;
         post?: never;
@@ -1698,6 +1698,23 @@ export interface paths {
         };
         /** Members */
         get: operations["list-corporation-members"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/corporations/{id}/members/limit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Maximum members this corporation may hold */
+        get: operations["get-corporation-member-limit"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2172,7 +2189,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Regional order book (not backed — see file doc comment) */
+        /** Orders HANGAR has synced for tracked owners in this region (keyset-paginated) */
         get: operations["list-market-region-orders"];
         put?: never;
         post?: never;
@@ -2189,7 +2206,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Types traded in this region (not backed — see file doc comment) */
+        /** Distinct type ids present in this region's synced orders */
         get: operations["list-market-region-types"];
         put?: never;
         post?: never;
@@ -2784,6 +2801,17 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        LockdownInBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/LockdownInBody.json
+             */
+            readonly $schema?: string;
+            locked_down: boolean;
+            /** @description Why the platform is being frozen. Recorded for the audit trail; ignored when unlocking. */
+            reason?: string;
+        };
         MeOutBody: {
             /**
              * Format: uri
@@ -2840,6 +2868,14 @@ export interface components {
              */
             readonly $schema?: string;
             ids: number[] | null;
+        };
+        RoleGrantIn: {
+            /**
+             * @description deny always wins over allow (internal/rbac's absolute deny precedence).
+             * @enum {string}
+             */
+            effect: "allow" | "deny";
+            permission: string;
         };
         RulesPreviewInBody: {
             /**
@@ -2915,7 +2951,7 @@ export interface components {
              * @example https://example.com/schemas/UpdateScopesInBody.json
              */
             readonly $schema?: string;
-            grants: string[] | null;
+            grants: components["schemas"]["RoleGrantIn"][] | null;
             /** Format: uuid */
             role_id: string;
         };
@@ -3221,19 +3257,24 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description HANGAR-assigned UUID. */
                 id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LockdownInBody"];
+            };
+        };
         responses: {
-            /** @description No Content */
-            204: {
+            /** @description OK */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ItemMapStringInterface {}"];
+                };
             };
             /** @description Error */
             default: {
@@ -3384,12 +3425,14 @@ export interface operations {
             };
         };
         responses: {
-            /** @description No Content */
-            204: {
+            /** @description OK */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["CollectionMapStringInterface {}"];
+                };
             };
             /** @description Error */
             default: {
@@ -6200,6 +6243,38 @@ export interface operations {
             };
         };
     };
+    "get-corporation-member-limit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Numeric EVE id (character, corporation, alliance...). */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ItemMapStringInterface {}"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "list-corporation-member-titles": {
         parameters: {
             query?: never;
@@ -7073,7 +7148,11 @@ export interface operations {
     };
     "list-market-region-orders": {
         parameters: {
-            query?: never;
+            query?: {
+                after?: string;
+                before?: string;
+                limit?: number;
+            };
             header?: never;
             path: {
                 region_id: number;
@@ -7235,6 +7314,7 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    "Set-Cookie"?: string;
                     [name: string]: unknown;
                 };
                 content: {

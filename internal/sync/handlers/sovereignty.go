@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/hangar-project/hangar/internal/store"
 	"github.com/hangar-project/hangar/internal/store/gen"
 )
@@ -99,4 +101,58 @@ func SyncSovereigntySystems(ctx context.Context, s *store.Store, dto Sovereignty
 		}
 	}
 	return SyncResult{RowsAffected: int32(len(dto.SolarSystems))}, nil
+}
+
+// ---- GET /status/ ----
+//
+// PHASE 15.1 — Tranquility's own status (players online, VIP mode,
+// version, uptime), backing SRS §6.7's
+// `GET /api/v1/meta/server-status`. Phase 15 registered that route but had
+// nothing to serve: no sync ingested it and no table held it, so it
+// permanently rendered "unavailable". Phase 16's dashboard consumes this
+// route, so leaving it permanently empty was not viable.
+//
+// It is stored in app.setting rather than a table of its own: it is a
+// single global row that is overwritten in place every 30 seconds (the
+// upstream x-cache-age), with no history, no owner and no foreign keys —
+// exactly what app.setting exists for, and the same choice
+// internal/sso/jwks already makes for its cached key set.
+
+// ServerStatusSettingKey is the app.setting key the latest Tranquility
+// status snapshot is stored under.
+const ServerStatusSettingKey = "esi.server_status"
+
+type ServerStatusDTO struct {
+	Players       int32     `json:"players"`
+	ServerVersion string    `json:"server_version"`
+	StartTime     time.Time `json:"start_time"`
+	VIP           *bool     `json:"vip,omitempty"`
+}
+
+func ParseServerStatus(body []byte) (ServerStatusDTO, error) {
+	var dto ServerStatusDTO
+	if err := json.Unmarshal(body, &dto); err != nil {
+		return ServerStatusDTO{}, fmt.Errorf("handlers: parsing server status: %w", err)
+	}
+	return dto, nil
+}
+
+func SyncServerStatus(ctx context.Context, s *store.Store, dto ServerStatusDTO) (SyncResult, error) {
+	// Stored with a fetched_at so the API layer can report freshness in
+	// the `_sync` envelope rather than presenting a stale snapshot as
+	// current.
+	payload, err := json.Marshal(map[string]any{
+		"players":        dto.Players,
+		"server_version": dto.ServerVersion,
+		"start_time":     dto.StartTime,
+		"vip":            dto.VIP,
+		"fetched_at":     time.Now().UTC(),
+	})
+	if err != nil {
+		return SyncResult{}, fmt.Errorf("handlers: encoding server status: %w", err)
+	}
+	if err := s.UpsertSetting(ctx, ServerStatusSettingKey, payload, uuid.NullUUID{}); err != nil {
+		return SyncResult{}, fmt.Errorf("handlers: storing server status: %w", err)
+	}
+	return SyncResult{RowsAffected: 1}, nil
 }

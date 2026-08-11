@@ -13,6 +13,7 @@ package v1
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/hangar-project/hangar/internal/api"
 	apimw "github.com/hangar-project/hangar/internal/api/middleware"
 	"github.com/hangar-project/hangar/internal/store/gen"
+	"github.com/hangar-project/hangar/internal/sync/handlers"
 )
 
 const supportTag = "support"
@@ -55,10 +57,10 @@ func registerSupport(hapi huma.API, deps api.Deps) {
 	}, searchHandler(deps))
 
 	mutate[ResolveIn, CollectionOut](hapi, deps, http.MethodPost, "", "/api/v1/support/resolve", "support-resolve", "Resolve ids to names and affiliations", supportTag, resolveHandler(deps))
-	get[LocationLookupIn, ItemOut](hapi, deps, "", "/api/v1/support/universe/structures", "support-universe-structures", "Resolve a structure id", supportTag, locationLookupHandler(deps, "structure"))
-	get[LocationLookupIn, ItemOut](hapi, deps, "", "/api/v1/support/universe/stations", "support-universe-stations", "Resolve a station id", supportTag, locationLookupHandler(deps, "station"))
+	get[LocationLookupIn, ItemOut](hapi, deps, "tools.view", "/api/v1/support/universe/structures", "support-universe-structures", "Resolve a structure id", supportTag, locationLookupHandler(deps, "structure"))
+	get[LocationLookupIn, ItemOut](hapi, deps, "tools.view", "/api/v1/support/universe/stations", "support-universe-stations", "Resolve a station id", supportTag, locationLookupHandler(deps, "station"))
 
-	get[InsuranceIn, CollectionOut](hapi, deps, "", "/api/v1/tools/insurance", "tools-insurance", "Insurance prices for one ship type", supportTag,
+	get[InsuranceIn, CollectionOut](hapi, deps, "tools.view", "/api/v1/tools/insurance", "tools-insurance", "Insurance prices for one ship type", supportTag,
 		func(ctx context.Context, in *InsuranceIn) (*CollectionOut, error) {
 			rows, err := deps.Store.ListInsurancePrices(ctx, in.TypeID)
 			if err != nil {
@@ -71,7 +73,7 @@ func registerSupport(hapi huma.API, deps api.Deps) {
 		ownerListHandler(func(ctx context.Context, id int64) ([]gen.AppCharacterNote, error) {
 			return deps.Store.ListCharacterNotes(ctx, id)
 		}))
-	get[StandingsIn, CollectionOut](hapi, deps, "", "/api/v1/tools/standings", "tools-standings", "Standings for one owner", supportTag,
+	get[StandingsIn, CollectionOut](hapi, deps, "tools.view", "/api/v1/tools/standings", "tools-standings", "Standings for one owner", supportTag,
 		func(ctx context.Context, in *StandingsIn) (*CollectionOut, error) {
 			rows, err := deps.Store.ListStandings(ctx, in.OwnerKind, in.OwnerID)
 			if err != nil {
@@ -366,21 +368,41 @@ func esiStatusHandler(deps api.Deps) func(context.Context, *EmptyIn) (*ItemOut, 
 }
 
 // serverStatusHandler answers /meta/server-status — Tranquility's own
-// status (players online, VIP mode, version), per SRS §6.7 and the
-// roadmap's Phase 15 design notes. NOTE: this phase's own task prompt
-// described this route as "HANGAR's own health", but both docs/00_SRS_v3.1.md
-// §6.7 and docs/03_IMPLEMENTATION_ROADMAP.md's Phase 15 entry agree it is
-// Tranquility's server status, not HANGAR's — a genuine inconsistency
-// between the prompt and the authoritative specs, reported rather than
-// silently reconciled (this phase followed the SRS/roadmap, the
-// authoritative pair). No Tier-2 table stores this (it isn't owner-scoped
-// ESI data); a future phase would need to sync GET /status/ into a small
-// settings-style row for this to return live data. Answers unavailable
-// rather than fabricated numbers.
+// status (players online, VIP mode, version, uptime), per SRS §6.7.
+//
+// PHASE 15.1: really backed. Phase 15 registered this route but had
+// nothing to serve — no sync ingested ESI's GET /status/ and no table held
+// it, so it permanently rendered "unavailable". (Phase 15 also corrected
+// its own prompt here: the prompt called this "HANGAR's own health", but
+// SRS §6.7 and the roadmap both define it as Tranquility's status. That
+// correction stands.) internal/sync/handlers.SyncServerStatus now stores
+// the snapshot in app.setting under ServerStatusSettingKey and this reads
+// it back.
+//
+// Before the first successful sync there is genuinely nothing to report,
+// and that case still renders as UNAVAILABLE with an explanation rather
+// than as zeroes — "0 players online" would be a lie, not an empty result.
 func serverStatusHandler(deps api.Deps) func(context.Context, *EmptyIn) (*ItemOut, error) {
 	return func(ctx context.Context, _ *EmptyIn) (*ItemOut, error) {
-		reason := "Tranquility server status is not yet synced into HANGAR (no backing table this phase) — this is a known gap, not an empty result"
-		item := api.UnavailableItem[map[string]any](reason)
-		return &ItemOut{Body: item}, nil
+		row, err := deps.Store.GetSetting(ctx, handlers.ServerStatusSettingKey)
+		if err != nil {
+			return &ItemOut{Body: api.UnavailableItem[map[string]any](
+				"Tranquility status has not been synced yet — ESI's /status route is scheduled but has not completed a successful run on this installation",
+			)}, nil
+		}
+		var data map[string]any
+		if err := json.Unmarshal(row.Value, &data); err != nil {
+			return nil, api.Internal("decoding stored server status", err)
+		}
+		sync := api.Sync{}
+		if raw, ok := data["fetched_at"].(string); ok {
+			if t, perr := time.Parse(time.RFC3339Nano, raw); perr == nil {
+				sync.LastModifiedAt = &t
+				// The upstream route's x-cache-age is 30s; anything older
+				// than a couple of minutes means the sync is not keeping up.
+				sync.Stale = time.Since(t) > 2*time.Minute
+			}
+		}
+		return &ItemOut{Body: api.Item[map[string]any]{Data: &data, Sync: sync}}, nil
 	}
 }

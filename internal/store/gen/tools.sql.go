@@ -145,6 +145,46 @@ func (q *Queries) ListInsurancePrices(ctx context.Context, typeID int32) ([]AppI
 	return items, nil
 }
 
+const listSdeTypeNames = `-- name: ListSdeTypeNames :many
+SELECT type_id, name FROM sde.type
+ WHERE type_id = ANY($1::int[])
+`
+
+type ListSdeTypeNamesRow struct {
+	TypeID int32
+	Name   string
+}
+
+// PHASE 15.1 — resolves type ids to names for the EFT fitting export
+// (`GET /api/v1/characters/{id}/fittings/{fitting_id}/eft`). Phase 15
+// rendered `[<type_id>]` placeholders because no type-name lookup query
+// existed; EFT is a text format real players paste into a real fitting
+// tool, and a numeric id there is not a fitting.
+//
+// Returns only the rows that exist: a type absent from the SDE (an import
+// that has never run, or a type newer than the imported dump) simply
+// doesn't come back, and the caller keeps its id placeholder for that one
+// line rather than failing the whole export.
+func (q *Queries) ListSdeTypeNames(ctx context.Context, typeIds []int32) ([]ListSdeTypeNamesRow, error) {
+	rows, err := q.db.Query(ctx, listSdeTypeNames, typeIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSdeTypeNamesRow
+	for rows.Next() {
+		var i ListSdeTypeNamesRow
+		if err := rows.Scan(&i.TypeID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertInsurancePrice = `-- name: UpsertInsurancePrice :one
 INSERT INTO app.insurance_price AS t (type_id, level, cost, payout) VALUES ($1,$2,$3,$4)
 ON CONFLICT (type_id, level) DO UPDATE

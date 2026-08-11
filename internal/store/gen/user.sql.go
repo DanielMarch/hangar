@@ -16,7 +16,7 @@ import (
 
 const completeSessionLogin = `-- name: CompleteSessionLogin :exec
 UPDATE app.session
-   SET user_id = $2, pkce_verifier = NULL, state = NULL
+   SET user_id = $2, pkce_verifier = NULL, state = NULL, expires_at = $3
  WHERE session_id = $1
 `
 
@@ -26,8 +26,20 @@ UPDATE app.session
 // the callback path a second time even if the cookie is stolen after the
 // fact — GetSession still finds the row (for the browser's ongoing
 // session), but there is no verifier/state left to consume.
-func (q *Queries) CompleteSessionLogin(ctx context.Context, sessionID uuid.UUID, userID uuid.NullUUID) error {
-	_, err := q.db.Exec(ctx, completeSessionLogin, sessionID, userID)
+//
+// PHASE 15.1 FIX — expires_at is now promoted here. BeginLogin creates the
+// pre-auth row with expires_at = now + sso.StateTTL (10 minutes), which is
+// the correct lifetime for an *unconsumed* PKCE state but catastrophically
+// wrong for the authenticated session that replaces it: this statement did
+// not touch expires_at, and GetSession filters `expires_at > now()`, so
+// every user was silently force-logged-out ten minutes after clicking
+// "log in". It was invisible until Phase 15.1 wired the login flow for
+// real (Phase 15 left /auth/callback answering 501, so no session was ever
+// completed). config.CryptoConfig.SessionTTL (default 720h) had been
+// declared since Phase 5 and read by nothing — this is the consumer it was
+// always meant to have.
+func (q *Queries) CompleteSessionLogin(ctx context.Context, sessionID uuid.UUID, userID uuid.NullUUID, expiresAt time.Time) error {
+	_, err := q.db.Exec(ctx, completeSessionLogin, sessionID, userID, expiresAt)
 	return err
 }
 

@@ -69,6 +69,26 @@ var Permissions = []Permission{
 	{"corporations.view", "corporations", "View corporation structures, wallets and members"},
 	{"corporations.manage", "corporations", "Manage a tracked corporation's sync configuration"},
 
+	// -- alliances / sovereignty / markets / tools --
+	//
+	// PHASE 15.1 ADDITION. SRS §6.4 (alliances & sovereignty), §6.5
+	// (markets) and §6.7 (utilities & support) each define a group of
+	// endpoints, but this closed set had no permission covering any of
+	// them — Phase 15 shipped those routes gated on "a resolved session
+	// and nothing more" as an explicit stopgap and reported the gap rather
+	// than inventing names mid-phase. These are those names.
+	//
+	// Deliberately NOT added, and still correctly session-only: the
+	// /api/v1/me* family (self-scoped by definition — a permission
+	// governing "may this user read their own account" is meaningless) and
+	// /api/v1/meta/{esi-status,server-status} (installation health the SPA
+	// shell renders for every signed-in user; gating it would break the
+	// dashboard for ordinary members, which is the opposite of the intent).
+	{"alliances.view", "alliances", "View alliance sheets, member corporations and contacts"},
+	{"sovereignty.view", "sovereignty", "View sovereignty campaigns and system ownership"},
+	{"markets.view", "markets", "View market orders, price history and regional market data"},
+	{"tools.view", "tools", "Use reference lookups: universe locations, insurance prices and standings"},
+
 	// -- squads --
 	{"squads.view", "squads", "View squad rosters and applications"},
 	{"squads.create", "squads", "Create a new squad"},
@@ -83,16 +103,43 @@ var Permissions = []Permission{
 	{"admin.security_log.view", "admin", "View the append-only security log"},
 	{"admin.esi_routes.manage", "admin", "Edit route catalogue overrides (blocked_by_pin, TTL)"},
 	{"admin.esi_pin.advance", "admin", "Advance the ESI compatibility date pin"},
+	// PHASE 15.1 ADDITION — the read side of §6.8. Before this, only three
+	// of §6.8's routes had a permission at all (settings/users/roles
+	// manage, security_log.view, esi_pin.advance) and Phase 15 gated every
+	// §6.8 *read* on `superuser` as a stopgap, which made the entire
+	// observability surface all-or-nothing: an operator who should see
+	// sync health had to be handed a permission that bypasses every other
+	// check in the system. These split it apart.
+	{"admin.sync.view", "admin", "View the sync route catalogue, subscriptions and aggregate health"},
+	{"admin.esi.view", "admin", "View ESI gateway state: blocked routes, rate limits, error budget and replicas"},
+	{"admin.platforms.view", "admin", "View configured provisioning platforms"},
+	{"admin.scopes.view", "admin", "View newly observed ESI scope strings pending acknowledgement"},
 
 	// -- provisioning --
 	{"provisioning.platforms.manage", "provisioning", "Configure Discord/TeamSpeak/Mumble platform connections"},
 	{"provisioning.entitlements.manage", "provisioning", "Edit entitlement rules that grant platform groups"},
-	{"provisioning.audit.view", "provisioning", "View the provisioning audit trail and exposure board"},
+	{"provisioning.audit.view", "provisioning", "View the provisioning audit trail"},
+	// PHASE 15.1: split out of provisioning.audit.view, whose description
+	// claimed "and exposure board" but which no exposure-board route ever
+	// used — GET /admin/provisioning/exposures was gated on `superuser`.
+	// The two are different reads: the audit trail is a history of calls
+	// made, the exposure board is the live set of users whose actual
+	// platform groups disagree with their entitlements.
+	{"provisioning.exposures.view", "provisioning", "View the provisioning exposure board (live desired-vs-actual group mismatches)"},
 
 	// -- alerting --
 	{"alerting.channels.manage", "alerting", "Configure alert delivery channels"},
 	{"alerting.routing.manage", "alerting", "Edit alert routing rules"},
 	{"alerting.unknown_types.acknowledge", "alerting", "Acknowledge unrecognised notification types"},
+	// PHASE 15.1 ADDITION. Phase 14 defined only the *acknowledge* half of
+	// the unknown-types workflow and nothing at all for the dead-letter
+	// board, so Phase 15's §6.8 handlers for both were gated on
+	// `superuser`. Viewing and acting are separated here: requeuing a
+	// dead-lettered delivery re-sends a real message to a real platform,
+	// which is not the same authority as reading the board.
+	{"alerting.unknown_types.view", "alerting", "View unrecognised notification types pending acknowledgement"},
+	{"alerting.deadletter.view", "alerting", "View the alert delivery dead-letter board"},
+	{"alerting.deadletter.requeue", "alerting", "Requeue a dead-lettered alert delivery"},
 
 	// -- api tokens & webhooks --
 	{"api_tokens.manage", "api", "Create or revoke third-party API tokens"},

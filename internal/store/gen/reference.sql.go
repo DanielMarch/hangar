@@ -60,7 +60,7 @@ func (q *Queries) GetAlliance(ctx context.Context, allianceID int64) (AppAllianc
 }
 
 const getCorporation = `-- name: GetCorporation :one
-SELECT corporation_id, name, ticker, member_count, ceo_id, alliance_id, description, tax_rate, date_founded, creator_id, url, faction_id, home_station_id, shares, war_eligible, palette, updated_at FROM app.corporation WHERE corporation_id = $1
+SELECT corporation_id, name, ticker, member_count, ceo_id, alliance_id, description, tax_rate, date_founded, creator_id, url, faction_id, home_station_id, shares, war_eligible, palette, updated_at, member_limit FROM app.corporation WHERE corporation_id = $1
 `
 
 func (q *Queries) GetCorporation(ctx context.Context, corporationID int64) (AppCorporation, error) {
@@ -84,6 +84,7 @@ func (q *Queries) GetCorporation(ctx context.Context, corporationID int64) (AppC
 		&i.WarEligible,
 		&i.Palette,
 		&i.UpdatedAt,
+		&i.MemberLimit,
 	)
 	return i, err
 }
@@ -165,7 +166,7 @@ func (q *Queries) ListAlliances(ctx context.Context) ([]AppAlliance, error) {
 }
 
 const listCorporationsByAlliance = `-- name: ListCorporationsByAlliance :many
-SELECT corporation_id, name, ticker, member_count, ceo_id, alliance_id, description, tax_rate, date_founded, creator_id, url, faction_id, home_station_id, shares, war_eligible, palette, updated_at FROM app.corporation WHERE alliance_id = $1 ORDER BY name
+SELECT corporation_id, name, ticker, member_count, ceo_id, alliance_id, description, tax_rate, date_founded, creator_id, url, faction_id, home_station_id, shares, war_eligible, palette, updated_at, member_limit FROM app.corporation WHERE alliance_id = $1 ORDER BY name
 `
 
 // Phase 15 addition: GET /api/v1/alliances/{id}/corporations.
@@ -196,6 +197,7 @@ func (q *Queries) ListCorporationsByAlliance(ctx context.Context, allianceID *in
 			&i.WarEligible,
 			&i.Palette,
 			&i.UpdatedAt,
+			&i.MemberLimit,
 		); err != nil {
 			return nil, err
 		}
@@ -294,7 +296,7 @@ func (q *Queries) SearchCharactersByName(ctx context.Context, query string, page
 }
 
 const searchCorporationsByName = `-- name: SearchCorporationsByName :many
-SELECT corporation_id, name, ticker, member_count, ceo_id, alliance_id, description, tax_rate, date_founded, creator_id, url, faction_id, home_station_id, shares, war_eligible, palette, updated_at FROM app.corporation WHERE name ILIKE '%' || $1::text || '%' ORDER BY name LIMIT $2
+SELECT corporation_id, name, ticker, member_count, ceo_id, alliance_id, description, tax_rate, date_founded, creator_id, url, faction_id, home_station_id, shares, war_eligible, palette, updated_at, member_limit FROM app.corporation WHERE name ILIKE '%' || $1::text || '%' ORDER BY name LIMIT $2
 `
 
 func (q *Queries) SearchCorporationsByName(ctx context.Context, query string, pageSize int32) ([]AppCorporation, error) {
@@ -324,6 +326,7 @@ func (q *Queries) SearchCorporationsByName(ctx context.Context, query string, pa
 			&i.WarEligible,
 			&i.Palette,
 			&i.UpdatedAt,
+			&i.MemberLimit,
 		); err != nil {
 			return nil, err
 		}
@@ -333,6 +336,22 @@ func (q *Queries) SearchCorporationsByName(ctx context.Context, query string, pa
 		return nil, err
 	}
 	return items, nil
+}
+
+const setCorporationMemberLimit = `-- name: SetCorporationMemberLimit :exec
+UPDATE app.corporation
+   SET member_limit = $2, updated_at = now()
+ WHERE corporation_id = $1
+   AND member_limit IS DISTINCT FROM $2
+`
+
+// PHASE 15.1 — `/corporations/{corporation_id}/members/limit` is its own
+// ESI route returning a bare integer, not a field of the corporation
+// sheet, so it needs a targeted write: UpsertCorporation would require
+// inventing values for every other column just to set this one.
+func (q *Queries) SetCorporationMemberLimit(ctx context.Context, corporationID int64, memberLimit *int32) error {
+	_, err := q.db.Exec(ctx, setCorporationMemberLimit, corporationID, memberLimit)
+	return err
 }
 
 const startSdeImport = `-- name: StartSdeImport :one
@@ -417,14 +436,15 @@ const upsertCorporation = `-- name: UpsertCorporation :one
 INSERT INTO app.corporation AS t (
     corporation_id, name, ticker, member_count, ceo_id, alliance_id,
     description, tax_rate, date_founded, creator_id, url, faction_id,
-    home_station_id, shares, war_eligible, palette
+    home_station_id, shares, war_eligible, palette, member_limit
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
 )
 ON CONFLICT (corporation_id) DO UPDATE
    SET name              = EXCLUDED.name,
        ticker             = EXCLUDED.ticker,
        member_count       = EXCLUDED.member_count,
+       member_limit       = EXCLUDED.member_limit,
        ceo_id             = EXCLUDED.ceo_id,
        alliance_id        = EXCLUDED.alliance_id,
        description        = EXCLUDED.description,
@@ -438,11 +458,11 @@ ON CONFLICT (corporation_id) DO UPDATE
        war_eligible       = EXCLUDED.war_eligible,
        palette            = EXCLUDED.palette,
        updated_at         = now()
- WHERE (t.name, t.ticker, t.member_count, t.ceo_id, t.alliance_id, t.tax_rate, t.shares, t.war_eligible)
+ WHERE (t.name, t.ticker, t.member_count, t.member_limit, t.ceo_id, t.alliance_id, t.tax_rate, t.shares, t.war_eligible)
     IS DISTINCT FROM
-       (EXCLUDED.name, EXCLUDED.ticker, EXCLUDED.member_count, EXCLUDED.ceo_id,
+       (EXCLUDED.name, EXCLUDED.ticker, EXCLUDED.member_count, EXCLUDED.member_limit, EXCLUDED.ceo_id,
         EXCLUDED.alliance_id, EXCLUDED.tax_rate, EXCLUDED.shares, EXCLUDED.war_eligible)
-RETURNING corporation_id, name, ticker, member_count, ceo_id, alliance_id, description, tax_rate, date_founded, creator_id, url, faction_id, home_station_id, shares, war_eligible, palette, updated_at
+RETURNING corporation_id, name, ticker, member_count, ceo_id, alliance_id, description, tax_rate, date_founded, creator_id, url, faction_id, home_station_id, shares, war_eligible, palette, updated_at, member_limit
 `
 
 type UpsertCorporationParams struct {
@@ -462,6 +482,7 @@ type UpsertCorporationParams struct {
 	Shares        *int64
 	WarEligible   *bool
 	Palette       []byte
+	MemberLimit   *int32
 }
 
 // app.corporation, app.alliance, app.location, app.sde_import
@@ -471,6 +492,10 @@ type UpsertCorporationParams struct {
 // sde_import bookkeeping has nowhere else to live — the full corporation/
 // alliance sync upsert (all ESI-sourced columns) is Phase 7/8's job;
 // these cover the reference-data lifecycle Phase 1a itself needs.
+// member_limit joins the change guard (Phase 15.1): without it a
+// corporation that trained Corporation Management would keep the stale
+// limit forever, because no OTHER column changed and the DO UPDATE would
+// be skipped entirely.
 func (q *Queries) UpsertCorporation(ctx context.Context, arg UpsertCorporationParams) (AppCorporation, error) {
 	row := q.db.QueryRow(ctx, upsertCorporation,
 		arg.CorporationID,
@@ -489,6 +514,7 @@ func (q *Queries) UpsertCorporation(ctx context.Context, arg UpsertCorporationPa
 		arg.Shares,
 		arg.WarEligible,
 		arg.Palette,
+		arg.MemberLimit,
 	)
 	var i AppCorporation
 	err := row.Scan(
@@ -509,6 +535,7 @@ func (q *Queries) UpsertCorporation(ctx context.Context, arg UpsertCorporationPa
 		&i.WarEligible,
 		&i.Palette,
 		&i.UpdatedAt,
+		&i.MemberLimit,
 	)
 	return i, err
 }

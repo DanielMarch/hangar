@@ -23,8 +23,13 @@ import (
 // closure.
 type Deps struct {
 	Store *store.Store
+	// Pool is the transaction-capable handle the handful of handlers that
+	// must write atomically need (PUT /admin/scopes' grant replace goes
+	// through internal/rbac.ReplaceRoleGrants, which opens its own
+	// transaction). Store alone cannot Begin.
+	Pool store.Pool
 	// SSO is nil unless cmd/hangar/serve.go configured EVE SSO credentials
-	// — the character-reauthorize handler degrades to 501 rather than
+	// — the character-reauthorize handler degrades to an error rather than
 	// panicking when it is.
 	SSO *sso.Flow
 }

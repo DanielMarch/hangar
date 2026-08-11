@@ -155,6 +155,30 @@ observer-computed SeAT alert — is committed at
 `TestCatalogueMatchesMeasuredUpstream`, so the alert catalogue's provenance is reproducible in CI
 rather than resting on this document.
 
+### 4b. Upstream ESI route existence checks **[added in Phase 15.1]**
+
+Phase 15 declined to implement four SRS §6 endpoints on the stated grounds that they had no
+backing table or no upstream equivalent. Phase 15.1 verified each claim against the authoritative
+machine-readable source — the ingested spec snapshot at
+`internal/esi/catalogue/embedded/openapi.snapshot.json`, not the live site — before deciding
+whether to build or strike.
+
+```sh
+node -e "const s=require('./internal/esi/catalogue/embedded/openapi.snapshot.json');
+         Object.keys(s.paths).filter(p=>/markets|members|status/.test(p)).forEach(p=>console.log(p))"
+```
+
+| SRS §6 endpoint | Upstream route in the snapshot | Phase 15 claim | Verdict |
+| :-- | :-- | :-- | :-- |
+| `/markets/{region_id}/orders` | `/markets/{region_id}/orders` ✅ exists | "no backing table" | **Claim wrong.** `app.market_order` carries `region_id` and a dedicated index on it. Implemented, with the scope stated in SRS §6.5. |
+| `/markets/{region_id}/types` | `/markets/{region_id}/types` ✅ exists | "no backing table" | **Claim wrong**, same table. Implemented. |
+| `/corporations/{id}/members/limit` | `/corporations/{corporation_id}/members/limit` ✅ exists | "no backing column" | **Claim correct.** Column added in `00040`, sync handler added, route implemented. |
+| `/meta/server-status` | `/status` ✅ exists (`x-cache-age` 30s; `players`, `server_version`, `start_time`, `vip`) | "no backing table" | **Claim correct.** Synced into `app.setting` rather than a table of its own — one global row, overwritten, no history. |
+
+Nothing was struck from the SRS. All four are implemented. The lesson matching §4a's: **a
+"not backed" conclusion is a measurement, and must be measured** — two of the four were
+contradicted by the schema and the snapshot that were already in the repository.
+
 ## 5. UI locales
 
 **Expected: 9 (`af de en fr ja ko ro ru zh-CN`). Measured: 9.** ✅ Match.

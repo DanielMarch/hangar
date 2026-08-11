@@ -173,3 +173,19 @@ SELECT DISTINCT c.user_id AS user_id
 -- Affected set for a squad_member change (one character joining or
 -- leaving a squad): just that character's own user, if linked.
 SELECT user_id FROM app.character WHERE character_id = $1;
+
+-- name: DeleteRoleGrants :exec
+-- PHASE 15.1 — the delete half of `PUT /api/v1/admin/scopes` (SRS §6.8's
+-- bulk grant replace). Phase 15 answered 501 because only per-grant
+-- AddRoleGrant/RemoveRoleGrant existed and a read-modify-write loop over
+-- them is not a replace: a caller and a concurrent editor could interleave
+-- into a grant set neither of them asked for. Paired with AddRoleGrant
+-- inside one transaction (see internal/api/v1/admin.go), this makes the
+-- replace atomic.
+--
+-- Flagged by sqlc's flag-delete rule for review, like every other DELETE
+-- in this file: app.role_grant is a pure join of (role, permission,
+-- effect) with no history worth soft-deleting — internal/rbac's
+-- materialisation is what carries the audit consequence, and it is
+-- recomputed from the surviving rows.
+DELETE FROM app.role_grant WHERE role_id = $1;

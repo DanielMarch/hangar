@@ -25,6 +25,27 @@ import (
 )
 
 const corpTag = "corporations"
+
+// bountyRefTypes / piRefTypes are the app.wallet_journal ref_type values
+// SRS §6.3's /ledger/bounties and /ledger/pi aggregate over.
+//
+// ref_type is an OPEN vocabulary (Principle 14): CCP adds values without
+// notice, so these are a best-known starting set, NOT a closed
+// classification — an unrecognised bounty-like ref_type simply won't be
+// counted rather than breaking the query, and extending these slices is
+// the whole change needed when one appears. They live in Go rather than
+// SQL for exactly that reason (see AggregateWalletJournalByRefType).
+var bountyRefTypes = []string{
+	"bounty_prize",
+	"bounty_prizes",
+	"bounty_prize_corporation_tax",
+}
+
+var piRefTypes = []string{
+	"planetary_import_tax",
+	"planetary_export_tax",
+}
+
 const permCorpView = "corporations.view"
 
 func registerCorporations(hapi huma.API, deps api.Deps) {
@@ -41,10 +62,24 @@ func registerCorporations(hapi huma.API, deps api.Deps) {
 		ownerListHandler(func(ctx context.Context, id int64) ([]gen.AppCorporationMemberTracking, error) {
 			return deps.Store.ListCorporationMemberTracking(ctx, id)
 		}))
-	// /members/limit has no backing column anywhere in the Tier-2 schema
-	// (app.corporation carries member_count, not member_limit) — a genuine
-	// SRS/schema gap this phase reports rather than fabricates a route for.
-	// See this phase's closing report.
+	// PHASE 15.1: /members/limit is now backed. Phase 15 could not register
+	// it because app.corporation had member_count but no member_limit;
+	// 00040_phase15_1_defect_closure.sql adds the column and
+	// handlers.SyncCorporationMemberLimit populates it from the upstream
+	// route's bare-integer response.
+	get[IDIn, ItemOut](hapi, deps, permCorpView, "/api/v1/corporations/{id}/members/limit", "get-corporation-member-limit", "Maximum members this corporation may hold", corpTag,
+		func(ctx context.Context, in *IDIn) (*ItemOut, error) {
+			corp, err := deps.Store.GetCorporation(ctx, in.ID)
+			if err != nil {
+				return nil, api.NotFound("corporation")
+			}
+			data := map[string]any{
+				"corporation_id": corp.CorporationID,
+				"member_limit":   corp.MemberLimit,
+				"member_count":   corp.MemberCount,
+			}
+			return &ItemOut{Body: api.Item[map[string]any]{Data: &data, Sync: api.Sync{}}}, nil
+		})
 	get[IDIn, CollectionOut](hapi, deps, permCorpView, "/api/v1/corporations/{id}/members/titles", "list-corporation-member-titles", "Title assignment for every member (corp-wide)", corpTag,
 		ownerListHandler(func(ctx context.Context, id int64) ([]gen.AppCorporationMemberTitle, error) {
 			return deps.Store.ListAllCorporationMemberTitles(ctx, id)
@@ -171,13 +206,17 @@ func registerCorporations(hapi huma.API, deps api.Deps) {
 			return deps.Store.ListCorporationAllianceHistory(ctx, id)
 		}))
 
-	get[IDIn, CollectionOut](hapi, deps, permCorpView, "/api/v1/corporations/{id}/ledger/bounties", "list-corporation-ledger-bounties", "Bounty ledger", corpTag,
-		ownerListHandler(func(ctx context.Context, id int64) ([]gen.AppWalletJournal, error) {
-			return nil, huma.Error501NotImplemented("bounty ledger is derived from wallet journal ref_type filtering, not wired in this phase")
+	// PHASE 15.1: both ledgers are now derived for real (see
+	// AggregateWalletJournalByRefType in db/queries/wallet.sql). Phase 15
+	// described the derivation correctly and then 501'd instead of doing
+	// it.
+	get[IDIn, CollectionOut](hapi, deps, permCorpView, "/api/v1/corporations/{id}/ledger/bounties", "list-corporation-ledger-bounties", "Bounty income by member", corpTag,
+		ownerListHandler(func(ctx context.Context, id int64) ([]gen.AggregateWalletJournalByRefTypeRow, error) {
+			return deps.Store.AggregateWalletJournalByRefType(ctx, string(domain.OwnerCorporation), id, bountyRefTypes)
 		}))
-	get[IDIn, CollectionOut](hapi, deps, permCorpView, "/api/v1/corporations/{id}/ledger/pi", "list-corporation-ledger-pi", "PI ledger", corpTag,
-		ownerListHandler(func(ctx context.Context, id int64) ([]gen.AppWalletJournal, error) {
-			return nil, huma.Error501NotImplemented("PI ledger is derived from wallet journal ref_type filtering, not wired in this phase")
+	get[IDIn, CollectionOut](hapi, deps, permCorpView, "/api/v1/corporations/{id}/ledger/pi", "list-corporation-ledger-pi", "Planetary interaction tax income by member", corpTag,
+		ownerListHandler(func(ctx context.Context, id int64) ([]gen.AggregateWalletJournalByRefTypeRow, error) {
+			return deps.Store.AggregateWalletJournalByRefType(ctx, string(domain.OwnerCorporation), id, piRefTypes)
 		}))
 	get[IDIn, CollectionOut](hapi, deps, permCorpView, "/api/v1/corporations/{id}/ledger/mining", "list-corporation-ledger-mining", "Mining ledger", corpTag,
 		ownerListHandler(func(ctx context.Context, id int64) ([]gen.AppMiningLedger, error) {

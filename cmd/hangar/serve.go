@@ -12,6 +12,7 @@ import (
 
 	"github.com/hangar-project/hangar/internal/api"
 	v1 "github.com/hangar-project/hangar/internal/api/v1"
+	"github.com/hangar-project/hangar/internal/crypto"
 	"github.com/hangar-project/hangar/internal/store"
 	"github.com/hangar-project/hangar/internal/sync/planner"
 	"github.com/hangar-project/hangar/internal/telemetry"
@@ -91,19 +92,28 @@ func runServe(ctx context.Context) error {
 	})
 
 	// Phase 15: the /api/v1 surface, mounted on the same mux as the SPA and
-	// healthchecks (Principle 6 — one API, no private endpoint). Deps.SSO
-	// is nil here — the /auth/login and /auth/callback redirect handlers
-	// degrade to 501 rather than panic when it is (see
-	// internal/api/v1/auth.go's RegisterAuthRedirects); wiring the full EVE
-	// SSO login flow (JWKS cache, keyring, OAuth config) into `serve` is a
-	// follow-up to this phase, not required for the /api/v1 JSON surface
-	// itself.
+	// healthchecks (Principle 6 — one API, no private endpoint).
+	//
+	// PHASE 15.1: the EVE SSO login flow is now really assembled
+	// (cmd/hangar/sso.go) rather than passed as a nil *sso.Flow — Phase 15
+	// left /auth/login and /auth/callback answering 501, which Phase 16's
+	// SPA login screen cannot build against.
 	s := store.New(pool)
-	deps := api.Deps{Store: s}
+
+	keyring, err := crypto.NewKeyring(cfg.Crypto)
+	if err != nil {
+		return err
+	}
+	flow, err := buildSSOFlow(ctx, cfg, s, keyring)
+	if err != nil {
+		return err
+	}
+
+	deps := api.Deps{Store: s, Pool: pool, SSO: flow}
 	api.Version = version
 	hapi := api.NewAPI(mux, deps)
 	v1.RegisterAll(hapi, deps)
-	v1.RegisterAuthRedirects(mux, s, nil)
+	v1.RegisterAuthRedirects(mux, s, flow)
 	if err := registerMumbleAuthRoute(ctx, mux, s, cfg); err != nil {
 		return err
 	}

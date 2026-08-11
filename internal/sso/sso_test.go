@@ -68,13 +68,14 @@ func (f *fakeStore) GetSession(ctx context.Context, sessionID uuid.UUID) (gen.Ap
 	return s, nil
 }
 
-func (f *fakeStore) CompleteSessionLogin(ctx context.Context, sessionID uuid.UUID, userID uuid.NullUUID) error {
+func (f *fakeStore) CompleteSessionLogin(ctx context.Context, sessionID uuid.UUID, userID uuid.NullUUID, expiresAt time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	s := f.sessions[sessionID]
 	s.UserID = userID
 	s.PkceVerifier = nil
 	s.State = nil
+	s.ExpiresAt = expiresAt
 	f.sessions[sessionID] = s
 	return nil
 }
@@ -454,4 +455,68 @@ func mustState(t *testing.T, redirectURL string) string {
 	u, err := url.Parse(redirectURL)
 	require.NoError(t, err)
 	return u.Query().Get("state")
+}
+
+// TestSessionTTLPromotedOnLogin is Phase 15.1's regression test for a
+// defect that existed from Phase 5 and only became reachable once Phase
+// 15.1 wired the login flow into `serve` for real.
+//
+// BeginLogin creates the pre-auth row with expires_at = now + StateTTL (10
+// minutes) — correct for an unconsumed PKCE state. CompleteSessionLogin
+// did not touch expires_at, and GetSession filters `expires_at > now()`,
+// so the authenticated session inherited the 10-minute pre-auth deadline:
+// every user would have been force-logged-out ten minutes after clicking
+// "log in". config.CryptoConfig.SessionTTL (default 720h) was declared in
+// Phase 5 and read by nothing.
+func TestSessionTTLPromotedOnLogin(t *testing.T) {
+	sso1 := newFakeSSOServer(t, "test-client-id")
+	defer sso1.close()
+	store := newFakeStore()
+	flow := buildFlow(t, sso1, store)
+	flow.SessionTTL = 48 * time.Hour
+
+	pending, err := flow.BeginLogin(context.Background(), nil, nil, nil)
+	require.NoError(t, err)
+
+	// The PRE-auth row is short-lived: StateTTL, not SessionTTL.
+	preAuth, err := store.GetSession(context.Background(), pending.SessionID)
+	require.NoError(t, err)
+	require.WithinDuration(t, time.Now().Add(sso.StateTTL), preAuth.ExpiresAt, time.Minute,
+		"the pre-auth session must expire on the short StateTTL window")
+
+	state := mustState(t, pending.RedirectURL)
+	result, err := flow.HandleCallback(context.Background(), pending.SessionID, "code-1", state)
+	require.NoError(t, err)
+
+	// The AUTHENTICATED row must have been promoted to SessionTTL.
+	authed, err := store.GetSession(context.Background(), pending.SessionID)
+	require.NoError(t, err)
+	require.WithinDuration(t, time.Now().Add(48*time.Hour), authed.ExpiresAt, time.Minute,
+		"the authenticated session must be promoted to Flow.SessionTTL, not left on StateTTL")
+	require.True(t, authed.ExpiresAt.After(time.Now().Add(sso.StateTTL)),
+		"the authenticated session must outlive the pre-auth StateTTL window")
+
+	// LoginResult must surface it so the HTTP layer can re-issue the
+	// cookie with a matching Expires.
+	require.WithinDuration(t, authed.ExpiresAt, result.SessionExpiresAt, time.Second)
+}
+
+// TestSessionTTLDefaultsWhenUnset proves a Flow built without an explicit
+// SessionTTL still gets a sane long-lived session rather than zero (which
+// would set expires_at to `now` and log the user out instantly).
+func TestSessionTTLDefaultsWhenUnset(t *testing.T) {
+	sso1 := newFakeSSOServer(t, "test-client-id")
+	defer sso1.close()
+	store := newFakeStore()
+	flow := buildFlow(t, sso1, store) // SessionTTL deliberately left zero
+
+	pending, err := flow.BeginLogin(context.Background(), nil, nil, nil)
+	require.NoError(t, err)
+	state := mustState(t, pending.RedirectURL)
+	_, err = flow.HandleCallback(context.Background(), pending.SessionID, "code-1", state)
+	require.NoError(t, err)
+
+	authed, err := store.GetSession(context.Background(), pending.SessionID)
+	require.NoError(t, err)
+	require.WithinDuration(t, time.Now().Add(sso.DefaultSessionTTL), authed.ExpiresAt, time.Minute)
 }

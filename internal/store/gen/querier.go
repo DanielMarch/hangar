@@ -24,6 +24,24 @@ type Querier interface {
 	AddSquadMember(ctx context.Context, squadID uuid.UUID, characterID int64) error
 	AddSquadModerator(ctx context.Context, squadID uuid.UUID, userID uuid.UUID) error
 	AddSquadRole(ctx context.Context, squadID uuid.UUID, roleID uuid.UUID) error
+	// PHASE 15.1 — backs SRS §6.3's `/ledger/bounties` and `/ledger/pi`.
+	//
+	// Phase 15 answered 501 on both with "derived from wallet journal ref_type
+	// filtering, not wired in this phase". That description was right; this is
+	// the derivation. Both ledgers are the same shape — "who generated how
+	// much of this kind of income for the corporation" — so one parameterised
+	// query serves both rather than two near-identical ones, with the caller
+	// supplying the ref_type set (internal/api/v1/corporations.go).
+	//
+	// ref_type is an OPEN vocabulary (Principle 14, app.open_vocabulary's
+	// `ref_type`): CCP adds new ones without notice, so the set is passed in
+	// as data rather than baked into the SQL, and an unrecognised ref_type
+	// simply doesn't match rather than breaking the query.
+	//
+	// total_amount is NUMERIC and therefore decimal.Decimal on the Go side
+	// (sqlc.yaml's Principle 9 override) — a JSON string on the wire, never a
+	// float.
+	AggregateWalletJournalByRefType(ctx context.Context, ownerKind string, ownerID int64, refTypes []string) ([]AggregateWalletJournalByRefTypeRow, error)
 	// Single-query recursive tree for GET /{owner}/{id}/assets/tree/{location_id}
 	// (02_DATABASE_SCHEMA.md §5.3, the Phase 1b exit fixture). Both the depth
 	// bound and the cycle guard are required: a torn sync can introduce a loop
@@ -116,7 +134,19 @@ type Querier interface {
 	// the callback path a second time even if the cookie is stolen after the
 	// fact — GetSession still finds the row (for the browser's ongoing
 	// session), but there is no verifier/state left to consume.
-	CompleteSessionLogin(ctx context.Context, sessionID uuid.UUID, userID uuid.NullUUID) error
+	//
+	// PHASE 15.1 FIX — expires_at is now promoted here. BeginLogin creates the
+	// pre-auth row with expires_at = now + sso.StateTTL (10 minutes), which is
+	// the correct lifetime for an *unconsumed* PKCE state but catastrophically
+	// wrong for the authenticated session that replaces it: this statement did
+	// not touch expires_at, and GetSession filters `expires_at > now()`, so
+	// every user was silently force-logged-out ten minutes after clicking
+	// "log in". It was invisible until Phase 15.1 wired the login flow for
+	// real (Phase 15 left /auth/callback answering 501, so no session was ever
+	// completed). config.CryptoConfig.SessionTTL (default 720h) had been
+	// declared since Phase 5 and read by nothing — this is the consumer it was
+	// always meant to have.
+	CompleteSessionLogin(ctx context.Context, sessionID uuid.UUID, userID uuid.NullUUID, expiresAt time.Time) error
 	CountAlertTypesByDomain(ctx context.Context) ([]CountAlertTypesByDomainRow, error)
 	CountDeadLetterAlertDeliveries(ctx context.Context) (int64, error)
 	// Cheap operational visibility into L2 size — useful for the admin
@@ -218,6 +248,20 @@ type Querier interface {
 	// rows rather than erroring, so the caller must check rows-affected (or
 	// re-GetRole) to detect a no-op deletion attempt.
 	DeleteRole(ctx context.Context, roleID uuid.UUID) error
+	// PHASE 15.1 — the delete half of `PUT /api/v1/admin/scopes` (SRS §6.8's
+	// bulk grant replace). Phase 15 answered 501 because only per-grant
+	// AddRoleGrant/RemoveRoleGrant existed and a read-modify-write loop over
+	// them is not a replace: a caller and a concurrent editor could interleave
+	// into a grant set neither of them asked for. Paired with AddRoleGrant
+	// inside one transaction (see internal/api/v1/admin.go), this makes the
+	// replace atomic.
+	//
+	// Flagged by sqlc's flag-delete rule for review, like every other DELETE
+	// in this file: app.role_grant is a pure join of (role, permission,
+	// effect) with no history worth soft-deleting — internal/rbac's
+	// materialisation is what carries the audit consequence, and it is
+	// recomputed from the surviving rows.
+	DeleteRoleGrants(ctx context.Context, roleID uuid.UUID) error
 	// Explicit logout. Flagged by sqlc's flag-delete rule for review: a
 	// terminated session carries no data worth retaining.
 	DeleteSession(ctx context.Context, sessionID uuid.UUID) error
@@ -575,7 +619,31 @@ type Querier interface {
 	ListMarketHistory(ctx context.Context, regionID int32, typeID int32, pageSize int32) ([]AppMarketHistory, error)
 	ListMarketOrderHistoryByOwner(ctx context.Context, ownerKind string, ownerID int64) ([]AppMarketOrderHistory, error)
 	ListMarketOrdersByOwner(ctx context.Context, ownerKind string, ownerID int64) ([]AppMarketOrder, error)
+	// PHASE 15.1 — SRS §6.5 `GET /api/v1/markets/{region_id}/orders`.
+	//
+	// SCOPE, stated precisely because Phase 15 got this wrong in the other
+	// direction: this is NOT the complete public regional order book. HANGAR
+	// syncs orders per tracked owner (`/characters/{id}/orders`,
+	// `/corporations/{id}/orders`), so app.market_order contains exactly the
+	// orders belonging to characters and corporations this installation
+	// tracks. Region-scoping that set is a genuinely useful read — "what are
+	// our people trading in Domain" — and app.market_order was built for it:
+	// Phase 1b gave the table a `region_id` column AND a dedicated
+	// `CREATE INDEX ON app.market_order (region_id)`, an index that is useless
+	// to every owner-scoped query (they all lead with owner_kind, owner_id)
+	// and only pays for itself here.
+	//
+	// Phase 15 read "no complete public order book" as "no backing table" and
+	// answered 501. The table and its index were there the whole time; what is
+	// absent is a full-region sync, which nothing in the SRS asks for and
+	// which would mean ingesting hundreds of thousands of rows per region
+	// across ~100 regions.
+	ListMarketOrdersByRegion(ctx context.Context, regionID int32, afterOrderID int64, pageSize int32) ([]AppMarketOrder, error)
 	ListMarketPrices(ctx context.Context) ([]AppMarketPrice, error)
+	// PHASE 15.1 — SRS §6.5 `GET /api/v1/markets/{region_id}/types`. Same
+	// scope note as ListMarketOrdersByRegion: the distinct type_ids present in
+	// the orders HANGAR has synced for this region.
+	ListMarketTypesByRegion(ctx context.Context, regionID int32) ([]int32, error)
 	ListMedalsIssuedByCorporation(ctx context.Context, corporationID int64) ([]AppMedalIssued, error)
 	// Answers GET /characters/{id}/medals.
 	ListMedalsIssuedToCharacter(ctx context.Context, characterID int64) ([]AppMedalIssued, error)
@@ -611,6 +679,17 @@ type Querier interface {
 	// (/admin/esi/catalogue/blocked). Phase 6's claim query is expected to
 	// join sync_subscription against this, not against ListEsiRoutes.
 	ListSchedulableEsiRoutes(ctx context.Context) ([]AppEsiRoute, error)
+	// PHASE 15.1 — resolves type ids to names for the EFT fitting export
+	// (`GET /api/v1/characters/{id}/fittings/{fitting_id}/eft`). Phase 15
+	// rendered `[<type_id>]` placeholders because no type-name lookup query
+	// existed; EFT is a text format real players paste into a real fitting
+	// tool, and a numeric id there is not a fitting.
+	//
+	// Returns only the rows that exist: a type absent from the SDE (an import
+	// that has never run, or a type newer than the imported dump) simply
+	// doesn't come back, and the caller keeps its id placeholder for that one
+	// line rather than failing the whole export.
+	ListSdeTypeNames(ctx context.Context, typeIds []int32) ([]ListSdeTypeNamesRow, error)
 	ListSecurityLogForUser(ctx context.Context, userID uuid.NullUUID, pageSize int32) ([]AppSecurityLog, error)
 	// Phase 15 addition, same rationale as ListApiTokensForUser above: GET
 	// /api/v1/me/share-links needs a caller-scoped list.
@@ -765,9 +844,19 @@ type Querier interface {
 	// binding is the second, independent layer of defense against injection.
 	SearchCharactersByName(ctx context.Context, query string, pageSize int32) ([]AppCharacter, error)
 	SearchCorporationsByName(ctx context.Context, query string, pageSize int32) ([]AppCorporation, error)
+	// PHASE 15.1 — `/corporations/{corporation_id}/members/limit` is its own
+	// ESI route returning a bare integer, not a field of the corporation
+	// sheet, so it needs a targeted write: UpsertCorporation would require
+	// inventing values for every other column just to set this one.
+	SetCorporationMemberLimit(ctx context.Context, corporationID int64, memberLimit *int32) error
 	SetDiscordInvalidBudgetPaused(ctx context.Context, paused bool) error
 	SetEntitlementRuleEnabled(ctx context.Context, ruleID uuid.UUID, enabled bool) error
 	SetErrorBudgetPaused(ctx context.Context, paused bool) error
+	// PHASE 15.1 — SRS §6.8 `POST /api/v1/admin/platforms/{id}/lockdown`.
+	// Deliberately distinct from `enabled` (see 00040's column comment):
+	// `enabled` is "is this platform in use at all", lockdown is "freeze
+	// outbound provisioning right now, and record who froze it and why".
+	SetPlatformLockdown(ctx context.Context, arg SetPlatformLockdownParams) (AppPlatform, error)
 	SetSyncNoCacheOptIn(ctx context.Context, subscriptionID uuid.UUID, optInNoCache bool) error
 	SetSyncSubscriptionEnabled(ctx context.Context, subscriptionID uuid.UUID, enabled bool) error
 	SetUserActive(ctx context.Context, userID uuid.UUID, isActive bool) error
@@ -881,6 +970,10 @@ type Querier interface {
 	// sde_import bookkeeping has nowhere else to live — the full corporation/
 	// alliance sync upsert (all ESI-sourced columns) is Phase 7/8's job;
 	// these cover the reference-data lifecycle Phase 1a itself needs.
+	// member_limit joins the change guard (Phase 15.1): without it a
+	// corporation that trained Corporation Management would keep the stale
+	// limit forever, because no OTHER column changed and the DO UPDATE would
+	// be skipped entirely.
 	UpsertCorporation(ctx context.Context, arg UpsertCorporationParams) (AppCorporation, error)
 	UpsertCorporationCustomsOffice(ctx context.Context, arg UpsertCorporationCustomsOfficeParams) (AppCorporationCustomsOffice, error)
 	UpsertCorporationDivision(ctx context.Context, arg UpsertCorporationDivisionParams) (AppCorporationDivision, error)

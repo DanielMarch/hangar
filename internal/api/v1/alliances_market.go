@@ -1,24 +1,11 @@
 // alliances_market.go implements SRS §6.4 (alliances & sovereignty) and
-// §6.5 (market). Neither group has a matching permission in the closed RBAC
-// vocabulary (internal/domain/vocabulary.go only defines
-// characters.view/corporations.view/squads.*/admin.*/provisioning.*/
-// alerting.*/api_tokens.*/webhooks.manage — nothing for alliances,
-// sovereignty or markets) — a genuine SRS/RBAC-vocabulary gap this phase
-// reports rather than invents an ad hoc permission name for. Every route
-// below sits behind requireAuthenticated only (get(..., "", ...)), matching
-// how this file's sibling files treat every other unauthenticated-adjacent
-// case: a resolved session is still mandatory, just not a specific
-// permission.
+// §6.5 (market).
 //
-// GET /markets/{region_id}/orders and /markets/{region_id}/types have no
-// backing table in the Tier-2 schema at all: app.market_order is
-// owner-scoped (a character/corporation's OWN orders — SRS §6.2/§6.3), not
-// the public, anonymous regional order book, which 02_DATABASE_SCHEMA.md
-// never defines a table for (likely a deliberate MVP scope cut given its
-// size — hundreds of thousands of rows per region). Both routes are
-// registered so the OpenAPI surface matches SRS §6.5, but respond 501 with
-// an explanation rather than fabricating data or silently 200ing an empty
-// list. Reported in this phase's closing summary.
+// PERMISSIONS — closed in Phase 15.1. Phase 15 found the closed RBAC
+// vocabulary had no permission covering either group and shipped every
+// route here on requireAuthenticated as a documented stopgap. Phase 15.1
+// added alliances.view, sovereignty.view and markets.view
+// (internal/domain/vocabulary.go) and each route below now names one.
 package v1
 
 import (
@@ -35,7 +22,7 @@ const allianceTag = "alliances"
 const marketTag = "market"
 
 func registerAlliancesAndMarket(hapi huma.API, deps api.Deps) {
-	get[EmptyIn, CollectionOut](hapi, deps, "", "/api/v1/alliances", "list-alliances", "Tracked alliances", allianceTag,
+	get[EmptyIn, CollectionOut](hapi, deps, "alliances.view", "/api/v1/alliances", "list-alliances", "Tracked alliances", allianceTag,
 		func(ctx context.Context, _ *EmptyIn) (*CollectionOut, error) {
 			rows, err := deps.Store.ListAlliances(ctx)
 			if err != nil {
@@ -44,22 +31,22 @@ func registerAlliancesAndMarket(hapi huma.API, deps api.Deps) {
 			data := rowSliceOf(rows)
 			return &CollectionOut{Body: api.Collection[map[string]any]{Data: data, Page: api.EmptyPage(int32(len(data))), Sync: api.Sync{}}}, nil
 		})
-	get[IDIn, ItemOut](hapi, deps, "", "/api/v1/alliances/{id}", "get-alliance", "One alliance", allianceTag,
+	get[IDIn, ItemOut](hapi, deps, "alliances.view", "/api/v1/alliances/{id}", "get-alliance", "One alliance", allianceTag,
 		ownerDetailHandler(func(ctx context.Context, id int64) (gen.AppAlliance, error) { return deps.Store.GetAlliance(ctx, id) }))
-	get[IDIn, CollectionOut](hapi, deps, "", "/api/v1/alliances/{id}/corporations", "list-alliance-corporations", "Member corporations", allianceTag,
+	get[IDIn, CollectionOut](hapi, deps, "alliances.view", "/api/v1/alliances/{id}/corporations", "list-alliance-corporations", "Member corporations", allianceTag,
 		ownerListHandler(func(ctx context.Context, id int64) ([]gen.AppCorporation, error) {
 			return deps.Store.ListCorporationsByAlliance(ctx, &id)
 		}))
-	get[IDIn, CollectionOut](hapi, deps, "", "/api/v1/alliances/{id}/contacts", "list-alliance-contacts", "Contacts", allianceTag,
+	get[IDIn, CollectionOut](hapi, deps, "alliances.view", "/api/v1/alliances/{id}/contacts", "list-alliance-contacts", "Contacts", allianceTag,
 		ownerListHandler(func(ctx context.Context, id int64) ([]gen.AppContact, error) {
 			return deps.Store.ListContacts(ctx, string(domain.OwnerAlliance), id)
 		}))
-	get[IDIn, CollectionOut](hapi, deps, "", "/api/v1/alliances/{id}/contacts/labels", "list-alliance-contact-labels", "Contact labels", allianceTag,
+	get[IDIn, CollectionOut](hapi, deps, "alliances.view", "/api/v1/alliances/{id}/contacts/labels", "list-alliance-contact-labels", "Contact labels", allianceTag,
 		ownerListHandler(func(ctx context.Context, id int64) ([]gen.AppContactLabel, error) {
 			return deps.Store.ListContactLabels(ctx, string(domain.OwnerAlliance), id)
 		}))
 
-	get[EmptyIn, CollectionOut](hapi, deps, "", "/api/v1/sovereignty/campaigns", "list-sovereignty-campaigns", "Active sovereignty campaigns", allianceTag,
+	get[EmptyIn, CollectionOut](hapi, deps, "sovereignty.view", "/api/v1/sovereignty/campaigns", "list-sovereignty-campaigns", "Active sovereignty campaigns", allianceTag,
 		func(ctx context.Context, _ *EmptyIn) (*CollectionOut, error) {
 			rows, err := deps.Store.ListSovereigntyCampaigns(ctx)
 			if err != nil {
@@ -68,7 +55,7 @@ func registerAlliancesAndMarket(hapi huma.API, deps api.Deps) {
 			data := rowSliceOf(rows)
 			return &CollectionOut{Body: api.Collection[map[string]any]{Data: data, Page: api.EmptyPage(int32(len(data))), Sync: api.Sync{}}}, nil
 		})
-	get[EmptyIn, CollectionOut](hapi, deps, "", "/api/v1/sovereignty/systems", "list-sovereignty-systems", "Sovereignty by solar system", allianceTag,
+	get[EmptyIn, CollectionOut](hapi, deps, "sovereignty.view", "/api/v1/sovereignty/systems", "list-sovereignty-systems", "Sovereignty by solar system", allianceTag,
 		func(ctx context.Context, _ *EmptyIn) (*CollectionOut, error) {
 			rows, err := deps.Store.ListSovereigntySystems(ctx)
 			if err != nil {
@@ -95,11 +82,26 @@ func registerAlliancesAndMarket(hapi huma.API, deps api.Deps) {
 			return deps.Store.ListMarketOrderHistoryByOwner(ctx, string(domain.OwnerCorporation), id)
 		}))
 
-	get[RegionOrdersIn, CollectionOut](hapi, deps, "", "/api/v1/markets/{region_id}/orders", "list-market-region-orders", "Regional order book (not backed — see file doc comment)", marketTag,
-		func(ctx context.Context, _ *RegionOrdersIn) (*CollectionOut, error) {
-			return nil, huma.Error501NotImplemented("the public regional order book has no backing table in the Tier-2 schema; only owner-scoped orders and per-type history are stored")
+	get[RegionOrdersPageIn, CollectionOut](hapi, deps, "markets.view", "/api/v1/markets/{region_id}/orders", "list-market-region-orders", "Orders HANGAR has synced for tracked owners in this region (keyset-paginated)", marketTag,
+		func(ctx context.Context, in *RegionOrdersPageIn) (*CollectionOut, error) {
+			page, err := api.ParsePageRequest(in.After, in.Before, &in.Limit)
+			if err != nil {
+				return nil, api.PageError(err)
+			}
+			rows, err := deps.Store.ListMarketOrdersByRegion(ctx, in.RegionID, cursorAfterID(page, "order_id"), page.Limit)
+			if err != nil {
+				return nil, api.Internal("listing regional market orders", err)
+			}
+			data := rowSliceOf(rows)
+			next := api.ZeroSentinel
+			if len(rows) == int(page.Limit) {
+				next = api.EncodeCursor(api.Keyset{"order_id": float64(rows[len(rows)-1].OrderID)})
+			}
+			return &CollectionOut{Body: api.Collection[map[string]any]{
+				Data: data, Page: api.PageInfo{NextCursor: next, PrevCursor: api.ZeroSentinel, Limit: page.Limit}, Sync: api.Sync{},
+			}}, nil
 		})
-	get[RegionHistoryIn, CollectionOut](hapi, deps, "", "/api/v1/markets/{region_id}/history", "list-market-region-history", "Price history for one type in one region", marketTag,
+	get[RegionHistoryIn, CollectionOut](hapi, deps, "markets.view", "/api/v1/markets/{region_id}/history", "list-market-region-history", "Price history for one type in one region", marketTag,
 		func(ctx context.Context, in *RegionHistoryIn) (*CollectionOut, error) {
 			rows, err := deps.Store.ListMarketHistory(ctx, in.RegionID, in.TypeID, api.MaxLimit)
 			if err != nil {
@@ -108,11 +110,19 @@ func registerAlliancesAndMarket(hapi huma.API, deps api.Deps) {
 			data := rowSliceOf(rows)
 			return &CollectionOut{Body: api.Collection[map[string]any]{Data: data, Page: api.EmptyPage(int32(len(data))), Sync: api.Sync{}}}, nil
 		})
-	get[RegionOrdersIn, CollectionOut](hapi, deps, "", "/api/v1/markets/{region_id}/types", "list-market-region-types", "Types traded in this region (not backed — see file doc comment)", marketTag,
-		func(ctx context.Context, _ *RegionOrdersIn) (*CollectionOut, error) {
-			return nil, huma.Error501NotImplemented("the regional traded-types index has no backing table in the Tier-2 schema")
+	get[RegionOrdersIn, CollectionOut](hapi, deps, "markets.view", "/api/v1/markets/{region_id}/types", "list-market-region-types", "Distinct type ids present in this region's synced orders", marketTag,
+		func(ctx context.Context, in *RegionOrdersIn) (*CollectionOut, error) {
+			typeIDs, err := deps.Store.ListMarketTypesByRegion(ctx, in.RegionID)
+			if err != nil {
+				return nil, api.Internal("listing regional market types", err)
+			}
+			data := make([]map[string]any, len(typeIDs))
+			for i, id := range typeIDs {
+				data[i] = map[string]any{"type_id": id}
+			}
+			return &CollectionOut{Body: api.Collection[map[string]any]{Data: data, Page: api.EmptyPage(int32(len(data))), Sync: api.Sync{}}}, nil
 		})
-	get[EmptyIn, CollectionOut](hapi, deps, "", "/api/v1/markets/prices", "list-market-prices", "Global adjusted/average prices by type", marketTag,
+	get[EmptyIn, CollectionOut](hapi, deps, "markets.view", "/api/v1/markets/prices", "list-market-prices", "Global adjusted/average prices by type", marketTag,
 		func(ctx context.Context, _ *EmptyIn) (*CollectionOut, error) {
 			rows, err := deps.Store.ListMarketPrices(ctx)
 			if err != nil {
@@ -125,6 +135,13 @@ func registerAlliancesAndMarket(hapi huma.API, deps api.Deps) {
 
 type RegionOrdersIn struct {
 	RegionID int32 `path:"region_id"`
+}
+
+type RegionOrdersPageIn struct {
+	RegionID int32  `path:"region_id"`
+	After    string `query:"after"`
+	Before   string `query:"before"`
+	Limit    int32  `query:"limit" default:"50"`
 }
 
 type RegionHistoryIn struct {

@@ -137,3 +137,17 @@ SELECT * FROM app.provisioning_audit
 
 -- name: ListRecentProvisioningAudit :many
 SELECT * FROM app.provisioning_audit ORDER BY event_at DESC LIMIT sqlc.arg(page_size);
+
+-- name: SetPlatformLockdown :one
+-- PHASE 15.1 — SRS §6.8 `POST /api/v1/admin/platforms/{id}/lockdown`.
+-- Deliberately distinct from `enabled` (see 00040's column comment):
+-- `enabled` is "is this platform in use at all", lockdown is "freeze
+-- outbound provisioning right now, and record who froze it and why".
+UPDATE app.platform
+   SET locked_down     = $2,
+       locked_down_at  = CASE WHEN $2 THEN now() ELSE NULL END,
+       locked_down_by  = CASE WHEN $2 THEN sqlc.narg(actor)::uuid ELSE NULL END,
+       lockdown_reason = CASE WHEN $2 THEN sqlc.narg(reason)::text ELSE NULL END,
+       updated_at      = now()
+ WHERE platform_id = $1
+RETURNING *;

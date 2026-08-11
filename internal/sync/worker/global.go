@@ -24,6 +24,18 @@ import (
 type globalHandler func(ctx context.Context, s *store.Store, body []byte) (int32, error)
 
 var globalDispatch = map[string]globalHandler{
+	// PHASE 15.1 — Tranquility status, backing /api/v1/meta/server-status.
+	"/status": func(ctx context.Context, s *store.Store, body []byte) (int32, error) {
+		dto, err := handlers.ParseServerStatus(body)
+		if err != nil {
+			return 0, err
+		}
+		res, err := handlers.SyncServerStatus(ctx, s, dto)
+		if err != nil {
+			return 0, err
+		}
+		return res.RowsAffected, nil
+	},
 	"/sovereignty/campaigns": func(ctx context.Context, s *store.Store, body []byte) (int32, error) {
 		dto, err := handlers.ParseSovereigntyCampaigns(body)
 		if err != nil {

@@ -63,3 +63,37 @@ RETURNING *;
 
 -- name: ListMarketPrices :many
 SELECT * FROM app.market_price ORDER BY type_id;
+
+-- name: ListMarketOrdersByRegion :many
+-- PHASE 15.1 — SRS §6.5 `GET /api/v1/markets/{region_id}/orders`.
+--
+-- SCOPE, stated precisely because Phase 15 got this wrong in the other
+-- direction: this is NOT the complete public regional order book. HANGAR
+-- syncs orders per tracked owner (`/characters/{id}/orders`,
+-- `/corporations/{id}/orders`), so app.market_order contains exactly the
+-- orders belonging to characters and corporations this installation
+-- tracks. Region-scoping that set is a genuinely useful read — "what are
+-- our people trading in Domain" — and app.market_order was built for it:
+-- Phase 1b gave the table a `region_id` column AND a dedicated
+-- `CREATE INDEX ON app.market_order (region_id)`, an index that is useless
+-- to every owner-scoped query (they all lead with owner_kind, owner_id)
+-- and only pays for itself here.
+--
+-- Phase 15 read "no complete public order book" as "no backing table" and
+-- answered 501. The table and its index were there the whole time; what is
+-- absent is a full-region sync, which nothing in the SRS asks for and
+-- which would mean ingesting hundreds of thousands of rows per region
+-- across ~100 regions.
+SELECT * FROM app.market_order
+ WHERE region_id = $1
+   AND order_id > sqlc.arg(after_order_id)
+ ORDER BY order_id
+ LIMIT sqlc.arg(page_size);
+
+-- name: ListMarketTypesByRegion :many
+-- PHASE 15.1 — SRS §6.5 `GET /api/v1/markets/{region_id}/types`. Same
+-- scope note as ListMarketOrdersByRegion: the distinct type_ids present in
+-- the orders HANGAR has synced for this region.
+SELECT DISTINCT type_id FROM app.market_order
+ WHERE region_id = $1
+ ORDER BY type_id;

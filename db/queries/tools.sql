@@ -24,3 +24,17 @@ RETURNING *;
 
 -- name: GetMoonReport :one
 SELECT * FROM app.moon_report WHERE report_id = $1;
+
+-- name: ListSdeTypeNames :many
+-- PHASE 15.1 — resolves type ids to names for the EFT fitting export
+-- (`GET /api/v1/characters/{id}/fittings/{fitting_id}/eft`). Phase 15
+-- rendered `[<type_id>]` placeholders because no type-name lookup query
+-- existed; EFT is a text format real players paste into a real fitting
+-- tool, and a numeric id there is not a fitting.
+--
+-- Returns only the rows that exist: a type absent from the SDE (an import
+-- that has never run, or a type newer than the imported dump) simply
+-- doesn't come back, and the caller keeps its id placeholder for that one
+-- line rather than failing the whole export.
+SELECT type_id, name FROM sde.type
+ WHERE type_id = ANY(sqlc.arg(type_ids)::int[]);

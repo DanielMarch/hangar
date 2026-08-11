@@ -61,7 +61,7 @@ const createPlatform = `-- name: CreatePlatform :one
 
 INSERT INTO app.platform (kind, name, config)
 VALUES ($1, $2, $3)
-RETURNING platform_id, kind, name, config, enabled, created_at, updated_at
+RETURNING platform_id, kind, name, config, enabled, created_at, updated_at, locked_down, locked_down_at, locked_down_by, lockdown_reason
 `
 
 // app.platform, app.platform_group, app.entitlement_rule,
@@ -78,6 +78,10 @@ func (q *Queries) CreatePlatform(ctx context.Context, kind string, name string, 
 		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LockedDown,
+		&i.LockedDownAt,
+		&i.LockedDownBy,
+		&i.LockdownReason,
 	)
 	return i, err
 }
@@ -126,7 +130,7 @@ func (q *Queries) DeleteEntitlementRule(ctx context.Context, ruleID uuid.UUID) (
 }
 
 const getPlatform = `-- name: GetPlatform :one
-SELECT platform_id, kind, name, config, enabled, created_at, updated_at FROM app.platform WHERE platform_id = $1
+SELECT platform_id, kind, name, config, enabled, created_at, updated_at, locked_down, locked_down_at, locked_down_by, lockdown_reason FROM app.platform WHERE platform_id = $1
 `
 
 func (q *Queries) GetPlatform(ctx context.Context, platformID uuid.UUID) (AppPlatform, error) {
@@ -140,6 +144,10 @@ func (q *Queries) GetPlatform(ctx context.Context, platformID uuid.UUID) (AppPla
 		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LockedDown,
+		&i.LockedDownAt,
+		&i.LockedDownBy,
+		&i.LockdownReason,
 	)
 	return i, err
 }
@@ -480,7 +488,7 @@ func (q *Queries) ListPlatformGroups(ctx context.Context, platformID uuid.UUID) 
 }
 
 const listPlatforms = `-- name: ListPlatforms :many
-SELECT platform_id, kind, name, config, enabled, created_at, updated_at FROM app.platform WHERE enabled ORDER BY name
+SELECT platform_id, kind, name, config, enabled, created_at, updated_at, locked_down, locked_down_at, locked_down_by, lockdown_reason FROM app.platform WHERE enabled ORDER BY name
 `
 
 func (q *Queries) ListPlatforms(ctx context.Context) ([]AppPlatform, error) {
@@ -500,6 +508,10 @@ func (q *Queries) ListPlatforms(ctx context.Context) ([]AppPlatform, error) {
 			&i.Enabled,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LockedDown,
+			&i.LockedDownAt,
+			&i.LockedDownBy,
+			&i.LockdownReason,
 		); err != nil {
 			return nil, err
 		}
@@ -634,6 +646,52 @@ UPDATE app.entitlement_rule SET enabled = $2 WHERE rule_id = $1
 func (q *Queries) SetEntitlementRuleEnabled(ctx context.Context, ruleID uuid.UUID, enabled bool) error {
 	_, err := q.db.Exec(ctx, setEntitlementRuleEnabled, ruleID, enabled)
 	return err
+}
+
+const setPlatformLockdown = `-- name: SetPlatformLockdown :one
+UPDATE app.platform
+   SET locked_down     = $2,
+       locked_down_at  = CASE WHEN $2 THEN now() ELSE NULL END,
+       locked_down_by  = CASE WHEN $2 THEN $3::uuid ELSE NULL END,
+       lockdown_reason = CASE WHEN $2 THEN $4::text ELSE NULL END,
+       updated_at      = now()
+ WHERE platform_id = $1
+RETURNING platform_id, kind, name, config, enabled, created_at, updated_at, locked_down, locked_down_at, locked_down_by, lockdown_reason
+`
+
+type SetPlatformLockdownParams struct {
+	PlatformID uuid.UUID
+	LockedDown bool
+	Actor      uuid.NullUUID
+	Reason     *string
+}
+
+// PHASE 15.1 — SRS §6.8 `POST /api/v1/admin/platforms/{id}/lockdown`.
+// Deliberately distinct from `enabled` (see 00040's column comment):
+// `enabled` is "is this platform in use at all", lockdown is "freeze
+// outbound provisioning right now, and record who froze it and why".
+func (q *Queries) SetPlatformLockdown(ctx context.Context, arg SetPlatformLockdownParams) (AppPlatform, error) {
+	row := q.db.QueryRow(ctx, setPlatformLockdown,
+		arg.PlatformID,
+		arg.LockedDown,
+		arg.Actor,
+		arg.Reason,
+	)
+	var i AppPlatform
+	err := row.Scan(
+		&i.PlatformID,
+		&i.Kind,
+		&i.Name,
+		&i.Config,
+		&i.Enabled,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LockedDown,
+		&i.LockedDownAt,
+		&i.LockedDownBy,
+		&i.LockdownReason,
+	)
+	return i, err
 }
 
 const updateProvisioningStateGroups = `-- name: UpdateProvisioningStateGroups :exec

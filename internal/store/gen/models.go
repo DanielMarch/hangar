@@ -477,6 +477,8 @@ type AppCorporation struct {
 	WarEligible   *bool
 	Palette       []byte
 	UpdatedAt     time.Time
+	// Maximum members the corporation may hold (ESI /corporations/{id}/members/limit). NOT member_count, which is current occupancy. Phase 15.1.
+	MemberLimit *int32
 }
 
 type AppCorporationAllianceHistory struct {
@@ -1160,6 +1162,11 @@ type AppPlatform struct {
 	Enabled    bool
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+	// Incident freeze: suspends outbound provisioning without erasing the fact that the platform is configured. Distinct from `enabled`, the ordinary on/off switch. Phase 15.1.
+	LockedDown     bool
+	LockedDownAt   *time.Time
+	LockedDownBy   uuid.NullUUID
+	LockdownReason *string
 }
 
 type AppPlatformGroup struct {

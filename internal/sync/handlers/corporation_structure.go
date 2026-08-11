@@ -523,3 +523,26 @@ func SyncCorporationContainerLog(ctx context.Context, s *store.Store, corporatio
 	}
 	return SyncResult{RowsAffected: int32(len(rows))}, nil
 }
+
+// ---- GET /corporations/{corporation_id}/members/limit ----
+//
+// PHASE 15.1. Bare integer response, like /corporations/{id}/members'
+// bare array — no wrapper object. SRS §6.3 exposes it as
+// `GET /api/v1/corporations/{id}/members/limit`; Phase 15 could not
+// register that route because app.corporation had no member_limit column
+// (00040_phase15_1_defect_closure.sql adds it) and no sync populated one.
+
+func ParseCorporationMemberLimit(body []byte) (int32, error) {
+	var limit int32
+	if err := json.Unmarshal(body, &limit); err != nil {
+		return 0, fmt.Errorf("handlers: parsing corporation member limit: %w", err)
+	}
+	return limit, nil
+}
+
+func SyncCorporationMemberLimit(ctx context.Context, s *store.Store, corporationID int64, limit int32) (SyncResult, error) {
+	if err := s.SetCorporationMemberLimit(ctx, corporationID, &limit); err != nil {
+		return SyncResult{}, fmt.Errorf("handlers: setting member limit for corporation %d: %w", corporationID, err)
+	}
+	return SyncResult{RowsAffected: 1}, nil
+}

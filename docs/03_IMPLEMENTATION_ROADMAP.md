@@ -1461,6 +1461,104 @@ decisions) and `/meta/server-status` (Tranquility players/VIP/version, drives th
 > tests, including cursor validation rejecting simultaneous `after` and `before` and handling
 > the `'0'` sentinel in both directions.
 
+**Status: CLOSED CLEAN** (Phase 15 implementation + Phase 15.1 defect closure). Phase 15
+delivered all 156 operations and its eight exit tests, but left six routes registered-and-501
+and a set of reported gaps; Phase 15.1 closed every one of them. There are no outstanding
+Phase 15 items — see Phase 15.1 below.
+
+---
+
+## Phase 15.1 — HTTP API defect closure & documentation reconciliation
+
+**Objective.** Resolve every open item from Phase 15's closing report so Phase 16 starts against
+a codebase and document set with no known-open items. Same pattern as Phase 14.1 for Phase 14.
+
+**Depends on.** Phase 15.
+
+**What it closed.**
+
+| Item | Resolution |
+| :-- | :-- |
+| `/auth/login` + `/auth/callback` answered 501 (`serve.go` passed a nil `*sso.Flow`) | `cmd/hangar/sso.go` assembles the real Flow: a `jwks.SettingStore` adapter over `*store.Store`, JWKS cache seeded from `app.setting` then refreshed, offline verifier, keyring. A cold cache (no persisted keys *and* no reachable JWKS) is fatal; a reachable-but-failing refresh over a warm cache is not — §7.1's offline-boot contract. No `jwks.Clock` implementation was needed: `NewCache` already defaults a nil clock to its own system clock, so adding one would have been a type with no behavioural effect. |
+| Six routes registered but answering 501 | All six implemented — see the table below. `TestNoUnimplementedEndpoints` now fails the build if a seventh appears. |
+| RBAC vocabulary had no permission for §6.4/§6.5/§6.7 or §6.8's read side | Twelve permissions added, seed regenerated, every stopgap re-gated. `/api/v1/me*` and `/api/v1/meta/*` remain session-only as a documented design decision. |
+| `/meta/server-status` had no sync source | Global sync of ESI `GET /status/` into `app.setting`; renders *unavailable with an explanation* before the first successful run, never zeroes. |
+| 12 Phase 15 query additions undocumented | Recorded in `02_DATABASE_SCHEMA.md` §9.2, alongside Phase 15.1's own seven. |
+| `make ci-strict` blocked by a Windows file lock | Root-caused (see below) — an environmental self-inflicted concurrency issue, not a repository defect. `make ci-strict` now runs directly. |
+
+**The six 501s and how each was closed.**
+
+| Route | Phase 15's stated reason | Phase 15.1 |
+| :-- | :-- | :-- |
+| `/markets/{region_id}/orders`, `/types` | "no backing table" | Wrong: `app.market_order` has a `region_id` column *and* a dedicated index on it that no owner-scoped query can use. Implemented as an owner-scoped-but-region-filtered read; SRS §6.5 now states the scope explicitly. |
+| `/corporations/{id}/members/limit` | no `member_limit` column | Column added (`00040`), sync handler added, route registered. |
+| `/admin/esi/errorlimit` | "only reachable through an in-process cache" | Wrong: `GetErrorBudget` has existed since Phase 4, and the table is the *correct* source for an admin view because the budget is installation-wide across replicas. |
+| `PUT /admin/scopes` | only per-grant Add/Remove existed | Right to refuse to fake it. `internal/rbac.ReplaceRoleGrants` now does delete + insert + rematerialise in one transaction, so concurrent editors serialise instead of interleaving. |
+| `POST /admin/platforms/{id}/lockdown` | "no lockdown primitive" | `app.platform.locked_down` + who/when/why. Deliberately not a reuse of `enabled`. |
+| `/characters/{id}/fittings/{id}/eft` | rendered `[type_id]`, no SDE lookup | `ListSdeTypeNames`; degrades per-line to the id placeholder when no SDE has been imported. |
+
+**Defects found while doing the above** — all three were invisible to the existing tests, and
+all three are the kind that only surface when a path is exercised end to end for the first time:
+
+1. **Every user would have been force-logged-out ten minutes after login.** `BeginLogin` writes
+   `expires_at = now + StateTTL` (10 min, correct for an unconsumed PKCE state);
+   `CompleteSessionLogin` did not touch it; `GetSession` filters on it.
+   `config.CryptoConfig.SessionTTL` (720h) had existed since Phase 5 **with no consumer**.
+   Fixed, with `TestSessionTTLPromotedOnLogin` covering it.
+2. **First-time login crashed on a foreign key.** `resolveUser` called `SetUserMainCharacter`
+   *before* `UpsertCharacter`, pointing `app.user.main_character_id` at a character row that did
+   not exist yet. `app.user` and `app.character` reference each other and neither FK is
+   `DEFERRABLE`, so the write order is not a matter of taste. Survived from Phase 5 because
+   `internal/sso`'s unit tests use an in-memory fake with no FK enforcement and no test had ever
+   run the flow against real Postgres.
+3. **Character reauthorization could never succeed.** The handler returned a redirect URL whose
+   `state`/PKCE verifier lived on a session row the browser was never given a cookie for. It also
+   did not check that the character belonged to the caller — an open redirect minting a login
+   session for an arbitrary character id.
+
+**Why `make ci-strict` would not run — two separate hazards.** Phase 15 attributed this to one
+cause; it was two, and only the first was correctly identified.
+
+*Hazard 1 — the sqlc "user-mapped section" error.* Phase 15 worked around
+`The requested operation cannot be performed on a file with a user-mapped section open` on
+`internal/store/gen/*.go` by regenerating into an isolated temp directory. It does not reproduce:
+34 controlled attempts (15 consecutive `sqlc generate`, 3 after `go build`, 3 after `go vet`, 1
+after `golangci-lint`, 2 concurrent, 10 concurrent `go build` + `sqlc`) all passed. The cause was
+a **long-running background `make verify-generated` left running while foreground `sqlc generate`
+calls overlapped it** — two processes rewriting the same files, which Windows surfaces as a
+mapped-section conflict (Defender real-time scanning is on, with no exclusion for the repository,
+which is what turns the overlap into that specific error). Not a `gopls`, build-cache or
+repository defect. Operational rule: never run `make generate`/`verify-generated` in the
+background while editing or generating.
+
+*Hazard 2 — `verify-generated` hanging on `git diff`.* Discovered only when hazard 1 stopped
+masking it: with `sqlc` succeeding, the recipe proceeded to
+`git diff --exit-code -- <paths>`, **and that hung indefinitely** — twice, ~13+ minutes, `make`
+at near-zero CPU with a live `git.exe` child, blocking the entire gate. It is the same command
+that hung an earlier Phase 15 background invocation which never completed, so this had been
+happening unrecognised.
+
+It does **not** reproduce standalone: no `core.pager`, no `core.fsmonitor`, no stale
+`index.lock`, a 14 MiB repository and a ~500-line diff, and both `> /dev/null` and `| tail`
+variants return promptly. **The mechanism is therefore unproven, and the fix is not a
+diagnosis** — it removes the failure surface instead: `--quiet` so git writes no output at all
+(the check only ever wanted the exit code) and `--no-pager` so no pager can be spawned under any
+tty-detection outcome, with a bounded `--name-only` list printed on failure instead of a
+potentially enormous diff. Recorded honestly in the Makefile: if it recurs, add a timeout rather
+than restore the old form — a gate that can hang forever is worse than one that fails.
+
+**Exit criteria.**
+
+| Test | Assertion |
+| :-- | :-- |
+| `TestSSOLoginRoundTripToAuthenticatedMe` | `/auth/login` → callback → session cookie → authenticated `/api/v1/me`, against real Postgres |
+| `TestSSOCallbackReplayDoesNotLogTheUserOut` | back-button callback replay redirects a logged-in user instead of 401ing them out |
+| `TestSSOCallbackWithoutSessionIsRejected` | replay tolerance does not weaken the unauthenticated case |
+| `TestSessionTTLPromotedOnLogin` | authenticated session promoted to `SessionTTL`, not left on `StateTTL` |
+| `TestNoUnimplementedEndpoints` | zero 501 responses anywhere in `docs/openapi.json` |
+| `TestPermissionSeedMatchesGoSet` | still green with the twelve added permissions |
+| `make ci-strict` | passes directly, no workaround |
+
 ---
 
 ## Phase 16 — Frontend I (Shell, auth, dashboard, localisation)

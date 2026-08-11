@@ -165,3 +165,37 @@ func DeleteRole(ctx context.Context, pool store.Pool, roleID uuid.UUID) error {
 func CreateRole(ctx context.Context, s *store.Store, name string, description *string, isSystem bool) (gen.AppRole, error) {
 	return s.CreateRole(ctx, name, description, isSystem)
 }
+
+// ReplaceRoleGrants atomically replaces roleID's ENTIRE grant set with
+// `grants` and refreshes every user the role reaches.
+//
+// PHASE 15.1 — SRS §6.8's `PUT /api/v1/admin/scopes`. Phase 15 answered
+// 501 on the grounds that only per-grant Add/Remove existed, and it was
+// right to refuse to fake it: looping Add/Remove from the API layer is not
+// a replace. Two administrators editing the same role concurrently would
+// interleave their deletes and inserts into a grant set neither of them
+// asked for, and a failure partway through would leave the role holding
+// half of one edit — with app.effective_permission already materialised
+// from it.
+//
+// Doing the whole delete-then-insert-then-rematerialise inside one
+// transaction is what makes it a replace: concurrent callers serialise on
+// the role's rows, and a failure rolls the role back to its previous grant
+// set with its materialisation still consistent.
+func ReplaceRoleGrants(ctx context.Context, pool store.Pool, roleID uuid.UUID, grants []gen.AppRoleGrant) error {
+	return store.WithTx(ctx, pool, func(ctx context.Context, s *store.Store) error {
+		if err := s.DeleteRoleGrants(ctx, roleID); err != nil {
+			return fmt.Errorf("rbac: clearing grants for role %s: %w", roleID, err)
+		}
+		for _, g := range grants {
+			if _, err := s.AddRoleGrant(ctx, roleID, g.Permission, g.Effect); err != nil {
+				return fmt.Errorf("rbac: adding grant %s=%s to role %s: %w", g.Permission, g.Effect, roleID, err)
+			}
+		}
+		affected, err := UsersAffectedByRole(ctx, s, roleID)
+		if err != nil {
+			return err
+		}
+		return RefreshUsers(ctx, s, affected)
+	})
+}

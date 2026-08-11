@@ -14,6 +14,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"time"
 
@@ -68,7 +69,11 @@ type MeOut struct {
 }
 
 type ReauthorizeOut struct {
-	Body struct {
+	// SetCookie carries the pre-auth session cookie the SSO callback needs
+	// to find this pending login again (Phase 15.1 — see
+	// reauthorizeHandler).
+	SetCookie string `header:"Set-Cookie"`
+	Body      struct {
 		RedirectURL string `json:"redirect_url"`
 	}
 }
@@ -127,20 +132,53 @@ func myCharactersHandler(deps api.Deps) func(context.Context, *EmptyIn) (*Collec
 	}
 }
 
+// reauthorizeHandler is POST /api/v1/me/characters/{id}/reauthorize.
+//
+// PHASE 15.1. Two things were wrong here. It answered 501 when deps.SSO
+// was nil (cmd/hangar/serve.go now always builds a real Flow, and fails
+// startup rather than serving a half-configured API, so the nil case is
+// now a programming error — a 500, not a documented "not implemented"),
+// and more importantly it discarded the pending session entirely: it
+// returned a redirect URL whose `state` and PKCE verifier live on a
+// session row the browser was never given a cookie for, so the subsequent
+// /auth/callback could not find the session and every reauthorization
+// failed. SetCookie on the output struct fixes that — the same cookie
+// /auth/login issues, for the same reason.
 func reauthorizeHandler(deps api.Deps) func(context.Context, *SubIDEmptyIn) (*ReauthorizeOut, error) {
 	return func(ctx context.Context, in *SubIDEmptyIn) (*ReauthorizeOut, error) {
-		if deps.SSO == nil {
-			return nil, api.Internal("reauthorize", huma.Error501NotImplemented("SSO flow not configured"))
+		userID, ok := userIDFromCtx(ctx)
+		if !ok {
+			return nil, huma.Error401Unauthorized("unauthenticated")
 		}
+		if deps.SSO == nil {
+			return nil, api.Internal("reauthorize", errNoSSOFlow)
+		}
+		// Only a character already linked to the caller may be
+		// reauthorized — otherwise this is an open redirect that mints a
+		// login session for an arbitrary character id.
+		ch, err := deps.Store.GetCharacter(ctx, in.ID)
+		if err != nil {
+			return nil, api.NotFound("character")
+		}
+		if !ch.UserID.Valid || ch.UserID.UUID != userID {
+			return nil, api.Forbidden("character is not linked to the caller's account")
+		}
+
 		pending, err := deps.SSO.BeginLogin(ctx, []string{}, nil, nil)
 		if err != nil {
 			return nil, api.Internal("beginning reauthorization", err)
 		}
-		return &ReauthorizeOut{Body: struct {
-			RedirectURL string `json:"redirect_url"`
-		}{RedirectURL: pending.RedirectURL}}, nil
+		out := &ReauthorizeOut{}
+		out.Body.RedirectURL = pending.RedirectURL
+		out.SetCookie = (&http.Cookie{
+			Name: apimw.SessionCookieName, Value: pending.SessionID.String(),
+			Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Expires: pending.ExpiresAt,
+		}).String()
+		return out, nil
 	}
 }
+
+var errNoSSOFlow = errors.New("v1: no SSO flow configured on this API instance")
 
 func unlinkCharacterHandler(deps api.Deps) func(context.Context, *IDIn) (*EmptyOut, error) {
 	return func(ctx context.Context, in *IDIn) (*EmptyOut, error) {
@@ -335,10 +373,31 @@ func RegisterAuthRedirects(mux *http.ServeMux, s *store.Store, flow *sso.Flow) {
 		state := r.URL.Query().Get("state")
 		result, err := flow.HandleCallback(r.Context(), sessionID, code, state)
 		if err != nil {
+			// PHASE 15.1 — back-button replay. `state` is single-use:
+			// CompleteSessionLogin nulls pkce_verifier/state, so replaying
+			// the callback URL (browser back button, or a refresh of the
+			// post-login redirect) fails HandleCallback's "session has no
+			// pending login" check even though the user is, right now,
+			// perfectly well logged in. Erroring them out of a working
+			// session is the wrong answer; if the cookie still resolves to
+			// a completed session, treat the replay as a no-op and send
+			// them where a successful login would have. Only a genuinely
+			// unauthenticated caller sees 401.
+			if session, gerr := s.GetSession(r.Context(), sessionID); gerr == nil && session.UserID.Valid {
+				http.Redirect(w, r, "/", http.StatusFound)
+				return
+			}
 			http.Error(w, "login failed", http.StatusUnauthorized)
 			return
 		}
-		_ = result
+		// Re-issue the cookie with the AUTHENTICATED session's expiry. The
+		// cookie written by /auth/login carries the 10-minute pre-auth
+		// sso.StateTTL; leaving it in place would have the browser drop a
+		// still-valid 30-day session ten minutes after login.
+		http.SetCookie(w, &http.Cookie{
+			Name: apimw.SessionCookieName, Value: sessionID.String(),
+			Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Expires: result.SessionExpiresAt,
+		})
 		http.Redirect(w, r, "/", http.StatusFound)
 	})
 

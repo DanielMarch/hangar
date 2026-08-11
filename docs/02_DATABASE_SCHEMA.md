@@ -787,3 +787,62 @@ against the PG18 release notes during Phase 1 rather than assuming.
 | Tier-2 map complete | schema-diff test against §5.2 | 1b |
 | Recursive asset-tree CTE proven | fixture with 5 nesting levels + an injected cycle | 1b |
 | Partition maintenance creates three months ahead | fast-forward clock test | 1b |
+
+---
+
+## 9. Post-Phase-1 schema and query additions
+
+§4 and §5 describe the schema as Phase 1a/1b delivered it. Later phases
+have added to it. This section is the running record of what changed
+after Phase 1, so the document keeps describing what actually exists
+rather than what was first designed.
+
+### 9.1 Columns added after Phase 1
+
+| Migration | Table | Column | Phase | Why |
+| :-- | :-- | :-- | :-- | :-- |
+| `00040_phase15_1_defect_closure.sql` | `app.corporation` | `member_limit integer` | 15.1 | SRS §6.3 exposes `GET /corporations/{id}/members/limit`, and the ingested snapshot confirms the upstream route. Phase 1a modelled `member_count` (current occupancy) but never `member_limit` (permitted maximum) — different facts; the "approaching the ceiling" reading needs both. Phase 15 could not register the route at all and reported the gap. |
+| `00040_phase15_1_defect_closure.sql` | `app.platform` | `locked_down boolean NOT NULL DEFAULT false`, `locked_down_at`, `locked_down_by`, `lockdown_reason` | 15.1 | SRS §6.8's `POST /admin/platforms/{id}/lockdown`. Deliberately **not** a reuse of `app.platform.enabled`: `enabled` is the ordinary "is this platform in use" switch, and flipping it to handle an incident would afterwards be indistinguishable from a platform that was never configured. `locked_down` records who froze provisioning, when, and why. |
+
+### 9.2 Queries added after Phase 1
+
+Every query below is real, committed and load-bearing. Phase 15 added
+twelve of them outside its declared file list while implementing SRS §6
+for real; Phase 15.1 added the rest closing Phase 15's 501s. Recording
+them here is Principle 10's documentation counterpart — the schema
+document must describe the queries that exist.
+
+**Phase 15** (`internal/api/v1` needed a read path that no sync-side query
+provided):
+
+| Query | File | Serves |
+| :-- | :-- | :-- |
+| `ListApiTokensForUser` | `user.sql` | `GET /api/v1/api-tokens` — every prior `api_token` query targeted one known token. |
+| `ListShareLinksForUser` | `user.sql` | `GET /api/v1/me/share-links` |
+| `GetCharacterJumpFatigue` | `character_sheet.sql` | `GET /characters/{id}/fatigue` — only the sync-side `Upsert` existed. |
+| `ListCharacterAgentResearch` | `character_sheet.sql` | `GET /characters/{id}/agents_research` |
+| `ListAllCorporationMemberTitles` | `corporation_structure.sql` | `GET /corporations/{id}/members/titles` is corp-wide; the existing query was one member's rows. |
+| `ListAllCorporationRoles` | `corporation_structure.sql` | `GET /corporations/{id}/roles`, same corp-wide vs per-member distinction. |
+| `ListAlliances` | `reference.sql` | `GET /api/v1/alliances` |
+| `ListCorporationsByAlliance` | `reference.sql` | `GET /api/v1/alliances/{id}/corporations` |
+| `SearchCharactersByName` / `SearchCorporationsByName` / `SearchAlliancesByName` | `reference.sql` | `POST /api/v1/support/search`. Searches HANGAR's own synced rows only — CCP prohibits using ESI for entity discovery (§4.7). Always parameter-bound, never string-concatenated. |
+| `UpdateSquad` / `DeleteSquad` | `squad.sql` | `PATCH` / `DELETE /api/v1/squads/{id}` — no mutation beyond `CreateSquad` existed. |
+
+**Phase 15.1** (closing Phase 15's 501 responses):
+
+| Query | File | Serves |
+| :-- | :-- | :-- |
+| `ListMarketOrdersByRegion` | `market.sql` | `GET /markets/{region_id}/orders`. **Scope:** the orders HANGAR has synced for tracked owners in that region — not the complete public order book, which would mean ingesting hundreds of thousands of rows across ~100 regions and which nothing in the SRS asks for. `app.market_order` was always built for this read: Phase 1b gave it a `region_id` column *and* a dedicated index on it, an index no owner-scoped query can use. |
+| `ListMarketTypesByRegion` | `market.sql` | `GET /markets/{region_id}/types`, same scope note. |
+| `SetCorporationMemberLimit` | `reference.sql` | The `/members/limit` sync — a bare-integer upstream route, so it needs a targeted write rather than the full corporation upsert. |
+| `AggregateWalletJournalByRefType` | `wallet.sql` | `GET /corporations/{id}/ledger/{bounties,pi}`. One parameterised aggregate serves both; `ref_type` is an open vocabulary (Principle 14) so the set is passed as data, not baked into SQL. `total_amount` is `NUMERIC` ⇒ `decimal.Decimal` ⇒ a JSON string (Principle 9). |
+| `ListSdeTypeNames` | `tools.sql` | EFT fitting export. Returns only rows that exist, so an installation with no SDE import degrades to id placeholders per line rather than failing the export. |
+| `SetPlatformLockdown` | `provisioning.sql` | `POST /admin/platforms/{id}/lockdown` |
+| `DeleteRoleGrants` | `rbac.sql` | The delete half of `PUT /admin/scopes`' atomic grant replace (paired with `AddRoleGrant` inside one transaction by `internal/rbac.ReplaceRoleGrants`). |
+
+### 9.3 Corrected query semantics
+
+| Query | Phase | Correction |
+| :-- | :-- | :-- |
+| `CompleteSessionLogin` | 15.1 | Now also sets `expires_at`. It previously left the authenticated session on the 10-minute pre-auth `sso.StateTTL` deadline that `BeginLogin` wrote, and `GetSession` filters `expires_at > now()` — so **every user would have been force-logged-out ten minutes after clicking "log in"**. `config.CryptoConfig.SessionTTL` (default 720h) had existed since Phase 5 with no consumer; this is it. Undetected until Phase 15.1 because Phase 15 left `/auth/callback` answering 501, so no session was ever completed. |
+| `UpsertCorporation` | 15.1 | `member_limit` added to both the column list and the `IS DISTINCT FROM` change guard. Omitting it from the guard would have pinned the value forever: a corporation that trained Corporation Management would keep its stale limit because no *other* column changed and the `DO UPDATE` would be skipped. |

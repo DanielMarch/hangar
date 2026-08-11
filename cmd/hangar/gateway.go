@@ -78,11 +78,8 @@ func buildGateway(cfg *config.Config, pool *pgxpool.Pool, s *store.Store, logger
 // needs for access tokens (§7.3).
 func buildRefresher(cfg *config.Config, pool *pgxpool.Pool, keyring *crypto.Keyring) *sso.Refresher {
 	return &sso.Refresher{
-		Pool: pool,
-		OAuth: sso.OAuthConfig{
-			ClientID: cfg.SSO.ClientID, ClientSecret: cfg.SSO.ClientSecret.Reveal(),
-			CallbackURL: cfg.SSO.CallbackURL, AuthorizeURL: cfg.SSO.AuthorizeURL, TokenURL: cfg.SSO.TokenURL,
-		},
+		Pool:    pool,
+		OAuth:   ssoOAuthConfig(cfg), // Phase 15.1: shared with buildSSOFlow (sso.go) so the two can't drift
 		Keyring: keyring,
 	}
 }

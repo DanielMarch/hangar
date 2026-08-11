@@ -13,8 +13,16 @@ import (
 )
 
 // StateTTL is §7.1's fixed single-use window for a pending login's state
-// and PKCE verifier.
+// and PKCE verifier. It bounds only the PRE-auth row; the authenticated
+// session that replaces it on callback gets Flow.SessionTTL instead (see
+// DefaultSessionTTL and db/queries/user.sql's CompleteSessionLogin note).
 const StateTTL = 10 * time.Minute
+
+// DefaultSessionTTL is the authenticated session lifetime used when
+// Flow.SessionTTL is left zero. It matches internal/config's
+// `session_ttl` default (720h / 30 days) so a Flow built without explicit
+// configuration behaves the same as one built from a default Config.
+const DefaultSessionTTL = 720 * time.Hour
 
 // Store is the subset of gen.Querier the SSO flow needs, declared
 // narrowly against gen's own types (the same convention
@@ -23,7 +31,7 @@ const StateTTL = 10 * time.Minute
 type Store interface {
 	CreateSession(ctx context.Context, arg gen.CreateSessionParams) (gen.AppSession, error)
 	GetSession(ctx context.Context, sessionID uuid.UUID) (gen.AppSession, error)
-	CompleteSessionLogin(ctx context.Context, sessionID uuid.UUID, userID uuid.NullUUID) error
+	CompleteSessionLogin(ctx context.Context, sessionID uuid.UUID, userID uuid.NullUUID, expiresAt time.Time) error
 	DeleteSession(ctx context.Context, sessionID uuid.UUID) error
 
 	GetCharacter(ctx context.Context, characterID int64) (gen.AppCharacter, error)
@@ -52,6 +60,11 @@ type Flow struct {
 	OAuth    OAuthConfig
 	Verifier *jwks.Verifier
 	Keyring  *crypto.Keyring
+
+	// SessionTTL is how long an authenticated session lives once the
+	// callback completes. Zero means DefaultSessionTTL. cmd/hangar wires
+	// config.CryptoConfig.SessionTTL here.
+	SessionTTL time.Duration
 
 	// OnOwnerHashChanged is called (if set) whenever a character's
 	// owner_hash changes — an entitlement-reducing transfer event that
@@ -110,6 +123,19 @@ type LoginResult struct {
 	CharacterName string
 	Scopes        []string
 	IsNewUser     bool
+	// SessionExpiresAt is the authenticated session's new expiry, so the
+	// HTTP layer can re-issue the session cookie with a matching Expires
+	// instead of leaving the browser holding the 10-minute pre-auth one.
+	SessionExpiresAt time.Time
+}
+
+// sessionTTL resolves the configured authenticated-session lifetime,
+// falling back to DefaultSessionTTL when unset.
+func (f *Flow) sessionTTL() time.Duration {
+	if f.SessionTTL > 0 {
+		return f.SessionTTL
+	}
+	return DefaultSessionTTL
 }
 
 // HandleCallback completes the login: validates state against the
@@ -156,7 +182,8 @@ func (f *Flow) HandleCallback(ctx context.Context, sessionID uuid.UUID, code, st
 		return nil, err
 	}
 
-	if err := f.Store.CompleteSessionLogin(ctx, sessionID, uuid.NullUUID{UUID: userID, Valid: true}); err != nil {
+	expiresAt := time.Now().Add(f.sessionTTL())
+	if err := f.Store.CompleteSessionLogin(ctx, sessionID, uuid.NullUUID{UUID: userID, Valid: true}, expiresAt); err != nil {
 		return nil, fmt.Errorf("sso: callback: completing session: %w", err)
 	}
 	if err := f.Store.TouchUserLastLogin(ctx, userID); err != nil {
@@ -166,6 +193,7 @@ func (f *Flow) HandleCallback(ctx context.Context, sessionID uuid.UUID, code, st
 	return &LoginResult{
 		UserID: userID, CharacterID: characterID, CharacterName: claims.Name,
 		Scopes: []string(claims.Scopes), IsNewUser: isNewUser,
+		SessionExpiresAt: expiresAt,
 	}, nil
 }
 
@@ -191,9 +219,27 @@ func (f *Flow) resolveUser(ctx context.Context, characterID int64, claims *jwks.
 	if err != nil {
 		return uuid.UUID{}, false, fmt.Errorf("sso: resolving user: creating user: %w", err)
 	}
-	if err := f.Store.SetUserMainCharacter(ctx, user.UserID, &characterID); err != nil {
-		return uuid.UUID{}, false, fmt.Errorf("sso: resolving user: setting main character: %w", err)
-	}
+	// PHASE 15.1 FIX — ORDERING. app.user and app.character reference each
+	// other (app.user.main_character_id -> app.character via
+	// fk_user_main_character, added in 00004_platform_identity.sql; and
+	// app.character.user_id -> app.user). Neither constraint is DEFERRABLE,
+	// so the write order is not a matter of taste: this used to call
+	// SetUserMainCharacter BEFORE UpsertCharacter, pointing the fresh
+	// user's main_character_id at a character row that did not exist yet,
+	// and every first-time login died with
+	//   insert or update on table "user" violates foreign key constraint
+	//   "fk_user_main_character" (SQLSTATE 23503).
+	//
+	// It survived from Phase 5 to Phase 15.1 undetected because
+	// internal/sso's unit tests drive an in-memory fakeStore (sso_test.go)
+	// that enforces no foreign keys, and no test had ever run the login
+	// flow against real Postgres — Phase 15 registered /auth/callback but
+	// passed a nil *sso.Flow, so the route 501'd and the path stayed
+	// unreachable. internal/api/v1/auth_integration_test.go is the
+	// regression cover.
+	//
+	// Correct order: create the character (its user_id FK is already
+	// satisfiable), THEN point the user at it.
 	if _, err := f.Store.UpsertCharacter(ctx, gen.UpsertCharacterParams{
 		CharacterID: characterID,
 		UserID:      uuid.NullUUID{UUID: user.UserID, Valid: true},
@@ -201,6 +247,9 @@ func (f *Flow) resolveUser(ctx context.Context, characterID int64, claims *jwks.
 		OwnerHash:   claims.Owner,
 	}); err != nil {
 		return uuid.UUID{}, false, fmt.Errorf("sso: resolving user: upserting character: %w", err)
+	}
+	if err := f.Store.SetUserMainCharacter(ctx, user.UserID, &characterID); err != nil {
+		return uuid.UUID{}, false, fmt.Errorf("sso: resolving user: setting main character: %w", err)
 	}
 	return user.UserID, true, nil
 }

@@ -251,23 +251,50 @@ func fittingEFTHandler(deps api.Deps) func(context.Context, *SubIDIn) (*EFTOut, 
 		if err != nil {
 			return nil, api.Internal("listing fitting items", err)
 		}
-		text := renderEFT(*fitting, items)
-		return &EFTOut{Body: text}, nil
+		// PHASE 15.1: resolve type ids to real names via the SDE. Phase 15
+		// rendered `[<type_id>]` placeholders because no name lookup query
+		// existed — EFT is a text format players paste into a real fitting
+		// tool, and a numeric id there is not a fitting.
+		wanted := make([]int32, 0, len(items)+1)
+		wanted = append(wanted, fitting.ShipTypeID)
+		for _, it := range items {
+			wanted = append(wanted, it.TypeID)
+		}
+		names := map[int32]string{}
+		if rows, err := deps.Store.ListSdeTypeNames(ctx, wanted); err == nil {
+			for _, r := range rows {
+				names[r.TypeID] = r.Name
+			}
+		}
+		// A lookup failure (no SDE imported yet) is not fatal: renderEFT
+		// falls back to the id placeholder per missing line rather than
+		// failing the whole export.
+		return &EFTOut{Body: renderEFT(*fitting, items, names)}, nil
 	}
 }
 
-// renderEFT builds a minimal EFT-format export. Module/item lines are
-// rendered as `[<type_id>]` rather than a resolved item name: this
-// handler has no SDE name-lookup wired in (internal/sde exists but no
-// type-name-by-id query was in scope for this phase's file list) — an
-// honest limitation, not a silent approximation, flagged in Phase 15's
-// closing report rather than faked with placeholder names.
-func renderEFT(fitting gen.AppCharacterFitting, items []gen.AppCharacterFittingItem) string {
-	out := "[" + itoa(int64(fitting.ShipTypeID)) + ", " + fitting.Name + "]\n"
+// renderEFT builds an EFT-format export. `names` maps type ids to SDE
+// names (Phase 15.1 — see ListSdeTypeNames); a type missing from it falls
+// back to a `[<type_id>]` placeholder for that line only, which is what
+// happens on an installation that has never run an SDE import. The header
+// line is EFT's `[<ship>, <fitting name>]`.
+func renderEFT(fitting gen.AppCharacterFitting, items []gen.AppCharacterFittingItem, names map[int32]string) string {
+	out := "[" + typeLabel(fitting.ShipTypeID, names) + ", " + fitting.Name + "]\n"
 	for _, it := range items {
-		out += "[" + itoa(int64(it.TypeID)) + "] x" + itoa(it.Quantity) + "\n"
+		line := typeLabel(it.TypeID, names)
+		if it.Quantity > 1 {
+			line += " x" + itoa(it.Quantity)
+		}
+		out += line + "\n"
 	}
 	return out
+}
+
+func typeLabel(typeID int32, names map[int32]string) string {
+	if n, ok := names[typeID]; ok && n != "" {
+		return n
+	}
+	return "[" + itoa(int64(typeID)) + "]"
 }
 
 func itoa(n int64) string {
