@@ -253,12 +253,9 @@ func (q *Queries) InsertSyntheticLedgerEntry(ctx context.Context, rateLimitGroup
 }
 
 const listLedgerBuckets = `-- name: ListLedgerBuckets :many
-
 SELECT rate_limit_group, user_key, max_tokens, "window", server_remaining, server_observed_at, updated_at FROM app.esi_ledger_bucket
 `
 
-// ---- solo/clustered mode flush (§5.6 — both transitions must not lose or
-// double-count entries) ----
 // clustered -> solo: enumerate every bucket the shared table knows about so
 // the fast path can be primed for all of them before it engages, not just
 // the one the next request happens to touch.
@@ -279,6 +276,102 @@ func (q *Queries) ListLedgerBuckets(ctx context.Context) ([]AppEsiLedgerBucket, 
 			&i.ServerRemaining,
 			&i.ServerObservedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLedgerDivergence = `-- name: ListLedgerDivergence :many
+
+SELECT b.rate_limit_group,
+       b.user_key,
+       b.max_tokens,
+       b."window",
+       b.server_remaining,
+       b.server_observed_at,
+       b.updated_at,
+       coalesce(e.local_consumed, 0)::bigint AS local_consumed,
+       greatest(b.max_tokens - coalesce(e.local_consumed, 0), 0)::bigint AS local_remaining
+  FROM app.esi_ledger_bucket b
+  LEFT JOIN (
+        SELECT rate_limit_group, user_key, sum(cost)::bigint AS local_consumed
+          FROM app.esi_ledger_entry
+         GROUP BY rate_limit_group, user_key
+       ) e
+    ON e.rate_limit_group = b.rate_limit_group AND e.user_key = b.user_key
+ ORDER BY b.rate_limit_group, b.user_key
+`
+
+type ListLedgerDivergenceRow struct {
+	RateLimitGroup   string
+	UserKey          string
+	MaxTokens        int32
+	Window           time.Duration
+	ServerRemaining  *int32
+	ServerObservedAt *time.Time
+	UpdatedAt        time.Time
+	LocalConsumed    int64
+	LocalRemaining   int64
+}
+
+// ---- solo/clustered mode flush (§5.6 — both transitions must not lose or
+// double-count entries) ----
+// PHASE 18 — the rate-limit dashboard's own query (roadmap Phase 18 edge
+// case: "surface esi_ledger_divergence prominently: sustained divergence
+// is the early warning for a Gate 1 failure").
+//
+// `esi_ledger_divergence` is named in 01_ARCHITECTURE.md §16 and
+// 04_RELEASE_GATES.md §1.3 as a PROMETHEUS metric, and no metric surface
+// exists yet (internal/telemetry/metrics.go is a bare registry; the metric
+// set is Phase 20's, alongside the gate harnesses that read it). The
+// dashboard cannot wait for that and cannot derive divergence from
+// ListLedgerBuckets either: the bucket row carries the SERVER's reading
+// (server_remaining) but local headroom lives in app.esi_ledger_entry, so
+// the two have to be brought together, which is what this does.
+//
+// Definitions match internal/esi/ratelimit's reconciler exactly:
+//
+//	local_consumed  = sum of live entry costs in this bucket
+//	local_remaining = max_tokens - local_consumed, floored at zero
+//
+// Gate 1.3's threshold is max(|local_remaining - server_remaining|) <= 1
+// per group.
+//
+// The subtraction itself is deliberately NOT done here. server_remaining
+// is nullable — the server has said nothing about this bucket yet — and
+// sqlc's static analysis types `abs(... - b.server_remaining)` as a
+// non-null bigint however the expression is cast or wrapped, so scanning a
+// genuine NULL would fail at runtime. Collapsing "never observed" into
+// "zero divergence" to dodge that would be the exact empty-versus-
+// unavailable confusion SRS §6 forbids: zero divergence is a healthy
+// reading, no reading is not. The two operands come back typed (int64 and
+// *int32) and internal/api/v1 does the subtraction where the nil case is
+// explicit.
+func (q *Queries) ListLedgerDivergence(ctx context.Context) ([]ListLedgerDivergenceRow, error) {
+	rows, err := q.db.Query(ctx, listLedgerDivergence)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLedgerDivergenceRow
+	for rows.Next() {
+		var i ListLedgerDivergenceRow
+		if err := rows.Scan(
+			&i.RateLimitGroup,
+			&i.UserKey,
+			&i.MaxTokens,
+			&i.Window,
+			&i.ServerRemaining,
+			&i.ServerObservedAt,
+			&i.UpdatedAt,
+			&i.LocalConsumed,
+			&i.LocalRemaining,
 		); err != nil {
 			return nil, err
 		}

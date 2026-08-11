@@ -635,7 +635,7 @@ ON CONFLICT (type) DO UPDATE
    SET last_seen_at = now(), occurrences = app.notification_unknown_type.occurrences + 1
 `
 
-func (q *Queries) RecordUnknownNotificationType(ctx context.Context, type_ string, samplePayload []byte) error {
+func (q *Queries) RecordUnknownNotificationType(ctx context.Context, type_ string, samplePayload json.RawMessage) error {
 	_, err := q.db.Exec(ctx, recordUnknownNotificationType, type_, samplePayload)
 	return err
 }

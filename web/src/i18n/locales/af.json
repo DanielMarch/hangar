@@ -207,5 +207,198 @@
     "applications": {
       "pending": "Hangende aansoeke"
     }
+  },
+  "admin": {
+    "acknowledge": "Erken",
+    "tabs": {
+      "sync": "Sinkronisasie",
+      "routes": "Roetekatalogus",
+      "esi": "Versoenbaarheidspen",
+      "rateLimits": "Tempoperke",
+      "replicas": "Replikas",
+      "scopes": "Onbekende bestekke",
+      "platforms": "Platforms",
+      "alerts": "Waarskuwings",
+      "users": "Gebruikers",
+      "security": "Sekuriteitslog"
+    },
+    "sync": {
+      "totalRoutes": "Roetes ingeneem",
+      "schedulableRoutes": "Skeduleerbaar",
+      "blockedRoutes": "Deur pen geblokkeer",
+      "compatibilityPin": "Versoenbaarheidspen",
+      "dMaxLabel": "Bogrens (D_max)",
+      "dMaxRecorded": "uit laaste inname",
+      "dMaxFallback": "omslagterugval",
+      "subscriptionsHeading": "Sinkronisasie-intekeninge"
+    },
+    "routes": {
+      "heading": "ESI-roetekatalogus",
+      "method": "Metode",
+      "path": "Pad",
+      "operationId": "Operasie",
+      "compatibilityDate": "Versoenbaarheidsdatum",
+      "blocked": "Geblokkeer",
+      "cacheMode": "Kasmodus",
+      "rateLimitGroup": "Tempoperkgroep",
+      "pagination": "Bladsying",
+      "identifierTypes": "Identifiseerdertipes",
+      "specFragment": "Spesifikasiefragment",
+      "noValue": "Nie aangeteken nie"
+    },
+    "esi": {
+      "blockedHeading": "Roetes wat deur die versoenbaarheidspen geblokkeer word",
+      "pinHistoryHeading": "Geskiedenis van pen-skuiwe",
+      "pinHistory": {
+        "advancedAt": "Geskuif op",
+        "oldPin": "Vanaf",
+        "newPin": "Na",
+        "actor": "Akteur",
+        "diff": "Roeteverskil",
+        "diffNotRecorded": "Nie aangeteken nie",
+        "diffSummary": "+{{unblocked}} oopgemaak / −{{blocked}} geblokkeer"
+      }
+    },
+    "pin": {
+      "heading": "Skuif die versoenbaarheidspen",
+      "current": "Tans op {{date}} vasgepen",
+      "candidateLabel": "Teikendatum",
+      "candidatePlaceholder": "JJJJ-MM-DD",
+      "preview": "Voorskou",
+      "previewing": "Bereken…",
+      "previewFailed": "Die voorskou kon nie bereken word nie.",
+      "stalePreview": "Die datum het verander. Doen weer 'n voorskou voordat jy skuif.",
+      "outOfRange": "{{candidate}} is nuwer as D_max ({{dMax}}). ESI het dit nie gepubliseer nie, so die bediener sal weier.",
+      "confirmLabel": "Ek het die roeteverskil hierbo gelees en wil die pen skuif.",
+      "advance": "Skuif die pen",
+      "advancing": "Besig om te skuif…",
+      "advanced": "Pen na {{date}} geskuif.",
+      "advanceFailed": "Die pen kon nie geskuif word nie.",
+      "dMax": "D_max {{date}}",
+      "noRoutesChange": "Geen roete verander nie. Al {{count}} roetes behou hul huidige toestand.",
+      "newlyUnblocked": "Nuut oopgemaak ({{count}})",
+      "newlyBlocked": "Nuut geblokkeer ({{count}})",
+      "none": "Geen"
+    },
+    "rateLimits": {
+      "heading": "Grootboekemmers",
+      "group": "Groep",
+      "userKey": "Gebruikersleutel",
+      "maxTokens": "Maks. tekens",
+      "localRemaining": "Plaaslik oor",
+      "serverRemaining": "Bediener oor",
+      "divergence": "Afwyking",
+      "serverObservedAt": "Bediener waargeneem",
+      "worstDivergence": "Grootste afwyking",
+      "notObserved": "Nie waargeneem nie",
+      "gateHint": "Gate 1 laat hoogstens {{tolerance}} versoek se afwyking per groep toe.",
+      "bucketsBreaching": "Emmers buite toleransie",
+      "bucketsBreachingHint": "Volgehoue afwyking is 'n vroeë Gate 1-mislukking.",
+      "bucketsUnobserved": "Emmers nooit waargeneem nie",
+      "bucketsUnobservedHint": "Nog geen tempoperk-kopstuk is hiervoor gesien nie."
+    },
+    "errorLimit": {
+      "heading": "ESI-foutbegroting",
+      "errorCount": "Foute in venster",
+      "windowStart": "Venster begin",
+      "paused": "Poort",
+      "pausedYes": "Gepouseer",
+      "pausedNo": "Aktief"
+    },
+    "replicas": {
+      "heading": "Lewendige replikas",
+      "modeLabel": "Grootboekmodus",
+      "modeSolo": "Alleen",
+      "modeClustered": "Getros",
+      "liveCount": "Lewendige replikas",
+      "derivedNote": "Die grootboekmodus word afgelei uit die aantal lewendige replikas en word nooit met die hand gestel nie."
+    },
+    "scopes": {
+      "heading": "Bestekke wat erkenning afwag",
+      "scope": "Bestek",
+      "firstSeen": "Eerste gesien",
+      "action": "Aksie"
+    },
+    "alerts": {
+      "deadLetterHeading": "Dooiebrief-aflewerings",
+      "unknownTypesHeading": "Kennisgewingtipes wat erkenning afwag",
+      "createdAt": "Geskep",
+      "alertType": "Waarskuwing",
+      "channel": "Kanaalsoort",
+      "channelName": "Kanaal",
+      "attempts": "Pogings",
+      "lastAttempt": "Laaste poging",
+      "lastError": "Laaste fout",
+      "action": "Aksie",
+      "requeue": "Weer in ry plaas",
+      "type": "Tipe",
+      "firstSeen": "Eerste gesien",
+      "lastSeen": "Laaste gesien",
+      "occurrences": "Voorkomste",
+      "sample": "Loonvrag",
+      "viewSample": "Bekyk",
+      "noSample": "Geen voorbeeldloonvrag is aangeteken nie."
+    },
+    "platforms": {
+      "heading": "Voorsieningsplatforms",
+      "name": "Naam",
+      "kind": "Soort",
+      "enabled": "Geaktiveer",
+      "lockdown": "Status",
+      "lockedDown": "Gevries",
+      "live": "Aktief",
+      "lock": "Vries voorsiening",
+      "unlock": "Hervat voorsiening",
+      "reasonPlaceholder": "Rede vir die vries"
+    },
+    "rules": {
+      "heading": "Regte-reëls",
+      "add": "Voeg reël by",
+      "noGroups": "Hierdie platform het geen groepe om toe te ken nie.",
+      "empty": "Geen reëls nie. Almal verloor elke groep op hierdie platform.",
+      "sourceKind": "Bron",
+      "sourceRef": "Verwysing",
+      "group": "Groep",
+      "effect": "Uitwerking",
+      "remove": "Verwyder reël",
+      "preview": "Voorskou",
+      "previewing": "Bereken…",
+      "previewFailed": "Die voorskou kon nie bereken word nie.",
+      "stalePreview": "Die reëls het verander. Doen weer 'n voorskou voordat jy stoor.",
+      "save": "Stoor reëls",
+      "saving": "Besig om te stoor…",
+      "saved": "Reëls gestoor.",
+      "saveFailed": "Die reëls kon nie gestoor word nie.",
+      "mustPreview": "Doen 'n voorskou en bevestig voordat jy stoor.",
+      "confirmLabel": "Ek het die uitwerking hierbo gelees en wil hierdie reëls stoor.",
+      "losing": "{{count}} gebruikers verloor 'n groep",
+      "gaining": "{{count}} gebruikers kry 'n groep",
+      "noUsersAffected": "Geen gebruiker se groepe verander onder hierdie reëls nie."
+    },
+    "exposures": {
+      "heading": "Blootstellingsbord",
+      "kind": "Soort",
+      "pending": "Hangend",
+      "mismatched": "Wanpassend",
+      "user": "Gebruiker",
+      "action": "Aksie",
+      "reason": "Rede",
+      "eventAt": "Gebeurtenis om",
+      "age": "Ouderdom",
+      "noAge": "—"
+    },
+    "users": {
+      "heading": "Gebruikers"
+    },
+    "security": {
+      "heading": "Sekuriteitslog",
+      "filterByUser": "Filtreer volgens gebruiker",
+      "userIdPlaceholder": "Gebruiker-UUID",
+      "occurredAt": "Wanneer",
+      "action": "Aksie",
+      "actor": "Akteur",
+      "target": "Teiken",
+      "ip": "IP"
+    }
   }
 }

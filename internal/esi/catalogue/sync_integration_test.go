@@ -175,6 +175,18 @@ func TestBootSeedsPinAndIngestsLive(t *testing.T) {
 
 // TestAdvancePinRecordsHistory — AdvancePin is the only path that changes
 // the pin, and every advance is recorded in app.esi_pin_history.
+//
+// PHASE 18 ([v3.1 — B13]). Updated for AdvancePin's new signature and its
+// new server-side D_max bound. Two changes, both of which the old form
+// depended on the absence of:
+//
+//   - `now` is fixed and D_max is seeded, rather than the test advancing
+//     to a hardcoded 2026-09-01 and relying on nothing checking it. That
+//     date is in the FUTURE relative to the pin, so with the bound in
+//     place it is correctly refused — and a test pinned to a wall-clock
+//     date would in any case have started failing on its own once real
+//     time passed it.
+//   - The diff is computed by AdvancePin rather than passed in as nil.
 func TestAdvancePinRecordsHistory(t *testing.T) {
 	s := newMigratedStore(t)
 	ctx := context.Background()
@@ -183,9 +195,14 @@ func TestAdvancePinRecordsHistory(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, catalogue.DefaultCompatibilityPin, catalogue.FormatDate(initial))
 
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	dMax, err := catalogue.ParseDate("2026-09-01")
+	require.NoError(t, err)
+	require.NoError(t, catalogue.SetDMax(ctx, s, dMax))
+
 	newPin, err := catalogue.ParseDate("2026-09-01")
 	require.NoError(t, err)
-	rec, err := catalogue.AdvancePin(ctx, s, newPin, "operator:test-admin", nil)
+	rec, _, err := catalogue.AdvancePin(ctx, s, newPin, "operator:test-admin", now)
 	require.NoError(t, err)
 	require.Equal(t, "operator:test-admin", rec.Actor)
 	require.Equal(t, "2026-09-01", catalogue.FormatDate(rec.NewPin.Time))

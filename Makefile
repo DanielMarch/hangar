@@ -166,6 +166,25 @@ web-ci:
 	@if [ -d web/node_modules ]; then cd web && pnpm run ci; \
 	else $(call skip,web-ci,web/node_modules absent); fi
 
+# ── e2e (Phase 18) ───────────────────────────────────────────────────────────
+# `@playwright/test` and a `pnpm run e2e` script were dependencies from Phase 0
+# with NO suite behind them and no phase owning one — which is why Phase 17 had
+# to verify its 60fps criterion by proxy rather than by measurement. Phase 18
+# wires up a deliberately SMALL suite: the two confirmation flows this phase
+# introduces (pin advance, entitlement rule editor), which are exactly what
+# jsdom verifies weakly. It is NOT a retrofit of e2e coverage over Phases 16-17.
+#
+# Guarded on HANGAR_DB_URL the same way check-identifiers is: the suite runs the
+# real binary against a real, seeded, THROWAWAY Postgres — web/e2e/global-setup
+# .ts migrates and seeds it, and it will happily rewrite app.setting's
+# compatibility pin. Never point this at a database with data in it.
+.PHONY: e2e
+e2e: ## (Phase 18) Playwright: the pin-advance and rule-editor confirmation flows
+	@if [ -d web/node_modules ] && [ -n "$${HANGAR_DB_URL:-}" ]; then \
+	  cd web && pnpm exec playwright install --with-deps chromium >/dev/null 2>&1 || true; \
+	  pnpm run e2e; \
+	else $(call skip,e2e,needs web/node_modules and a reachable throwaway HANGAR_DB_URL); fi
+
 # ── invariant gates (see docs/04_RELEASE_GATES.md) ────────────────────────────
 # Each guards on the phase artefact that makes it meaningful.
 .PHONY: check-money check-identifiers check-alert-sources check-locales check-css check-no-ice check-static-binary
@@ -208,7 +227,7 @@ check-static-binary: ## §9.2 (Phase 0) — TestStaticBinaryHasNoDynamicLinks: l
 
 # ── composite ────────────────────────────────────────────────────────────────
 .PHONY: ci ci-strict
-ci: verify-generated lint test web-ci check-money check-identifiers check-alert-sources check-locales check-css check-no-ice check-static-binary ## Phase 0 exit criterion; strengthens automatically as phases land
+ci: verify-generated lint test web-ci e2e check-money check-identifiers check-alert-sources check-locales check-css check-no-ice check-static-binary ## Phase 0 exit criterion; strengthens automatically as phases land
 
 ci-strict: ## Same, but a skipped check is a failure. CI uses this from Phase 15 and on every release tag.
 	$(MAKE) ci STRICT=1

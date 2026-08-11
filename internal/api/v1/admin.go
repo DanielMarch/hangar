@@ -23,6 +23,8 @@ package v1
 
 import (
 	"context"
+	"crypto/subtle"
+	"errors"
 	"net/http"
 	"time"
 
@@ -34,6 +36,7 @@ import (
 	apimw "github.com/hangar-project/hangar/internal/api/middleware"
 	"github.com/hangar-project/hangar/internal/domain"
 	"github.com/hangar-project/hangar/internal/esi/catalogue"
+	"github.com/hangar-project/hangar/internal/provisioning/entitlement"
 	"github.com/hangar-project/hangar/internal/rbac"
 	"github.com/hangar-project/hangar/internal/store/gen"
 )
@@ -63,7 +66,30 @@ func registerAdmin(hapi huma.API, deps api.Deps) {
 		func(ctx context.Context, _ *EmptyIn) (*ItemOut, error) {
 			blocked, _ := deps.Store.ListBlockedEsiRoutes(ctx)
 			all, _ := deps.Store.ListEsiRoutes(ctx)
-			data := map[string]any{"total_routes": len(all), "blocked_routes": len(blocked)}
+			schedulable, _ := deps.Store.ListSchedulableEsiRoutes(ctx)
+			data := map[string]any{
+				"total_routes":       len(all),
+				"blocked_routes":     len(blocked),
+				"schedulable_routes": len(schedulable),
+			}
+			// PHASE 18. The pin and its ceiling belong on the health card:
+			// the Sync Health screen and the pin-advance flow both need
+			// them, and neither was reachable without a second endpoint that
+			// SRS §6.8 does not define. Reported as null rather than omitted
+			// when unresolvable, so "no pin" is distinguishable from "this
+			// build does not report one".
+			if pin, err := catalogue.GetPin(ctx, deps.Store); err == nil {
+				data["compatibility_pin"] = catalogue.FormatDate(pin)
+			} else {
+				data["compatibility_pin"] = nil
+			}
+			if dMax, source, err := catalogue.GetDMax(ctx, deps.Store, time.Now()); err == nil {
+				data["d_max"] = catalogue.FormatDate(dMax)
+				data["d_max_source"] = source
+			} else {
+				data["d_max"] = nil
+				data["d_max_source"] = nil
+			}
 			return &ItemOut{Body: api.Item[map[string]any]{Data: &data, Sync: api.Sync{}}}, nil
 		})
 
@@ -76,17 +102,30 @@ func registerAdmin(hapi huma.API, deps api.Deps) {
 			data := rowSliceOf(rows)
 			return &CollectionOut{Body: api.Collection[map[string]any]{Data: data, Page: api.EmptyPage(int32(len(data))), Sync: api.Sync{}}}, nil
 		})
+	// PREVIEW FIRST, and registered first so the OpenAPI document reads in
+	// the order the operation is meant to be used ([v3.1 — B13], SRS §6.8).
+	// The preview is non-mutating: it computes the route diff for a
+	// candidate date and touches neither app.setting nor
+	// app.esi_pin_history. It is what makes Principle 12 honest — an
+	// administrator sees the diff BEFORE the pin moves, which one mutating
+	// endpoint cannot provide.
+	//
+	// It is gated on the same permission as the advance rather than on the
+	// broader admin.esi.view: a preview enumerates exactly which routes an
+	// advance would turn on, which is the pin operator's business.
+	mutate[PreviewPinIn, PinPreviewOut](hapi, deps, http.MethodPost, "admin.esi_pin.advance", "/api/v1/admin/esi/catalogue/pin/preview", "admin-esi-pin-preview", "Preview the route diff for a candidate compatibility date (non-mutating)", adminTag, previewPinHandler(deps))
 	mutate[AdvancePinIn, ItemOut](hapi, deps, http.MethodPost, "admin.esi_pin.advance", "/api/v1/admin/esi/catalogue/pin", "admin-esi-pin-advance", "Advance the ESI compatibility date pin", adminTag, advancePinHandler(deps))
-
-	get[EmptyIn, CollectionOut](hapi, deps, "admin.esi.view", "/api/v1/admin/esi/ratelimits", "admin-esi-ratelimits", "Rate limit ledger buckets", adminTag,
+	get[EmptyIn, CollectionOut](hapi, deps, "admin.esi.view", "/api/v1/admin/esi/catalogue/pin/history", "admin-esi-pin-history", "Compatibility pin advance history, with the recorded route diff", adminTag,
 		func(ctx context.Context, _ *EmptyIn) (*CollectionOut, error) {
-			rows, err := deps.Store.ListLedgerBuckets(ctx)
+			rows, err := deps.Store.ListEsiPinHistory(ctx, api.MaxLimit)
 			if err != nil {
-				return nil, api.Internal("listing ledger buckets", err)
+				return nil, api.Internal("listing pin history", err)
 			}
 			data := rowSliceOf(rows)
 			return &CollectionOut{Body: api.Collection[map[string]any]{Data: data, Page: api.EmptyPage(int32(len(data))), Sync: api.Sync{}}}, nil
 		})
+
+	get[EmptyIn, CollectionOut](hapi, deps, "admin.esi.view", "/api/v1/admin/esi/ratelimits", "admin-esi-ratelimits", "Rate limit ledger buckets, with per-bucket ledger divergence", adminTag, ledgerDivergenceHandler(deps))
 	// PHASE 15.1: really wired. Phase 15 answered "unavailable" here on the
 	// belief that the error budget was only reachable through
 	// internal/esi/ratelimit's in-process cache. It is not — Governor2's
@@ -124,10 +163,51 @@ func registerAdmin(hapi huma.API, deps api.Deps) {
 			data := rowSliceOf(rows)
 			return &CollectionOut{Body: api.Collection[map[string]any]{Data: data, Page: api.EmptyPage(int32(len(data))), Sync: api.Sync{}}}, nil
 		})
+	// PHASE 18 — the rule editor's read side. The editor needs both the
+	// platform's groups (to offer as rule targets) and its current rule
+	// set (to edit); neither was reachable over the API.
+	get[UUIDIn, CollectionOut](hapi, deps, "provisioning.entitlements.manage", "/api/v1/admin/platforms/{id}/groups", "admin-platform-groups", "Groups one platform offers as entitlement targets", adminTag,
+		func(ctx context.Context, in *UUIDIn) (*CollectionOut, error) {
+			platformID, err := parseUUID(in.ID)
+			if err != nil {
+				return nil, huma.Error400BadRequest("malformed platform id")
+			}
+			rows, err := deps.Store.ListPlatformGroups(ctx, platformID)
+			if err != nil {
+				return nil, api.Internal("listing platform groups", err)
+			}
+			data := rowSliceOf(rows)
+			return &CollectionOut{Body: api.Collection[map[string]any]{Data: data, Page: api.EmptyPage(int32(len(data))), Sync: api.Sync{}}}, nil
+		})
+	get[UUIDIn, CollectionOut](hapi, deps, "provisioning.entitlements.manage", "/api/v1/admin/platforms/{id}/rules", "admin-platform-rules", "Current entitlement rule set for one platform", adminTag,
+		func(ctx context.Context, in *UUIDIn) (*CollectionOut, error) {
+			platformID, err := parseUUID(in.ID)
+			if err != nil {
+				return nil, huma.Error400BadRequest("malformed platform id")
+			}
+			rows, err := deps.Store.ListEntitlementRulesForPlatform(ctx, platformID)
+			if err != nil {
+				return nil, api.Internal("listing entitlement rules", err)
+			}
+			data := rowSliceOf(rows)
+			return &CollectionOut{Body: api.Collection[map[string]any]{Data: data, Page: api.EmptyPage(int32(len(data))), Sync: api.Sync{}}}, nil
+		})
 	mutate[RulesPreviewIn, RulesPreviewOut](hapi, deps, http.MethodPost, "provisioning.entitlements.manage", "/api/v1/admin/platforms/{id}/rules/preview", "admin-platform-rules-preview", "Preview a hypothetical entitlement rule set", adminTag, rulesPreviewHandler(deps))
+	mutate[ReplaceRulesIn, RulesSavedOut](hapi, deps, http.MethodPut, "provisioning.entitlements.manage", "/api/v1/admin/platforms/{id}/rules", "admin-platform-rules-replace", "Replace one platform's entitlement rule set (requires a matching preview token)", adminTag, replacePlatformRulesHandler(deps))
 	mutate[LockdownIn, ItemOut](hapi, deps, http.MethodPost, "provisioning.platforms.manage", "/api/v1/admin/platforms/{id}/lockdown", "admin-platform-lockdown", "Freeze or unfreeze outbound provisioning for one platform", adminTag, lockdownHandler(deps))
 
-	get[UUIDIn, CollectionOut](hapi, deps, "provisioning.exposures.view", "/api/v1/admin/provisioning/exposures", "admin-provisioning-exposures", "Exposure board for one platform", adminTag, exposuresHandler(deps))
+	// PHASE 18 DEFECT CLOSURE. This was registered with UUIDIn, whose `id`
+	// is a PATH parameter — but SRS §6.8's path for this route carries no
+	// `{id}` segment, so Huma emitted a required path parameter that the
+	// path itself can never supply. in.ID was therefore always empty and
+	// exposuresHandler's parseUUID always failed: the exposure board
+	// answered 400 to every request that had ever been made to it. It is
+	// the subject of one of this phase's exit criteria
+	// (TestExposureBoardShowsExactAges), which is how it surfaced.
+	//
+	// The platform moves to a QUERY parameter rather than the path being
+	// changed, because §6.8's path is the contract and it has no segment.
+	get[ExposuresIn, CollectionOut](hapi, deps, "provisioning.exposures.view", "/api/v1/admin/provisioning/exposures", "admin-provisioning-exposures", "Exposure board for one platform", adminTag, exposuresHandler(deps))
 	get[EmptyIn, CollectionOut](hapi, deps, "provisioning.audit.view", "/api/v1/admin/provisioning/audit", "admin-provisioning-audit", "Recent provisioning audit", adminTag,
 		func(ctx context.Context, _ *EmptyIn) (*CollectionOut, error) {
 			rows, err := deps.Store.ListRecentProvisioningAudit(ctx, api.MaxLimit)
@@ -167,6 +247,26 @@ func registerAdmin(hapi huma.API, deps api.Deps) {
 			data := rowSliceOf(rows)
 			return &CollectionOut{Body: api.Collection[map[string]any]{Data: data, Page: api.EmptyPage(int32(len(data))), Sync: api.Sync{}}}, nil
 		})
+	// PHASE 18. The acknowledge half of the two unknown boards. Both
+	// AcknowledgeNotificationType and AcknowledgeEsiScope have existed as
+	// generated queries since Phases 14 and 2 respectively, and both
+	// permissions were in the closed vocabulary, but NO endpoint ever
+	// called either: the boards were readable and unclearable, so they grow
+	// without bound and get ignored — the exact failure the roadmap's edge
+	// case names. SRS §6.8's endpoint list does not enumerate these two
+	// routes; reported at the close of this phase rather than reconciled
+	// silently.
+	mutate[AcknowledgeTypeIn, EmptyOut](hapi, deps, http.MethodPost, "alerting.unknown_types.acknowledge", "/api/v1/admin/alerts/unknown-types/{type}/acknowledge", "admin-alerts-unknown-types-acknowledge", "Acknowledge one unrecognised notification type", adminTag,
+		func(ctx context.Context, in *AcknowledgeTypeIn) (*EmptyOut, error) {
+			if in.Type == "" {
+				return nil, huma.Error400BadRequest("empty type")
+			}
+			if err := deps.Store.AcknowledgeNotificationType(ctx, in.Type); err != nil {
+				return nil, api.Internal("acknowledging notification type", err)
+			}
+			auditAdminAction(ctx, deps, "admin.alerting.unknown_type_acknowledged", in.Type)
+			return &EmptyOut{}, nil
+		})
 
 	get[EmptyIn, CollectionOut](hapi, deps, "admin.scopes.view", "/api/v1/admin/scopes/unknown", "admin-scopes-unknown", "Newly observed scope strings pending acknowledgement", adminTag,
 		func(ctx context.Context, _ *EmptyIn) (*CollectionOut, error) {
@@ -176,6 +276,22 @@ func registerAdmin(hapi huma.API, deps api.Deps) {
 			}
 			data := rowSliceOf(rows)
 			return &CollectionOut{Body: api.Collection[map[string]any]{Data: data, Page: api.EmptyPage(int32(len(data))), Sync: api.Sync{}}}, nil
+		})
+	// PHASE 18 — see the note on the unknown-types acknowledge above. A
+	// scope string is opaque and may contain slashes and dots
+	// (Principle 14), so it travels in the BODY, not the path: an ESI scope
+	// like `esi-characters.read_titles.v1` in a path segment is at the
+	// mercy of every proxy's own idea of path normalisation.
+	mutate[AcknowledgeScopeIn, EmptyOut](hapi, deps, http.MethodPost, "admin.scopes.acknowledge", "/api/v1/admin/scopes/unknown/acknowledge", "admin-scopes-unknown-acknowledge", "Acknowledge one newly observed scope string", adminTag,
+		func(ctx context.Context, in *AcknowledgeScopeIn) (*EmptyOut, error) {
+			if in.Body.Scope == "" {
+				return nil, huma.Error400BadRequest("empty scope")
+			}
+			if err := deps.Store.AcknowledgeEsiScope(ctx, in.Body.Scope); err != nil {
+				return nil, api.Internal("acknowledging scope", err)
+			}
+			auditAdminAction(ctx, deps, "admin.scopes.acknowledged", in.Body.Scope)
+			return &EmptyOut{}, nil
 		})
 	get[EmptyIn, CollectionOut](hapi, deps, "admin.roles.manage", "/api/v1/admin/scopes", "admin-scopes", "RBAC roles/grants", adminTag,
 		func(ctx context.Context, _ *EmptyIn) (*CollectionOut, error) {
@@ -216,6 +332,25 @@ type AdvancePinIn struct {
 	}
 }
 
+// PreviewPinIn is POST /api/v1/admin/esi/catalogue/pin/preview's body. It
+// is a POST despite being non-mutating for the same reason the advance is:
+// the candidate date is a request body, and SRS §6.8 names the verb.
+type PreviewPinIn struct {
+	Body struct {
+		NewPin string `json:"new_pin" doc:"Candidate compatibility date, YYYY-MM-DD. Nothing is changed by previewing it."`
+	}
+}
+
+// PinPreviewOut carries the full both-directions route diff plus the D_max
+// bound the candidate was measured against, so a client can render both
+// "here is what changes" and "this date is beyond what ESI has published"
+// from one call.
+type PinPreviewOut struct {
+	Body struct {
+		Data catalogue.PinPreview `json:"data"`
+	}
+}
+
 type RulesPreviewIn struct {
 	ID   string `path:"id" format:"uuid"`
 	Body struct {
@@ -231,6 +366,33 @@ type RulesPreviewIn struct {
 type RulesPreviewOut struct {
 	Body struct {
 		Diffs []map[string]any `json:"diffs"`
+		// PreviewToken is what PUT .../rules requires back. See
+		// admin_provisioning.go's RuleSetPreviewToken: a save can only
+		// succeed for a rule set that was previewed, and editing any rule
+		// after previewing invalidates it.
+		PreviewToken string `json:"preview_token"`
+	}
+}
+
+// ReplaceRulesIn is PUT /api/v1/admin/platforms/{id}/rules — the COMPLETE
+// desired rule set (a replace, not a merge: anything absent is removed),
+// plus the token proving this exact set was previewed.
+type ReplaceRulesIn struct {
+	ID   string `path:"id" format:"uuid"`
+	Body struct {
+		Rules []struct {
+			SourceKind string `json:"source_kind"`
+			SourceRef  string `json:"source_ref"`
+			GroupID    string `json:"group_id" format:"uuid"`
+			Effect     string `json:"effect" enum:"grant,deny"`
+		} `json:"rules"`
+		PreviewToken string `json:"preview_token" doc:"The token POST .../rules/preview returned for this exact rule set. Required: a rule set that has not been previewed cannot be saved."`
+	}
+}
+
+type RulesSavedOut struct {
+	Body struct {
+		Rules []map[string]any `json:"rules"`
 	}
 }
 
@@ -275,7 +437,48 @@ type SecurityLogIn struct {
 	UserID string `query:"user_id,omitempty" format:"uuid"`
 }
 
+// ExposuresIn selects the platform whose exposure board to return. Query,
+// not path — see the registration comment.
+type ExposuresIn struct {
+	PlatformID string `query:"platform_id" format:"uuid" doc:"The platform whose exposure board to return."`
+}
+
+// AcknowledgeTypeIn acknowledges one unrecognised notification type. The
+// type name is a HANGAR-side identifier from ESI's notification `type`
+// field — alphanumeric in every observed case — so a path parameter is
+// safe here in a way it is not for a scope string.
+type AcknowledgeTypeIn struct {
+	Type string `path:"type" doc:"The unrecognised notification type, verbatim."`
+}
+
+// AcknowledgeScopeIn acknowledges one newly observed ESI scope string.
+// Body, not path — see the registration comment.
+type AcknowledgeScopeIn struct {
+	Body struct {
+		Scope string `json:"scope" doc:"The scope string, verbatim and unparsed (Principle 14)."`
+	}
+}
+
 // ---- handlers ----
+
+// previewPinHandler is POST /api/v1/admin/esi/catalogue/pin/preview — the
+// non-mutating half of the pin operation ([v3.1 — B13]). It reads the
+// current pin, D_max and the route set, and writes nothing.
+func previewPinHandler(deps api.Deps) func(context.Context, *PreviewPinIn) (*PinPreviewOut, error) {
+	return func(ctx context.Context, in *PreviewPinIn) (*PinPreviewOut, error) {
+		candidate, err := catalogue.ParseDate(in.Body.NewPin)
+		if err != nil {
+			return nil, huma.Error400BadRequest("malformed new_pin", err)
+		}
+		preview, err := catalogue.PreviewPin(ctx, deps.Store, candidate, time.Now())
+		if err != nil {
+			return nil, api.Internal("previewing pin advance", err)
+		}
+		out := &PinPreviewOut{}
+		out.Body.Data = preview
+		return out, nil
+	}
+}
 
 func advancePinHandler(deps api.Deps) func(context.Context, *AdvancePinIn) (*ItemOut, error) {
 	return func(ctx context.Context, in *AdvancePinIn) (*ItemOut, error) {
@@ -287,10 +490,28 @@ func advancePinHandler(deps api.Deps) func(context.Context, *AdvancePinIn) (*Ite
 		if userID, ok := userIDFromCtx(ctx); ok {
 			actor = userID.String()
 		}
-		row, err := catalogue.AdvancePin(ctx, deps.Store, newPin, actor, nil)
+		row, _, err := catalogue.AdvancePin(ctx, deps.Store, newPin, actor, time.Now())
 		if err != nil {
+			// A candidate newer than D_max is the administrator asking for
+			// something ESI has not published — a 422 on their input, not a
+			// 500 on ours. This is the server half of
+			// TestPinAdvanceRefusesDateNewerThanDMax; the client half cannot
+			// stand alone, since any direct API call bypasses it.
+			var oor *catalogue.OutOfRangeError
+			if errors.As(err, &oor) {
+				return nil, huma.Error422UnprocessableEntity(oor.Error())
+			}
 			return nil, api.Internal("advancing pin", err)
 		}
+		// Advancing the pin changes which routes the whole installation may
+		// call — audited like every other administrative action.
+		var actorID uuid.UUID
+		if userID, ok := userIDFromCtx(ctx); ok {
+			actorID = userID
+		}
+		target := catalogue.FormatDate(newPin)
+		_ = apimw.Audit(ctx, deps.Store, actorID, "admin.esi.pin_advanced", &target, "", map[string]any{"new_pin": target})
+
 		data := rowOf(row)
 		return &ItemOut{Body: api.Item[map[string]any]{Data: &data, Sync: api.Sync{}}}, nil
 	}
@@ -316,15 +537,125 @@ func rulesPreviewHandler(deps api.Deps) func(context.Context, *RulesPreviewIn) (
 		}
 		out := &RulesPreviewOut{}
 		out.Body.Diffs = rowSliceOf(diffs)
+		out.Body.PreviewToken = RuleSetPreviewToken(platformID, hypothetical)
 		return out, nil
 	}
 }
 
-func exposuresHandler(deps api.Deps) func(context.Context, *UUIDIn) (*CollectionOut, error) {
-	return func(ctx context.Context, in *UUIDIn) (*CollectionOut, error) {
+// replacePlatformRulesHandler is PUT /api/v1/admin/platforms/{id}/rules.
+// The preview-token check below is the SERVER half of
+// TestRuleEditorRequiresPreviewConfirmation: a rule set that was not
+// previewed — or was edited after being previewed — cannot be saved, by
+// any client, including one that never renders the editor at all.
+func replacePlatformRulesHandler(deps api.Deps) func(context.Context, *ReplaceRulesIn) (*RulesSavedOut, error) {
+	return func(ctx context.Context, in *ReplaceRulesIn) (*RulesSavedOut, error) {
 		platformID, err := parseUUID(in.ID)
 		if err != nil {
 			return nil, huma.Error400BadRequest("malformed platform id")
+		}
+		rules := make([]RuleInput, len(in.Body.Rules))
+		for i, r := range in.Body.Rules {
+			gid, err := parseUUID(r.GroupID)
+			if err != nil {
+				return nil, huma.Error422UnprocessableEntity("malformed group_id in rule " + itoa(int64(i)))
+			}
+			if !validSourceKinds[r.SourceKind] {
+				return nil, huma.Error422UnprocessableEntity("unknown source_kind: " + r.SourceKind)
+			}
+			if r.Effect != entitlement.EffectGrant && r.Effect != entitlement.EffectDeny {
+				return nil, huma.Error422UnprocessableEntity("effect must be grant or deny, got: " + r.Effect)
+			}
+			rules[i] = RuleInput{SourceKind: r.SourceKind, SourceRef: r.SourceRef, GroupID: gid, Effect: r.Effect}
+		}
+
+		if in.Body.PreviewToken == "" {
+			return nil, huma.Error422UnprocessableEntity(
+				"preview_token is required: preview this rule set before saving it — an unpreviewed rule set is how an accidental mass revocation happens")
+		}
+		want := RuleSetPreviewToken(platformID, rules)
+		if subtle.ConstantTimeCompare([]byte(in.Body.PreviewToken), []byte(want)) != 1 {
+			return nil, huma.Error422UnprocessableEntity(
+				"preview_token does not match these rules: the rule set changed since it was previewed — preview it again before saving")
+		}
+
+		if deps.Pool == nil {
+			return nil, api.Internal("replacing platform rules", huma.Error500InternalServerError("no transactional pool configured"))
+		}
+		saved, err := ReplacePlatformRules(ctx, deps.Pool, platformID, rules)
+		if err != nil {
+			return nil, api.Internal("replacing platform rules", err)
+		}
+		auditAdminAction(ctx, deps, "admin.provisioning.rules_replaced", platformID.String())
+
+		out := &RulesSavedOut{}
+		out.Body.Rules = rowSliceOf(saved)
+		return out, nil
+	}
+}
+
+// validSourceKinds mirrors internal/provisioning/entitlement's closed
+// Go-side set. Closed because these are HANGAR's OWN rule sources, not an
+// external vocabulary — Principle 14 does not apply.
+var validSourceKinds = map[string]bool{
+	entitlement.SourceUser:        true,
+	entitlement.SourceRole:        true,
+	entitlement.SourceCorporation: true,
+	entitlement.SourceAlliance:    true,
+	entitlement.SourceCorpTitle:   true,
+	entitlement.SourceSquad:       true,
+	entitlement.SourcePublic:      true,
+}
+
+// auditAdminAction records one administrative action against the
+// append-only security log. Best-effort by the same convention
+// lockdownHandler established: failing to audit must not fail the action
+// the operator asked for, and the error is not actionable by the caller.
+func auditAdminAction(ctx context.Context, deps api.Deps, action, target string) {
+	var actor uuid.UUID
+	if userID, ok := userIDFromCtx(ctx); ok {
+		actor = userID
+	}
+	_ = apimw.Audit(ctx, deps.Store, actor, action, &target, "", nil)
+}
+
+// ledgerDivergenceHandler is GET /api/v1/admin/esi/ratelimits. It answers
+// with one row per Governor 1 ledger bucket, each carrying the local and
+// server readings AND the divergence between them — the roadmap's Phase 18
+// edge case: "surface esi_ledger_divergence prominently: sustained
+// divergence is the early warning for a Gate 1 failure" (Gate 1.3's bar is
+// max(divergence) <= 1 per group).
+//
+// `divergence` is null, not zero, until the server has been heard from for
+// that bucket. Zero divergence is a healthy reading; no reading is not a
+// reading, and collapsing them would hide a bucket whose headers have
+// stopped arriving behind a wall of reassuring zeroes.
+func ledgerDivergenceHandler(deps api.Deps) func(context.Context, *EmptyIn) (*CollectionOut, error) {
+	return func(ctx context.Context, _ *EmptyIn) (*CollectionOut, error) {
+		rows, err := deps.Store.ListLedgerDivergence(ctx)
+		if err != nil {
+			return nil, api.Internal("listing ledger divergence", err)
+		}
+		data := rowSliceOf(rows)
+		for i, r := range rows {
+			if r.ServerRemaining == nil {
+				data[i]["divergence"] = nil
+				continue
+			}
+			d := r.LocalRemaining - int64(*r.ServerRemaining)
+			if d < 0 {
+				d = -d
+			}
+			data[i]["divergence"] = d
+		}
+		return &CollectionOut{Body: api.Collection[map[string]any]{Data: data, Page: api.EmptyPage(int32(len(data))), Sync: api.Sync{}}}, nil
+	}
+}
+
+func exposuresHandler(deps api.Deps) func(context.Context, *ExposuresIn) (*CollectionOut, error) {
+	return func(ctx context.Context, in *ExposuresIn) (*CollectionOut, error) {
+		platformID, err := parseUUID(in.PlatformID)
+		if err != nil {
+			return nil, huma.Error400BadRequest("malformed or missing platform_id")
 		}
 		board, err := GetExposureBoard(ctx, deps.Store, platformID)
 		if err != nil {

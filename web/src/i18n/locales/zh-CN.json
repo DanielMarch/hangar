@@ -207,5 +207,198 @@
     "applications": {
       "pending": "待处理申请"
     }
+  },
+  "admin": {
+    "acknowledge": "确认",
+    "tabs": {
+      "sync": "同步状态",
+      "routes": "路由目录",
+      "esi": "兼容性锁定",
+      "rateLimits": "速率限制",
+      "replicas": "副本",
+      "scopes": "未知权限范围",
+      "platforms": "平台",
+      "alerts": "告警",
+      "users": "用户",
+      "security": "安全日志"
+    },
+    "sync": {
+      "totalRoutes": "已导入路由",
+      "schedulableRoutes": "可调度",
+      "blockedRoutes": "被锁定阻断",
+      "compatibilityPin": "兼容性锁定日期",
+      "dMaxLabel": "上限 (D_max)",
+      "dMaxRecorded": "来自上次导入",
+      "dMaxFallback": "翻转回退值",
+      "subscriptionsHeading": "同步订阅"
+    },
+    "routes": {
+      "heading": "ESI 路由目录",
+      "method": "方法",
+      "path": "路径",
+      "operationId": "操作",
+      "compatibilityDate": "兼容性日期",
+      "blocked": "已阻断",
+      "cacheMode": "缓存模式",
+      "rateLimitGroup": "速率限制组",
+      "pagination": "分页方式",
+      "identifierTypes": "标识符类型",
+      "specFragment": "规范片段",
+      "noValue": "未记录"
+    },
+    "esi": {
+      "blockedHeading": "被兼容性锁定阻断的路由",
+      "pinHistoryHeading": "锁定变更历史",
+      "pinHistory": {
+        "advancedAt": "变更时间",
+        "oldPin": "原值",
+        "newPin": "新值",
+        "actor": "操作者",
+        "diff": "路由差异",
+        "diffNotRecorded": "未记录",
+        "diffSummary": "+{{unblocked}} 开放 / −{{blocked}} 阻断"
+      }
+    },
+    "pin": {
+      "heading": "推进兼容性锁定日期",
+      "current": "当前锁定于 {{date}}",
+      "candidateLabel": "目标日期",
+      "candidatePlaceholder": "YYYY-MM-DD",
+      "preview": "预览",
+      "previewing": "计算中…",
+      "previewFailed": "无法计算预览。",
+      "stalePreview": "日期已更改，请重新预览后再推进。",
+      "outOfRange": "{{candidate}} 晚于 D_max（{{dMax}}）。ESI 尚未发布该日期，服务器将拒绝。",
+      "confirmLabel": "我已阅读上方的路由差异，确认移动锁定日期。",
+      "advance": "推进锁定日期",
+      "advancing": "推进中…",
+      "advanced": "锁定日期已推进至 {{date}}。",
+      "advanceFailed": "无法推进锁定日期。",
+      "dMax": "D_max {{date}}",
+      "noRoutesChange": "没有路由发生变化，全部 {{count}} 条路由保持当前状态。",
+      "newlyUnblocked": "新开放（{{count}}）",
+      "newlyBlocked": "新阻断（{{count}}）",
+      "none": "无"
+    },
+    "rateLimits": {
+      "heading": "账本桶",
+      "group": "分组",
+      "userKey": "用户键",
+      "maxTokens": "最大令牌",
+      "localRemaining": "本地剩余",
+      "serverRemaining": "服务端剩余",
+      "divergence": "偏差",
+      "serverObservedAt": "服务端观测时间",
+      "worstDivergence": "最大偏差",
+      "notObserved": "未观测",
+      "gateHint": "Gate 1 每组最多允许 {{tolerance}} 个请求的偏差。",
+      "bucketsBreaching": "超出容差的桶",
+      "bucketsBreachingHint": "持续偏差是 Gate 1 失败的先兆。",
+      "bucketsUnobserved": "从未观测的桶",
+      "bucketsUnobservedHint": "尚未收到这些桶的速率限制响应头。"
+    },
+    "errorLimit": {
+      "heading": "ESI 错误预算",
+      "errorCount": "窗口内错误数",
+      "windowStart": "窗口开始",
+      "paused": "网关",
+      "pausedYes": "已暂停",
+      "pausedNo": "运行中"
+    },
+    "replicas": {
+      "heading": "在线副本",
+      "modeLabel": "账本模式",
+      "modeSolo": "单机",
+      "modeClustered": "集群",
+      "liveCount": "在线副本数",
+      "derivedNote": "账本模式由在线副本数推导得出，绝不手动设置。"
+    },
+    "scopes": {
+      "heading": "待确认的权限范围",
+      "scope": "权限范围",
+      "firstSeen": "首次出现",
+      "action": "操作"
+    },
+    "alerts": {
+      "deadLetterHeading": "死信投递",
+      "unknownTypesHeading": "待确认的通知类型",
+      "createdAt": "创建时间",
+      "alertType": "告警",
+      "channel": "通道类型",
+      "channelName": "通道",
+      "attempts": "尝试次数",
+      "lastAttempt": "最后尝试",
+      "lastError": "最后错误",
+      "action": "操作",
+      "requeue": "重新入队",
+      "type": "类型",
+      "firstSeen": "首次出现",
+      "lastSeen": "最近出现",
+      "occurrences": "出现次数",
+      "sample": "负载",
+      "viewSample": "查看",
+      "noSample": "未记录示例负载。"
+    },
+    "platforms": {
+      "heading": "配给平台",
+      "name": "名称",
+      "kind": "类型",
+      "enabled": "已启用",
+      "lockdown": "状态",
+      "lockedDown": "已冻结",
+      "live": "运行中",
+      "lock": "冻结配给",
+      "unlock": "恢复配给",
+      "reasonPlaceholder": "冻结原因"
+    },
+    "rules": {
+      "heading": "授权规则",
+      "add": "添加规则",
+      "noGroups": "该平台没有可授予的组。",
+      "empty": "没有规则。所有人将失去该平台的全部组。",
+      "sourceKind": "来源",
+      "sourceRef": "引用",
+      "group": "组",
+      "effect": "效果",
+      "remove": "删除规则",
+      "preview": "预览",
+      "previewing": "计算中…",
+      "previewFailed": "无法计算预览。",
+      "stalePreview": "规则已更改，请重新预览后再保存。",
+      "save": "保存规则",
+      "saving": "保存中…",
+      "saved": "规则已保存。",
+      "saveFailed": "无法保存规则。",
+      "mustPreview": "保存前请先预览并确认。",
+      "confirmLabel": "我已阅读上方影响，确认保存这些规则。",
+      "losing": "{{count}} 名用户将失去某个组",
+      "gaining": "{{count}} 名用户将获得某个组",
+      "noUsersAffected": "在这些规则下没有用户的组发生变化。"
+    },
+    "exposures": {
+      "heading": "暴露看板",
+      "kind": "类型",
+      "pending": "待处理",
+      "mismatched": "不一致",
+      "user": "用户",
+      "action": "操作",
+      "reason": "原因",
+      "eventAt": "事件时间",
+      "age": "已持续",
+      "noAge": "—"
+    },
+    "users": {
+      "heading": "用户"
+    },
+    "security": {
+      "heading": "安全日志",
+      "filterByUser": "按用户筛选",
+      "userIdPlaceholder": "用户 UUID",
+      "occurredAt": "时间",
+      "action": "操作",
+      "actor": "操作者",
+      "target": "目标",
+      "ip": "IP"
+    }
   }
 }

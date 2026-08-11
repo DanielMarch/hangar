@@ -1,13 +1,14 @@
 // Persistent collapsible left sidebar (SRS §8.2). Collapse state is
 // client-only UI chrome, owned by Zustand (web/src/stores/ui.ts) — never
-// server data. Admin is still a placeholder until Phase 18's routes land;
-// characters/corporations/squads (Phase 17) are real now.
+// server data. Every section is real as of Phase 18, which landed the
+// admin routes the last placeholder was waiting on.
 import { Link, useMatches } from "@tanstack/react-router";
 import {
   Building2,
   LayoutDashboard,
   PanelLeftClose,
   PanelLeftOpen,
+  Settings2,
   Shield,
   Users,
 } from "lucide-react";
@@ -45,6 +46,12 @@ const NAV_ITEMS = [
     labelKey: "nav.squads",
     icon: Shield,
     to: "/squads" as const,
+    enabled: true,
+  },
+  {
+    labelKey: "nav.admin",
+    icon: Settings2,
+    to: "/admin" as const,
     enabled: true,
   },
 ];

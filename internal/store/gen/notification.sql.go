@@ -7,6 +7,7 @@ package gen
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 )
 
@@ -139,7 +140,7 @@ type UpsertCharacterNotificationParams struct {
 	Type           string
 	Text           *string
 	IsRead         *bool
-	Payload        []byte
+	Payload        json.RawMessage
 	ParseFailed    bool
 }
 

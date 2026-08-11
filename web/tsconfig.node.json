@@ -18,5 +18,10 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["vite.config.ts"]
+  // PHASE 18: `e2e` and playwright.config.ts join vite.config.ts here.
+  // They are Node-side, not browser-side (they import node:child_process
+  // and `pg`), so they belong in this project rather than tsconfig.app's —
+  // but they must be in SOME project, or `pnpm run typecheck` silently
+  // skips them and a broken spec is only discovered by running it.
+  "include": ["vite.config.ts", "playwright.config.ts", "e2e"]
 }

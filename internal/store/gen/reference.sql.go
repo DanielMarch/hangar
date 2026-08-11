@@ -481,7 +481,7 @@ type UpsertCorporationParams struct {
 	HomeStationID *int64
 	Shares        *int64
 	WarEligible   *bool
-	Palette       []byte
+	Palette       json.RawMessage
 	MemberLimit   *int32
 }
 

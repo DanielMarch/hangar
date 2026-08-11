@@ -1726,6 +1726,16 @@ module inside its own error boundary rendering a local retry.
 
 ## Phase 18 — Frontend III (Admin & observability)
 
+**Status: DELIVERED.** All eight exit criteria pass. B12 and B13 are closed; closing them
+surfaced six further defects (B14–B19, SRS §0 "Findings raised during implementation [added at the
+Phase 18 close-out]"), all of which are also fixed in this phase. Three observations that belong
+to later phases are recorded there rather than fixed here — most importantly that
+**`catalogue.Boot` has no caller in the running system**, so a deployed installation never ingests
+the route catalogue. That is not a Phase 18 regression (it has been true since Phase 2) and it does
+not weaken the pin bound, which falls back soundly to ESI's own rollover date; but the Route
+Catalogue viewer and the blocked-by-pin board are both empty on a real deployment until some phase
+calls `Boot`. **A phase should claim it.**
+
 **Objective.** The administrator surfaces, **and the backend work they depend on**.
 
 **Depends on.** Phase 17.
@@ -1792,6 +1802,24 @@ by measurement, and why 21 of its 24 feature components have no direct test. Pha
 a **small, bounded** Playwright suite covering the pin-advance and rule-editor confirm flows
 against a seeded database. It is not a mandate to retrofit e2e coverage over Phases 16–17; that
 remains an open item for scheduling.
+
+> **CLOSED.** `web/playwright.config.ts` + `web/e2e/**` (two specs, four tests) run the real
+> binary — serving the real SPA out of `embed.FS` — against a real, seeded, throwaway Postgres.
+> No API stub and no Vite dev server anywhere in the suite. `make e2e` is guarded on
+> `HANGAR_DB_URL` the same way `check-identifiers` is, and is wired into `make ci`.
+>
+> Authentication is **seeded, not stubbed**: `app.session` is a plain uuid-keyed table and
+> `ResolveSession` reads that uuid straight out of the cookie, so inserting a session row and
+> handing the browser the matching cookie is a real login to every layer under test. Only the SSO
+> round trip is skipped, and that is not what the suite verifies.
+>
+> The suite was checked to be non-vacuous: with the server-side `preview_token` check disabled,
+> `rule-editor.spec.ts`'s server test fails (422 → 200) while its browser test still passes —
+> which is the separation the two halves are supposed to have.
+>
+> **It found two real defects that every jsdom test had passed over**: `pgtype.Date` reaching the
+> wire as a struct (B14) and a stale-preview hint in the rule editor that could never render
+> because the edit handler cleared the very state the hint keyed on. Both are fixed.
 
 **Edge cases.**
 

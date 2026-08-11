@@ -314,7 +314,7 @@ type AppCharacterNotification struct {
 	Type           string
 	Text           *string
 	IsRead         *bool
-	Payload        []byte
+	Payload        json.RawMessage
 	ParseFailed    bool
 }
 
@@ -475,7 +475,7 @@ type AppCorporation struct {
 	HomeStationID *int64
 	Shares        *int64
 	WarEligible   *bool
-	Palette       []byte
+	Palette       json.RawMessage
 	UpdatedAt     time.Time
 	// Maximum members the corporation may hold (ESI /corporations/{id}/members/limit). NOT member_count, which is current occupancy. Phase 15.1.
 	MemberLimit *int32
@@ -1103,7 +1103,7 @@ type AppNotificationUnknownType struct {
 	FirstSeenAt    time.Time
 	LastSeenAt     time.Time
 	Occurrences    int64
-	SamplePayload  []byte
+	SamplePayload  json.RawMessage
 	AcknowledgedAt *time.Time
 }
 

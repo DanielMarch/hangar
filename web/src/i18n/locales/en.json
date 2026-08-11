@@ -207,5 +207,198 @@
     "applications": {
       "pending": "Pending applications"
     }
+  },
+  "admin": {
+    "acknowledge": "Acknowledge",
+    "tabs": {
+      "sync": "Sync health",
+      "routes": "Route catalogue",
+      "esi": "Compatibility pin",
+      "rateLimits": "Rate limits",
+      "replicas": "Replicas",
+      "scopes": "Unknown scopes",
+      "platforms": "Platforms",
+      "alerts": "Alerts",
+      "users": "Users",
+      "security": "Security log"
+    },
+    "sync": {
+      "totalRoutes": "Routes ingested",
+      "schedulableRoutes": "Schedulable",
+      "blockedRoutes": "Blocked by pin",
+      "compatibilityPin": "Compatibility pin",
+      "dMaxLabel": "Advance ceiling (D_max)",
+      "dMaxRecorded": "from last ingest",
+      "dMaxFallback": "rollover fallback",
+      "subscriptionsHeading": "Sync subscriptions"
+    },
+    "routes": {
+      "heading": "ESI route catalogue",
+      "method": "Method",
+      "path": "Path",
+      "operationId": "Operation",
+      "compatibilityDate": "Compatibility date",
+      "blocked": "Blocked",
+      "cacheMode": "Cache mode",
+      "rateLimitGroup": "Rate limit group",
+      "pagination": "Pagination",
+      "identifierTypes": "Identifier types",
+      "specFragment": "Spec fragment",
+      "noValue": "Not recorded"
+    },
+    "esi": {
+      "blockedHeading": "Routes blocked by the compatibility pin",
+      "pinHistoryHeading": "Pin advance history",
+      "pinHistory": {
+        "advancedAt": "Advanced at",
+        "oldPin": "From",
+        "newPin": "To",
+        "actor": "Actor",
+        "diff": "Route diff",
+        "diffNotRecorded": "Not recorded",
+        "diffSummary": "+{{unblocked}} unblocked / −{{blocked}} blocked"
+      }
+    },
+    "pin": {
+      "heading": "Advance the compatibility pin",
+      "current": "Currently pinned to {{date}}",
+      "candidateLabel": "Candidate date",
+      "candidatePlaceholder": "YYYY-MM-DD",
+      "preview": "Preview",
+      "previewing": "Previewing…",
+      "previewFailed": "The preview could not be computed.",
+      "stalePreview": "The date changed. Preview it again before advancing.",
+      "outOfRange": "{{candidate}} is newer than D_max ({{dMax}}). ESI has not published it, so the server will refuse this advance.",
+      "confirmLabel": "I have read the route diff above and want to move the pin.",
+      "advance": "Advance the pin",
+      "advancing": "Advancing…",
+      "advanced": "Pin advanced to {{date}}.",
+      "advanceFailed": "The pin could not be advanced.",
+      "dMax": "D_max {{date}}",
+      "noRoutesChange": "No routes change. All {{count}} routes keep their current blocked state.",
+      "newlyUnblocked": "Newly unblocked ({{count}})",
+      "newlyBlocked": "Newly blocked ({{count}})",
+      "none": "None"
+    },
+    "rateLimits": {
+      "heading": "Ledger buckets",
+      "group": "Group",
+      "userKey": "User key",
+      "maxTokens": "Max tokens",
+      "localRemaining": "Local remaining",
+      "serverRemaining": "Server remaining",
+      "divergence": "Divergence",
+      "serverObservedAt": "Server observed",
+      "worstDivergence": "Worst divergence",
+      "notObserved": "Not observed",
+      "gateHint": "Gate 1 requires at most {{tolerance}} request of divergence per group.",
+      "bucketsBreaching": "Buckets out of tolerance",
+      "bucketsBreachingHint": "Sustained divergence is an early Gate 1 failure.",
+      "bucketsUnobserved": "Buckets never observed",
+      "bucketsUnobservedHint": "No rate-limit header has been seen for these yet."
+    },
+    "errorLimit": {
+      "heading": "ESI error budget",
+      "errorCount": "Errors in window",
+      "windowStart": "Window started",
+      "paused": "Gateway",
+      "pausedYes": "Paused",
+      "pausedNo": "Running"
+    },
+    "replicas": {
+      "heading": "Live replicas",
+      "modeLabel": "Ledger mode",
+      "modeSolo": "Solo",
+      "modeClustered": "Clustered",
+      "liveCount": "Live replicas",
+      "derivedNote": "The ledger mode is derived from the live replica count and is never set by hand."
+    },
+    "scopes": {
+      "heading": "Scopes pending acknowledgement",
+      "scope": "Scope",
+      "firstSeen": "First seen",
+      "action": "Action"
+    },
+    "alerts": {
+      "deadLetterHeading": "Dead-lettered deliveries",
+      "unknownTypesHeading": "Notification types pending acknowledgement",
+      "createdAt": "Created",
+      "alertType": "Alert",
+      "channel": "Channel kind",
+      "channelName": "Channel",
+      "attempts": "Attempts",
+      "lastAttempt": "Last attempt",
+      "lastError": "Last error",
+      "action": "Action",
+      "requeue": "Requeue",
+      "type": "Type",
+      "firstSeen": "First seen",
+      "lastSeen": "Last seen",
+      "occurrences": "Occurrences",
+      "sample": "Payload",
+      "viewSample": "View",
+      "noSample": "No sample payload was recorded."
+    },
+    "platforms": {
+      "heading": "Provisioning platforms",
+      "name": "Name",
+      "kind": "Kind",
+      "enabled": "Enabled",
+      "lockdown": "Status",
+      "lockedDown": "Locked down",
+      "live": "Live",
+      "lock": "Freeze provisioning",
+      "unlock": "Resume provisioning",
+      "reasonPlaceholder": "Reason for the freeze"
+    },
+    "rules": {
+      "heading": "Entitlement rules",
+      "add": "Add rule",
+      "noGroups": "This platform has no groups to grant.",
+      "empty": "No rules. Everyone loses every group on this platform.",
+      "sourceKind": "Source",
+      "sourceRef": "Reference",
+      "group": "Group",
+      "effect": "Effect",
+      "remove": "Remove rule",
+      "preview": "Preview",
+      "previewing": "Previewing…",
+      "previewFailed": "The preview could not be computed.",
+      "stalePreview": "The rules changed. Preview them again before saving.",
+      "save": "Save rules",
+      "saving": "Saving…",
+      "saved": "Rules saved.",
+      "saveFailed": "The rules could not be saved.",
+      "mustPreview": "Preview and confirm before saving.",
+      "confirmLabel": "I have read the effect above and want to save these rules.",
+      "losing": "{{count}} users lose a group",
+      "gaining": "{{count}} users gain a group",
+      "noUsersAffected": "No user's groups change under these rules."
+    },
+    "exposures": {
+      "heading": "Exposure board",
+      "kind": "Kind",
+      "pending": "Pending",
+      "mismatched": "Mismatched",
+      "user": "User",
+      "action": "Action",
+      "reason": "Reason",
+      "eventAt": "Event at",
+      "age": "Age",
+      "noAge": "—"
+    },
+    "users": {
+      "heading": "Users"
+    },
+    "security": {
+      "heading": "Security log",
+      "filterByUser": "Filter by user",
+      "userIdPlaceholder": "User UUID",
+      "occurredAt": "When",
+      "action": "Action",
+      "actor": "Actor",
+      "target": "Target",
+      "ip": "IP"
+    }
   }
 }

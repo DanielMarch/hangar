@@ -457,6 +457,57 @@ func (q *Queries) ListPendingProvisioningAudit(ctx context.Context) ([]AppProvis
 	return items, nil
 }
 
+const listPendingProvisioningAuditForPlatform = `-- name: ListPendingProvisioningAuditForPlatform :many
+SELECT audit_id, platform_id, user_id, action, reason, groups_added, groups_removed, event_at, platform_call_completed_at, outcome, error FROM app.provisioning_audit
+ WHERE platform_call_completed_at IS NULL
+   AND platform_id = $1
+ ORDER BY event_at
+`
+
+// PHASE 18. The per-platform exposure board's audit side.
+// GetExposureBoard is scoped to one platform, but the query above is not,
+// so the board for platform A was listing platform B's pending
+// revocations alongside its own. Added as a scoped variant rather than by
+// adding a predicate to ListPendingProvisioningAudit, which Gate 2's
+// installation-wide latency measurement uses unscoped and correctly so.
+//
+// `age` is deliberately NOT computed here: the exposure board's exit
+// criterion is that the age comes from event_at, and event_at is on the
+// row. Computing an age server-side would freeze it at response time,
+// which is the same "measured from the wrong instant" mistake the
+// criterion exists to rule out.
+func (q *Queries) ListPendingProvisioningAuditForPlatform(ctx context.Context, platformID uuid.UUID) ([]AppProvisioningAudit, error) {
+	rows, err := q.db.Query(ctx, listPendingProvisioningAuditForPlatform, platformID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppProvisioningAudit
+	for rows.Next() {
+		var i AppProvisioningAudit
+		if err := rows.Scan(
+			&i.AuditID,
+			&i.PlatformID,
+			&i.UserID,
+			&i.Action,
+			&i.Reason,
+			&i.GroupsAdded,
+			&i.GroupsRemoved,
+			&i.EventAt,
+			&i.PlatformCallCompletedAt,
+			&i.Outcome,
+			&i.Error,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPlatformGroups = `-- name: ListPlatformGroups :many
 SELECT group_id, platform_id, remote_ref, name, created_at FROM app.platform_group WHERE platform_id = $1 ORDER BY name
 `

@@ -207,5 +207,198 @@
     "applications": {
       "pending": "Offene Bewerbungen"
     }
+  },
+  "admin": {
+    "acknowledge": "Bestätigen",
+    "tabs": {
+      "sync": "Sync-Zustand",
+      "routes": "Routenkatalog",
+      "esi": "Kompatibilitäts-Pin",
+      "rateLimits": "Ratenlimits",
+      "replicas": "Repliken",
+      "scopes": "Unbekannte Scopes",
+      "platforms": "Plattformen",
+      "alerts": "Alarme",
+      "users": "Benutzer",
+      "security": "Sicherheitsprotokoll"
+    },
+    "sync": {
+      "totalRoutes": "Erfasste Routen",
+      "schedulableRoutes": "Planbar",
+      "blockedRoutes": "Durch Pin blockiert",
+      "compatibilityPin": "Kompatibilitäts-Pin",
+      "dMaxLabel": "Obergrenze (D_max)",
+      "dMaxRecorded": "aus letztem Import",
+      "dMaxFallback": "Rollover-Rückfall",
+      "subscriptionsHeading": "Sync-Abonnements"
+    },
+    "routes": {
+      "heading": "ESI-Routenkatalog",
+      "method": "Methode",
+      "path": "Pfad",
+      "operationId": "Operation",
+      "compatibilityDate": "Kompatibilitätsdatum",
+      "blocked": "Blockiert",
+      "cacheMode": "Cache-Modus",
+      "rateLimitGroup": "Ratenlimit-Gruppe",
+      "pagination": "Paginierung",
+      "identifierTypes": "Bezeichnertypen",
+      "specFragment": "Spezifikationsfragment",
+      "noValue": "Nicht erfasst"
+    },
+    "esi": {
+      "blockedHeading": "Durch den Kompatibilitäts-Pin blockierte Routen",
+      "pinHistoryHeading": "Verlauf der Pin-Änderungen",
+      "pinHistory": {
+        "advancedAt": "Geändert am",
+        "oldPin": "Von",
+        "newPin": "Nach",
+        "actor": "Akteur",
+        "diff": "Routen-Diff",
+        "diffNotRecorded": "Nicht erfasst",
+        "diffSummary": "+{{unblocked}} freigegeben / −{{blocked}} blockiert"
+      }
+    },
+    "pin": {
+      "heading": "Kompatibilitäts-Pin vorrücken",
+      "current": "Derzeit auf {{date}} gesetzt",
+      "candidateLabel": "Zieldatum",
+      "candidatePlaceholder": "JJJJ-MM-TT",
+      "preview": "Vorschau",
+      "previewing": "Vorschau läuft…",
+      "previewFailed": "Die Vorschau konnte nicht berechnet werden.",
+      "stalePreview": "Das Datum hat sich geändert. Bitte erneut eine Vorschau erstellen.",
+      "outOfRange": "{{candidate}} liegt nach D_max ({{dMax}}). ESI hat dieses Datum nicht veröffentlicht; der Server lehnt die Änderung ab.",
+      "confirmLabel": "Ich habe den Routen-Diff gelesen und möchte den Pin verschieben.",
+      "advance": "Pin vorrücken",
+      "advancing": "Wird vorgerückt…",
+      "advanced": "Pin auf {{date}} gesetzt.",
+      "advanceFailed": "Der Pin konnte nicht vorgerückt werden.",
+      "dMax": "D_max {{date}}",
+      "noRoutesChange": "Keine Route ändert sich. Alle {{count}} Routen behalten ihren Status.",
+      "newlyUnblocked": "Neu freigegeben ({{count}})",
+      "newlyBlocked": "Neu blockiert ({{count}})",
+      "none": "Keine"
+    },
+    "rateLimits": {
+      "heading": "Ledger-Buckets",
+      "group": "Gruppe",
+      "userKey": "Benutzerschlüssel",
+      "maxTokens": "Max. Token",
+      "localRemaining": "Lokal verbleibend",
+      "serverRemaining": "Server verbleibend",
+      "divergence": "Abweichung",
+      "serverObservedAt": "Server beobachtet",
+      "worstDivergence": "Größte Abweichung",
+      "notObserved": "Nicht beobachtet",
+      "gateHint": "Gate 1 erlaubt höchstens {{tolerance}} Anfrage Abweichung pro Gruppe.",
+      "bucketsBreaching": "Buckets außerhalb der Toleranz",
+      "bucketsBreachingHint": "Anhaltende Abweichung kündigt einen Gate-1-Fehler an.",
+      "bucketsUnobserved": "Nie beobachtete Buckets",
+      "bucketsUnobservedHint": "Für diese wurde noch kein Ratenlimit-Header gesehen."
+    },
+    "errorLimit": {
+      "heading": "ESI-Fehlerbudget",
+      "errorCount": "Fehler im Fenster",
+      "windowStart": "Fenster begann",
+      "paused": "Gateway",
+      "pausedYes": "Pausiert",
+      "pausedNo": "Aktiv"
+    },
+    "replicas": {
+      "heading": "Aktive Repliken",
+      "modeLabel": "Ledger-Modus",
+      "modeSolo": "Einzeln",
+      "modeClustered": "Cluster",
+      "liveCount": "Aktive Repliken",
+      "derivedNote": "Der Ledger-Modus ergibt sich aus der Zahl aktiver Repliken und wird nie von Hand gesetzt."
+    },
+    "scopes": {
+      "heading": "Scopes zur Bestätigung",
+      "scope": "Scope",
+      "firstSeen": "Zuerst gesehen",
+      "action": "Aktion"
+    },
+    "alerts": {
+      "deadLetterHeading": "Fehlgeschlagene Zustellungen",
+      "unknownTypesHeading": "Benachrichtigungstypen zur Bestätigung",
+      "createdAt": "Erstellt",
+      "alertType": "Alarm",
+      "channel": "Kanalart",
+      "channelName": "Kanal",
+      "attempts": "Versuche",
+      "lastAttempt": "Letzter Versuch",
+      "lastError": "Letzter Fehler",
+      "action": "Aktion",
+      "requeue": "Erneut einreihen",
+      "type": "Typ",
+      "firstSeen": "Zuerst gesehen",
+      "lastSeen": "Zuletzt gesehen",
+      "occurrences": "Vorkommen",
+      "sample": "Nutzdaten",
+      "viewSample": "Ansehen",
+      "noSample": "Es wurden keine Beispiel-Nutzdaten erfasst."
+    },
+    "platforms": {
+      "heading": "Provisionierungsplattformen",
+      "name": "Name",
+      "kind": "Art",
+      "enabled": "Aktiv",
+      "lockdown": "Status",
+      "lockedDown": "Eingefroren",
+      "live": "Läuft",
+      "lock": "Provisionierung einfrieren",
+      "unlock": "Provisionierung fortsetzen",
+      "reasonPlaceholder": "Grund für das Einfrieren"
+    },
+    "rules": {
+      "heading": "Berechtigungsregeln",
+      "add": "Regel hinzufügen",
+      "noGroups": "Diese Plattform hat keine Gruppen zu vergeben.",
+      "empty": "Keine Regeln. Alle verlieren jede Gruppe auf dieser Plattform.",
+      "sourceKind": "Quelle",
+      "sourceRef": "Referenz",
+      "group": "Gruppe",
+      "effect": "Wirkung",
+      "remove": "Regel entfernen",
+      "preview": "Vorschau",
+      "previewing": "Vorschau läuft…",
+      "previewFailed": "Die Vorschau konnte nicht berechnet werden.",
+      "stalePreview": "Die Regeln haben sich geändert. Bitte erneut eine Vorschau erstellen.",
+      "save": "Regeln speichern",
+      "saving": "Wird gespeichert…",
+      "saved": "Regeln gespeichert.",
+      "saveFailed": "Die Regeln konnten nicht gespeichert werden.",
+      "mustPreview": "Vor dem Speichern Vorschau ansehen und bestätigen.",
+      "confirmLabel": "Ich habe die Auswirkung gelesen und möchte diese Regeln speichern.",
+      "losing": "{{count}} Benutzer verlieren eine Gruppe",
+      "gaining": "{{count}} Benutzer erhalten eine Gruppe",
+      "noUsersAffected": "Bei keinem Benutzer ändern sich die Gruppen."
+    },
+    "exposures": {
+      "heading": "Expositionsübersicht",
+      "kind": "Art",
+      "pending": "Ausstehend",
+      "mismatched": "Abweichend",
+      "user": "Benutzer",
+      "action": "Aktion",
+      "reason": "Grund",
+      "eventAt": "Ereignis am",
+      "age": "Alter",
+      "noAge": "—"
+    },
+    "users": {
+      "heading": "Benutzer"
+    },
+    "security": {
+      "heading": "Sicherheitsprotokoll",
+      "filterByUser": "Nach Benutzer filtern",
+      "userIdPlaceholder": "Benutzer-UUID",
+      "occurredAt": "Zeitpunkt",
+      "action": "Aktion",
+      "actor": "Akteur",
+      "target": "Ziel",
+      "ip": "IP"
+    }
   }
 }

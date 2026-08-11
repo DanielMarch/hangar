@@ -207,5 +207,198 @@
     "applications": {
       "pending": "Cereri în așteptare"
     }
+  },
+  "admin": {
+    "acknowledge": "Confirmă",
+    "tabs": {
+      "sync": "Stare sincronizare",
+      "routes": "Catalog de rute",
+      "esi": "Fixare compatibilitate",
+      "rateLimits": "Limite de rată",
+      "replicas": "Replici",
+      "scopes": "Scope-uri necunoscute",
+      "platforms": "Platforme",
+      "alerts": "Alerte",
+      "users": "Utilizatori",
+      "security": "Jurnal de securitate"
+    },
+    "sync": {
+      "totalRoutes": "Rute preluate",
+      "schedulableRoutes": "Programabile",
+      "blockedRoutes": "Blocate de fixare",
+      "compatibilityPin": "Fixare de compatibilitate",
+      "dMaxLabel": "Plafon (D_max)",
+      "dMaxRecorded": "din ultima preluare",
+      "dMaxFallback": "valoare de rezervă",
+      "subscriptionsHeading": "Abonamente de sincronizare"
+    },
+    "routes": {
+      "heading": "Catalogul de rute ESI",
+      "method": "Metodă",
+      "path": "Cale",
+      "operationId": "Operație",
+      "compatibilityDate": "Dată de compatibilitate",
+      "blocked": "Blocată",
+      "cacheMode": "Mod cache",
+      "rateLimitGroup": "Grup limită de rată",
+      "pagination": "Paginare",
+      "identifierTypes": "Tipuri de identificatori",
+      "specFragment": "Fragment de specificație",
+      "noValue": "Neînregistrat"
+    },
+    "esi": {
+      "blockedHeading": "Rute blocate de fixarea de compatibilitate",
+      "pinHistoryHeading": "Istoricul mutărilor fixării",
+      "pinHistory": {
+        "advancedAt": "Mutată la",
+        "oldPin": "De la",
+        "newPin": "La",
+        "actor": "Autor",
+        "diff": "Diferență de rute",
+        "diffNotRecorded": "Neînregistrat",
+        "diffSummary": "+{{unblocked}} deblocate / −{{blocked}} blocate"
+      }
+    },
+    "pin": {
+      "heading": "Avansează fixarea de compatibilitate",
+      "current": "Fixat momentan la {{date}}",
+      "candidateLabel": "Data țintă",
+      "candidatePlaceholder": "AAAA-LL-ZZ",
+      "preview": "Previzualizează",
+      "previewing": "Se calculează…",
+      "previewFailed": "Previzualizarea nu a putut fi calculată.",
+      "stalePreview": "Data s-a schimbat. Previzualizează din nou înainte de a avansa.",
+      "outOfRange": "{{candidate}} este mai nouă decât D_max ({{dMax}}). ESI nu a publicat-o, deci serverul va refuza.",
+      "confirmLabel": "Am citit diferența de rute de mai sus și vreau să mut fixarea.",
+      "advance": "Avansează fixarea",
+      "advancing": "Se avansează…",
+      "advanced": "Fixarea a fost mutată la {{date}}.",
+      "advanceFailed": "Fixarea nu a putut fi avansată.",
+      "dMax": "D_max {{date}}",
+      "noRoutesChange": "Nicio rută nu se schimbă. Toate cele {{count}} rute își păstrează starea.",
+      "newlyUnblocked": "Nou deblocate ({{count}})",
+      "newlyBlocked": "Nou blocate ({{count}})",
+      "none": "Niciuna"
+    },
+    "rateLimits": {
+      "heading": "Compartimente de registru",
+      "group": "Grup",
+      "userKey": "Cheie utilizator",
+      "maxTokens": "Jetoane maxime",
+      "localRemaining": "Rămas local",
+      "serverRemaining": "Rămas pe server",
+      "divergence": "Divergență",
+      "serverObservedAt": "Server observat",
+      "worstDivergence": "Divergență maximă",
+      "notObserved": "Neobservat",
+      "gateHint": "Gate 1 permite cel mult {{tolerance}} cerere de divergență per grup.",
+      "bucketsBreaching": "Compartimente peste toleranță",
+      "bucketsBreachingHint": "Divergența susținută anunță o eșuare a Gate 1.",
+      "bucketsUnobserved": "Compartimente niciodată observate",
+      "bucketsUnobservedHint": "Încă nu s-a văzut niciun antet de limită pentru acestea."
+    },
+    "errorLimit": {
+      "heading": "Buget de erori ESI",
+      "errorCount": "Erori în fereastră",
+      "windowStart": "Început fereastră",
+      "paused": "Gateway",
+      "pausedYes": "În pauză",
+      "pausedNo": "Activ"
+    },
+    "replicas": {
+      "heading": "Replici active",
+      "modeLabel": "Mod registru",
+      "modeSolo": "Singular",
+      "modeClustered": "Cluster",
+      "liveCount": "Replici active",
+      "derivedNote": "Modul registrului este derivat din numărul de replici active și nu se setează niciodată manual."
+    },
+    "scopes": {
+      "heading": "Scope-uri în așteptarea confirmării",
+      "scope": "Scope",
+      "firstSeen": "Prima apariție",
+      "action": "Acțiune"
+    },
+    "alerts": {
+      "deadLetterHeading": "Livrări în coada moartă",
+      "unknownTypesHeading": "Tipuri de notificare în așteptare",
+      "createdAt": "Creat",
+      "alertType": "Alertă",
+      "channel": "Tip canal",
+      "channelName": "Canal",
+      "attempts": "Încercări",
+      "lastAttempt": "Ultima încercare",
+      "lastError": "Ultima eroare",
+      "action": "Acțiune",
+      "requeue": "Repune în coadă",
+      "type": "Tip",
+      "firstSeen": "Prima apariție",
+      "lastSeen": "Ultima apariție",
+      "occurrences": "Apariții",
+      "sample": "Sarcină utilă",
+      "viewSample": "Vezi",
+      "noSample": "Nu a fost înregistrată nicio mostră."
+    },
+    "platforms": {
+      "heading": "Platforme de provizionare",
+      "name": "Nume",
+      "kind": "Tip",
+      "enabled": "Activată",
+      "lockdown": "Stare",
+      "lockedDown": "Înghețată",
+      "live": "Activă",
+      "lock": "Îngheață provizionarea",
+      "unlock": "Reia provizionarea",
+      "reasonPlaceholder": "Motivul înghețării"
+    },
+    "rules": {
+      "heading": "Reguli de drepturi",
+      "add": "Adaugă regulă",
+      "noGroups": "Această platformă nu are grupuri de acordat.",
+      "empty": "Nicio regulă. Toată lumea pierde fiecare grup de pe această platformă.",
+      "sourceKind": "Sursă",
+      "sourceRef": "Referință",
+      "group": "Grup",
+      "effect": "Efect",
+      "remove": "Șterge regula",
+      "preview": "Previzualizează",
+      "previewing": "Se calculează…",
+      "previewFailed": "Previzualizarea nu a putut fi calculată.",
+      "stalePreview": "Regulile s-au schimbat. Previzualizează din nou înainte de a salva.",
+      "save": "Salvează regulile",
+      "saving": "Se salvează…",
+      "saved": "Reguli salvate.",
+      "saveFailed": "Regulile nu au putut fi salvate.",
+      "mustPreview": "Previzualizează și confirmă înainte de salvare.",
+      "confirmLabel": "Am citit efectul de mai sus și vreau să salvez aceste reguli.",
+      "losing": "{{count}} utilizatori pierd un grup",
+      "gaining": "{{count}} utilizatori câștigă un grup",
+      "noUsersAffected": "Niciun utilizator nu își schimbă grupurile cu aceste reguli."
+    },
+    "exposures": {
+      "heading": "Panou de expunere",
+      "kind": "Tip",
+      "pending": "În așteptare",
+      "mismatched": "Nepotrivit",
+      "user": "Utilizator",
+      "action": "Acțiune",
+      "reason": "Motiv",
+      "eventAt": "Eveniment la",
+      "age": "Vechime",
+      "noAge": "—"
+    },
+    "users": {
+      "heading": "Utilizatori"
+    },
+    "security": {
+      "heading": "Jurnal de securitate",
+      "filterByUser": "Filtrează după utilizator",
+      "userIdPlaceholder": "UUID utilizator",
+      "occurredAt": "Când",
+      "action": "Acțiune",
+      "actor": "Autor",
+      "target": "Țintă",
+      "ip": "IP"
+    }
   }
 }

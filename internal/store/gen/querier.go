@@ -601,12 +601,42 @@ type Querier interface {
 	ListKillmailAttackers(ctx context.Context, ownerKind string, ownerID int64, killmailID int64) ([]AppKillmailAttacker, error)
 	ListKillmailItems(ctx context.Context, ownerKind string, ownerID int64, killmailID int64) ([]AppKillmailItem, error)
 	ListKillmailsByOwner(ctx context.Context, ownerKind string, ownerID int64, pageSize int32) ([]AppKillmail, error)
-	// ---- solo/clustered mode flush (§5.6 — both transitions must not lose or
-	// double-count entries) ----
 	// clustered -> solo: enumerate every bucket the shared table knows about so
 	// the fast path can be primed for all of them before it engages, not just
 	// the one the next request happens to touch.
 	ListLedgerBuckets(ctx context.Context) ([]AppEsiLedgerBucket, error)
+	// ---- solo/clustered mode flush (§5.6 — both transitions must not lose or
+	// double-count entries) ----
+	// PHASE 18 — the rate-limit dashboard's own query (roadmap Phase 18 edge
+	// case: "surface esi_ledger_divergence prominently: sustained divergence
+	// is the early warning for a Gate 1 failure").
+	//
+	// `esi_ledger_divergence` is named in 01_ARCHITECTURE.md §16 and
+	// 04_RELEASE_GATES.md §1.3 as a PROMETHEUS metric, and no metric surface
+	// exists yet (internal/telemetry/metrics.go is a bare registry; the metric
+	// set is Phase 20's, alongside the gate harnesses that read it). The
+	// dashboard cannot wait for that and cannot derive divergence from
+	// ListLedgerBuckets either: the bucket row carries the SERVER's reading
+	// (server_remaining) but local headroom lives in app.esi_ledger_entry, so
+	// the two have to be brought together, which is what this does.
+	//
+	// Definitions match internal/esi/ratelimit's reconciler exactly:
+	//   local_consumed  = sum of live entry costs in this bucket
+	//   local_remaining = max_tokens - local_consumed, floored at zero
+	// Gate 1.3's threshold is max(|local_remaining - server_remaining|) <= 1
+	// per group.
+	//
+	// The subtraction itself is deliberately NOT done here. server_remaining
+	// is nullable — the server has said nothing about this bucket yet — and
+	// sqlc's static analysis types `abs(... - b.server_remaining)` as a
+	// non-null bigint however the expression is cast or wrapped, so scanning a
+	// genuine NULL would fail at runtime. Collapsing "never observed" into
+	// "zero divergence" to dodge that would be the exact empty-versus-
+	// unavailable confusion SRS §6 forbids: zero divergence is a healthy
+	// reading, no reading is not. The two operands come back typed (int64 and
+	// *int32) and internal/api/v1 does the subtraction where the nil case is
+	// explicit.
+	ListLedgerDivergence(ctx context.Context) ([]ListLedgerDivergenceRow, error)
 	ListLiveReplicas(ctx context.Context, liveThreshold time.Duration) ([]AppEsiReplica, error)
 	ListMailHeadersPage(ctx context.Context, arg ListMailHeadersPageParams) ([]AppMailHeader, error)
 	// Drives the per-mail body fanout (roadmap: "Mail bodies are one ESI
@@ -655,6 +685,19 @@ type Querier interface {
 	// The exposure board's audit-side view: event_at set, platform call never
 	// completed. Gate 2 measures p99 over (platform_call_completed_at - event_at).
 	ListPendingProvisioningAudit(ctx context.Context) ([]AppProvisioningAudit, error)
+	// PHASE 18. The per-platform exposure board's audit side.
+	// GetExposureBoard is scoped to one platform, but the query above is not,
+	// so the board for platform A was listing platform B's pending
+	// revocations alongside its own. Added as a scoped variant rather than by
+	// adding a predicate to ListPendingProvisioningAudit, which Gate 2's
+	// installation-wide latency measurement uses unscoped and correctly so.
+	//
+	// `age` is deliberately NOT computed here: the exposure board's exit
+	// criterion is that the age comes from event_at, and event_at is on the
+	// row. Computing an age server-side would freeze it at response time,
+	// which is the same "measured from the wrong instant" mistake the
+	// criterion exists to rule out.
+	ListPendingProvisioningAuditForPlatform(ctx context.Context, platformID uuid.UUID) ([]AppProvisioningAudit, error)
 	ListPendingSquadApplications(ctx context.Context, squadID uuid.UUID) ([]AppSquadApplication, error)
 	// app.role, app.permission, app.role_grant, app.user_role,
 	// app.effective_permission (02_DATABASE_SCHEMA.md §4.2 #11-#15).
@@ -783,7 +826,7 @@ type Querier interface {
 	RecordSync304(ctx context.Context, subscriptionID uuid.UUID, nextDueAt time.Time) error
 	RecordSync403(ctx context.Context, subscriptionID uuid.UUID) error
 	RecordSyncSuccess(ctx context.Context, arg RecordSyncSuccessParams) error
-	RecordUnknownNotificationType(ctx context.Context, type_ string, samplePayload []byte) error
+	RecordUnknownNotificationType(ctx context.Context, type_ string, samplePayload json.RawMessage) error
 	// The single-use guarantee: this UPDATE only ever affects a row that is
 	// still unconsumed and unexpired, so a second redemption attempt with the
 	// same token — concurrent or sequential — always affects zero rows.

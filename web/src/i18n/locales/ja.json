@@ -207,5 +207,198 @@
     "applications": {
       "pending": "保留中の応募"
     }
+  },
+  "admin": {
+    "acknowledge": "確認済みにする",
+    "tabs": {
+      "sync": "同期状態",
+      "routes": "ルートカタログ",
+      "esi": "互換性ピン",
+      "rateLimits": "レート制限",
+      "replicas": "レプリカ",
+      "scopes": "未知のスコープ",
+      "platforms": "プラットフォーム",
+      "alerts": "アラート",
+      "users": "ユーザー",
+      "security": "セキュリティログ"
+    },
+    "sync": {
+      "totalRoutes": "取り込み済みルート",
+      "schedulableRoutes": "スケジュール可能",
+      "blockedRoutes": "ピンによりブロック",
+      "compatibilityPin": "互換性ピン",
+      "dMaxLabel": "上限 (D_max)",
+      "dMaxRecorded": "前回の取り込みより",
+      "dMaxFallback": "ロールオーバー既定値",
+      "subscriptionsHeading": "同期サブスクリプション"
+    },
+    "routes": {
+      "heading": "ESI ルートカタログ",
+      "method": "メソッド",
+      "path": "パス",
+      "operationId": "オペレーション",
+      "compatibilityDate": "互換性日付",
+      "blocked": "ブロック",
+      "cacheMode": "キャッシュモード",
+      "rateLimitGroup": "レート制限グループ",
+      "pagination": "ページネーション",
+      "identifierTypes": "識別子の型",
+      "specFragment": "仕様フラグメント",
+      "noValue": "記録なし"
+    },
+    "esi": {
+      "blockedHeading": "互換性ピンによりブロックされたルート",
+      "pinHistoryHeading": "ピン変更履歴",
+      "pinHistory": {
+        "advancedAt": "変更日時",
+        "oldPin": "変更前",
+        "newPin": "変更後",
+        "actor": "実行者",
+        "diff": "ルート差分",
+        "diffNotRecorded": "記録なし",
+        "diffSummary": "+{{unblocked}} 解放 / −{{blocked}} ブロック"
+      }
+    },
+    "pin": {
+      "heading": "互換性ピンを進める",
+      "current": "現在 {{date}} に固定",
+      "candidateLabel": "候補日",
+      "candidatePlaceholder": "YYYY-MM-DD",
+      "preview": "プレビュー",
+      "previewing": "計算中…",
+      "previewFailed": "プレビューを計算できませんでした。",
+      "stalePreview": "日付が変更されました。進める前に再度プレビューしてください。",
+      "outOfRange": "{{candidate}} は D_max ({{dMax}}) より新しい日付です。ESI が公開していないため、サーバーは拒否します。",
+      "confirmLabel": "上のルート差分を確認し、ピンを移動します。",
+      "advance": "ピンを進める",
+      "advancing": "実行中…",
+      "advanced": "ピンを {{date}} に進めました。",
+      "advanceFailed": "ピンを進められませんでした。",
+      "dMax": "D_max {{date}}",
+      "noRoutesChange": "変化するルートはありません。{{count}} 件すべて現在の状態のままです。",
+      "newlyUnblocked": "新たに解放 ({{count}})",
+      "newlyBlocked": "新たにブロック ({{count}})",
+      "none": "なし"
+    },
+    "rateLimits": {
+      "heading": "台帳バケット",
+      "group": "グループ",
+      "userKey": "ユーザーキー",
+      "maxTokens": "最大トークン",
+      "localRemaining": "ローカル残量",
+      "serverRemaining": "サーバー残量",
+      "divergence": "乖離",
+      "serverObservedAt": "サーバー観測時刻",
+      "worstDivergence": "最大乖離",
+      "notObserved": "未観測",
+      "gateHint": "Gate 1 はグループごとに最大 {{tolerance}} リクエストの乖離しか許容しません。",
+      "bucketsBreaching": "許容超過のバケット",
+      "bucketsBreachingHint": "継続的な乖離は Gate 1 失敗の予兆です。",
+      "bucketsUnobserved": "未観測のバケット",
+      "bucketsUnobservedHint": "これらにはまだレート制限ヘッダーが届いていません。"
+    },
+    "errorLimit": {
+      "heading": "ESI エラーバジェット",
+      "errorCount": "ウィンドウ内エラー数",
+      "windowStart": "ウィンドウ開始",
+      "paused": "ゲートウェイ",
+      "pausedYes": "一時停止中",
+      "pausedNo": "稼働中"
+    },
+    "replicas": {
+      "heading": "稼働中レプリカ",
+      "modeLabel": "台帳モード",
+      "modeSolo": "単独",
+      "modeClustered": "クラスタ",
+      "liveCount": "稼働レプリカ数",
+      "derivedNote": "台帳モードは稼働レプリカ数から導出され、手動で設定することはありません。"
+    },
+    "scopes": {
+      "heading": "確認待ちのスコープ",
+      "scope": "スコープ",
+      "firstSeen": "初回検出",
+      "action": "操作"
+    },
+    "alerts": {
+      "deadLetterHeading": "デッドレター配信",
+      "unknownTypesHeading": "確認待ちの通知タイプ",
+      "createdAt": "作成",
+      "alertType": "アラート",
+      "channel": "チャネル種別",
+      "channelName": "チャネル",
+      "attempts": "試行回数",
+      "lastAttempt": "最終試行",
+      "lastError": "最終エラー",
+      "action": "操作",
+      "requeue": "再投入",
+      "type": "タイプ",
+      "firstSeen": "初回検出",
+      "lastSeen": "最終検出",
+      "occurrences": "発生回数",
+      "sample": "ペイロード",
+      "viewSample": "表示",
+      "noSample": "サンプルペイロードは記録されていません。"
+    },
+    "platforms": {
+      "heading": "プロビジョニング・プラットフォーム",
+      "name": "名称",
+      "kind": "種別",
+      "enabled": "有効",
+      "lockdown": "状態",
+      "lockedDown": "凍結中",
+      "live": "稼働中",
+      "lock": "プロビジョニングを凍結",
+      "unlock": "プロビジョニングを再開",
+      "reasonPlaceholder": "凍結の理由"
+    },
+    "rules": {
+      "heading": "権限ルール",
+      "add": "ルールを追加",
+      "noGroups": "このプラットフォームには付与できるグループがありません。",
+      "empty": "ルールがありません。全員がこのプラットフォームの全グループを失います。",
+      "sourceKind": "ソース",
+      "sourceRef": "参照",
+      "group": "グループ",
+      "effect": "効果",
+      "remove": "ルールを削除",
+      "preview": "プレビュー",
+      "previewing": "計算中…",
+      "previewFailed": "プレビューを計算できませんでした。",
+      "stalePreview": "ルールが変更されました。保存前に再度プレビューしてください。",
+      "save": "ルールを保存",
+      "saving": "保存中…",
+      "saved": "ルールを保存しました。",
+      "saveFailed": "ルールを保存できませんでした。",
+      "mustPreview": "保存前にプレビューして確認してください。",
+      "confirmLabel": "上の影響を確認し、これらのルールを保存します。",
+      "losing": "{{count}} 人がグループを失います",
+      "gaining": "{{count}} 人がグループを獲得します",
+      "noUsersAffected": "これらのルールでグループが変わるユーザーはいません。"
+    },
+    "exposures": {
+      "heading": "露出ボード",
+      "kind": "種別",
+      "pending": "保留中",
+      "mismatched": "不一致",
+      "user": "ユーザー",
+      "action": "操作",
+      "reason": "理由",
+      "eventAt": "イベント時刻",
+      "age": "経過時間",
+      "noAge": "—"
+    },
+    "users": {
+      "heading": "ユーザー"
+    },
+    "security": {
+      "heading": "セキュリティログ",
+      "filterByUser": "ユーザーで絞り込む",
+      "userIdPlaceholder": "ユーザー UUID",
+      "occurredAt": "日時",
+      "action": "操作",
+      "actor": "実行者",
+      "target": "対象",
+      "ip": "IP"
+    }
   }
 }

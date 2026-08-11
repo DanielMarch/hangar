@@ -207,5 +207,198 @@
     "applications": {
       "pending": "Заявки на рассмотрении"
     }
+  },
+  "admin": {
+    "acknowledge": "Подтвердить",
+    "tabs": {
+      "sync": "Состояние синхронизации",
+      "routes": "Каталог маршрутов",
+      "esi": "Пин совместимости",
+      "rateLimits": "Лимиты запросов",
+      "replicas": "Реплики",
+      "scopes": "Неизвестные scope",
+      "platforms": "Платформы",
+      "alerts": "Оповещения",
+      "users": "Пользователи",
+      "security": "Журнал безопасности"
+    },
+    "sync": {
+      "totalRoutes": "Загружено маршрутов",
+      "schedulableRoutes": "Планируемых",
+      "blockedRoutes": "Заблокировано пином",
+      "compatibilityPin": "Пин совместимости",
+      "dMaxLabel": "Предел (D_max)",
+      "dMaxRecorded": "из последней загрузки",
+      "dMaxFallback": "запасное значение",
+      "subscriptionsHeading": "Подписки синхронизации"
+    },
+    "routes": {
+      "heading": "Каталог маршрутов ESI",
+      "method": "Метод",
+      "path": "Путь",
+      "operationId": "Операция",
+      "compatibilityDate": "Дата совместимости",
+      "blocked": "Заблокирован",
+      "cacheMode": "Режим кэша",
+      "rateLimitGroup": "Группа лимита",
+      "pagination": "Пагинация",
+      "identifierTypes": "Типы идентификаторов",
+      "specFragment": "Фрагмент спецификации",
+      "noValue": "Не записано"
+    },
+    "esi": {
+      "blockedHeading": "Маршруты, заблокированные пином совместимости",
+      "pinHistoryHeading": "История сдвигов пина",
+      "pinHistory": {
+        "advancedAt": "Сдвинут",
+        "oldPin": "С",
+        "newPin": "На",
+        "actor": "Инициатор",
+        "diff": "Разница маршрутов",
+        "diffNotRecorded": "Не записано",
+        "diffSummary": "+{{unblocked}} открыто / −{{blocked}} закрыто"
+      }
+    },
+    "pin": {
+      "heading": "Сдвинуть пин совместимости",
+      "current": "Сейчас закреплён на {{date}}",
+      "candidateLabel": "Целевая дата",
+      "candidatePlaceholder": "ГГГГ-ММ-ДД",
+      "preview": "Предпросмотр",
+      "previewing": "Вычисление…",
+      "previewFailed": "Не удалось вычислить предпросмотр.",
+      "stalePreview": "Дата изменилась. Выполните предпросмотр заново.",
+      "outOfRange": "{{candidate}} новее D_max ({{dMax}}). ESI не публиковала эту дату — сервер откажет.",
+      "confirmLabel": "Я прочитал разницу маршрутов выше и хочу сдвинуть пин.",
+      "advance": "Сдвинуть пин",
+      "advancing": "Сдвигаем…",
+      "advanced": "Пин сдвинут на {{date}}.",
+      "advanceFailed": "Не удалось сдвинуть пин.",
+      "dMax": "D_max {{date}}",
+      "noRoutesChange": "Ни один маршрут не меняется. Все {{count}} сохраняют текущее состояние.",
+      "newlyUnblocked": "Новые открытые ({{count}})",
+      "newlyBlocked": "Новые закрытые ({{count}})",
+      "none": "Нет"
+    },
+    "rateLimits": {
+      "heading": "Корзины реестра",
+      "group": "Группа",
+      "userKey": "Ключ пользователя",
+      "maxTokens": "Максимум токенов",
+      "localRemaining": "Локальный остаток",
+      "serverRemaining": "Остаток сервера",
+      "divergence": "Расхождение",
+      "serverObservedAt": "Сервер наблюдался",
+      "worstDivergence": "Максимальное расхождение",
+      "notObserved": "Не наблюдалось",
+      "gateHint": "Gate 1 допускает не более {{tolerance}} запроса расхождения на группу.",
+      "bucketsBreaching": "Корзины вне допуска",
+      "bucketsBreachingHint": "Устойчивое расхождение — предвестник провала Gate 1.",
+      "bucketsUnobserved": "Ни разу не наблюдались",
+      "bucketsUnobservedHint": "Заголовок лимита по ним ещё не приходил."
+    },
+    "errorLimit": {
+      "heading": "Бюджет ошибок ESI",
+      "errorCount": "Ошибок в окне",
+      "windowStart": "Начало окна",
+      "paused": "Шлюз",
+      "pausedYes": "Приостановлен",
+      "pausedNo": "Работает"
+    },
+    "replicas": {
+      "heading": "Активные реплики",
+      "modeLabel": "Режим реестра",
+      "modeSolo": "Одиночный",
+      "modeClustered": "Кластерный",
+      "liveCount": "Активных реплик",
+      "derivedNote": "Режим реестра выводится из числа активных реплик и никогда не задаётся вручную."
+    },
+    "scopes": {
+      "heading": "Scope, ожидающие подтверждения",
+      "scope": "Scope",
+      "firstSeen": "Впервые замечен",
+      "action": "Действие"
+    },
+    "alerts": {
+      "deadLetterHeading": "Недоставленные отправки",
+      "unknownTypesHeading": "Типы уведомлений, ожидающие подтверждения",
+      "createdAt": "Создано",
+      "alertType": "Оповещение",
+      "channel": "Тип канала",
+      "channelName": "Канал",
+      "attempts": "Попыток",
+      "lastAttempt": "Последняя попытка",
+      "lastError": "Последняя ошибка",
+      "action": "Действие",
+      "requeue": "Поставить в очередь",
+      "type": "Тип",
+      "firstSeen": "Впервые",
+      "lastSeen": "Последний раз",
+      "occurrences": "Случаев",
+      "sample": "Полезная нагрузка",
+      "viewSample": "Показать",
+      "noSample": "Образец полезной нагрузки не записан."
+    },
+    "platforms": {
+      "heading": "Платформы провижининга",
+      "name": "Название",
+      "kind": "Тип",
+      "enabled": "Включена",
+      "lockdown": "Статус",
+      "lockedDown": "Заморожена",
+      "live": "Работает",
+      "lock": "Заморозить провижининг",
+      "unlock": "Возобновить провижининг",
+      "reasonPlaceholder": "Причина заморозки"
+    },
+    "rules": {
+      "heading": "Правила прав доступа",
+      "add": "Добавить правило",
+      "noGroups": "У этой платформы нет групп для выдачи.",
+      "empty": "Правил нет. Все теряют все группы на этой платформе.",
+      "sourceKind": "Источник",
+      "sourceRef": "Ссылка",
+      "group": "Группа",
+      "effect": "Эффект",
+      "remove": "Удалить правило",
+      "preview": "Предпросмотр",
+      "previewing": "Вычисление…",
+      "previewFailed": "Не удалось вычислить предпросмотр.",
+      "stalePreview": "Правила изменились. Выполните предпросмотр заново.",
+      "save": "Сохранить правила",
+      "saving": "Сохранение…",
+      "saved": "Правила сохранены.",
+      "saveFailed": "Не удалось сохранить правила.",
+      "mustPreview": "Перед сохранением выполните предпросмотр и подтвердите.",
+      "confirmLabel": "Я прочитал последствия выше и хочу сохранить эти правила.",
+      "losing": "{{count}} пользователей теряют группу",
+      "gaining": "{{count}} пользователей получают группу",
+      "noUsersAffected": "Ни у кого группы не меняются по этим правилам."
+    },
+    "exposures": {
+      "heading": "Панель экспозиции",
+      "kind": "Тип",
+      "pending": "В ожидании",
+      "mismatched": "Расхождение",
+      "user": "Пользователь",
+      "action": "Действие",
+      "reason": "Причина",
+      "eventAt": "Событие в",
+      "age": "Возраст",
+      "noAge": "—"
+    },
+    "users": {
+      "heading": "Пользователи"
+    },
+    "security": {
+      "heading": "Журнал безопасности",
+      "filterByUser": "Фильтр по пользователю",
+      "userIdPlaceholder": "UUID пользователя",
+      "occurredAt": "Когда",
+      "action": "Действие",
+      "actor": "Инициатор",
+      "target": "Цель",
+      "ip": "IP"
+    }
   }
 }

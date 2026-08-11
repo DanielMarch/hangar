@@ -17,8 +17,9 @@
 
 Eleven defects were found in v3.0. Seven were structural (B1–B7); four were under-specifications
 that would have produced divergent implementations (B8–B11). All are corrected in this revision.
-Two more (B12–B13) were raised later, against the running system, and are recorded in their own
-subsection below.
+Two more (B12–B13) were raised later, against the running system, at the Phase 17 close-out, and
+six more (B14–B19) at the Phase 18 close-out; both sets are recorded in their own subsections
+below.
 
 | # | Defect in v3.0 | Resolution in v3.1 | Sections |
 | :--- | :--- | :--- | :--- |
@@ -45,6 +46,44 @@ rather than against v3.0, and are corrected here for Phase 18 to build on.
 | :--- | :--- | :--- | :--- |
 | **B12** | **Structured `jsonb` columns had no stated wire representation.** §6 pins down money (a string) and the `_sync` envelope but says nothing about how a `jsonb` column reaches the client. The generic row converter (`internal/api/dto/row.go`) hex-encodes any `[]byte`, and Go's `json.RawMessage` **is** `[]byte`, so every structured column reaches the wire as an opaque hex string: a starbase's `fuels` (the fuel-low alert's own data), a skyhook's and sovereignty hub's `reagents`, a structure's `services`, a planetary colony's `pins`/`links`/`routes`, and an ESI pin advance's `route_diff`. 42 such fields exist across the generated models. No client can render one without first decoding a HANGAR response field, which no part of this document asks it to do. | A `jsonb` column is emitted as **nested JSON**, never as an encoded scalar. Hex-encoding is reserved for genuinely binary columns (hashes, ciphertext, wrapped key material) — none of which may leave the server in the first place. | §6, §7 Phase 18 |
 | **B13** | **The pin-advance preview was named but never specified as an operation.** §6.8 lists a single mutating `POST /api/v1/admin/esi/catalogue/pin` *"(advance the compatibility date, with preview diff)"*. Principle 12 and Phase 18 both require the administrator to see the route diff **before** the pin moves, which one mutating call cannot provide. The delivered handler compounds this: it passes a `nil` diff (recorded as `{}`, so no diff is ever computed) and performs no `D_max` bound check, leaving both of Phase 18's pin exit criteria unsatisfiable against the API as built. | Preview is a **separate, non-mutating endpoint**, `POST /api/v1/admin/esi/catalogue/pin/preview`, returning the full route diff in both directions (newly blocked **and** newly unblocked) for a candidate date without changing state. The advance endpoint validates the candidate against `D_max` server-side and records the computed diff rather than `{}`. | §6.8, §7 Phase 18 |
+
+### Findings raised during implementation **[added at the Phase 18 close-out]**
+
+Closing B12 and B13 required touching every §6.8 surface, and doing so surfaced six further
+defects. Five are in the delivered system rather than in this document, and are recorded here
+because §6.8's endpoint list is the thing they contradict; the sixth (B14) is a genuine
+under-specification of the same kind as B12. All six are **fixed in Phase 18** — none is
+outstanding — and they are written down rather than reconciled silently because each was found by
+running the thing, not by reading it.
+
+| # | Defect | Resolution | Sections |
+| :--- | :--- | :--- | :--- |
+| **B14** | **`date` and `interval` columns had no stated wire representation either** — the same gap as B12, one type family over. `pgtype.Date` and `pgtype.Interval` implement no `json.Marshaler`, so `dto.Row`'s generic struct branch recursed into their fields: a compatibility date reached the wire as `{"time":"2026-08-11T00:00:00Z","infinity_modifier":0,"valid":true}` and a route's `cache_age` as `{"microseconds":300000000,"days":0,"months":0,"valid":true}`. `esi_pin_history.old_pin`/`new_pin` and `esi_route.compatibility_date` are all affected, and all three are rendered by Phase 18 screens. | A `date` column is emitted as a **`YYYY-MM-DD` string** — never a timestamp, which would invite a local-time conversion that shifts it a day — and an `interval` as **whole seconds**. NULL is `null` in both cases, never a zero date or a zero duration. | §6, §7 Phase 18 |
+| **B15** | **Nullable `jsonb` was not covered by B12's fix.** `sqlc.yaml` had a `jsonb -> json.RawMessage` override with no `nullable: true` variant, so a nullable `jsonb` column generated a plain `[]byte` — indistinguishable by type from `bytea`, and therefore still hex-encoded after B12's converter fix. Three columns: `notification_unknown_type.sample_payload` (which Phase 18's unknown-types board renders), `corporation.palette`, `character_notification.payload`. | The override gained its nullable variant. B12's rule is about the **column's type, not its nullability**, and is now enforceable by Go type rather than by inspecting bytes. | §6, §7 Phase 18 |
+| **B16** | **`GET /api/v1/admin/provisioning/exposures` was unreachable.** It was registered with an input shape declaring a **path** parameter `id`, but §6.8's path for this route has no `{id}` segment — so the parameter could never be supplied, and the handler's `parseUUID("")` failed on every request. The exposure board answered `400` to every call ever made to it. It is the subject of a Phase 18 exit criterion, which is how it surfaced. | The platform moves to a **query** parameter, `?platform_id=`; §6.8's path is the contract and is unchanged. | §6.8, §7 Phase 18 |
+| **B17** | **The two unknown boards could be read but never cleared.** §6.8 lists `GET /admin/scopes/unknown` and `GET /admin/alerts/unknown-types` but no acknowledge operation for either, though `acknowledged_at` exists on both tables, both queries have existed since Phases 2 and 14, and `alerting.unknown_types.acknowledge` has been in the permission vocabulary since Phase 14. Boards that only grow get ignored. | Two operations added: `POST /admin/scopes/unknown/acknowledge` (scope in the **body**, not the path — a scope string is opaque and may contain characters a proxy will normalise) and `POST /admin/alerts/unknown-types/{type}/acknowledge`. A new permission, `admin.scopes.acknowledge`, is the scope-side twin of the alerting one. | §6.8, §5.1, §7 Phase 18 |
+| **B18** | **The entitlement rule editor had nothing to save through.** §6.8 lists the rule *preview* and *lockdown* operations for a platform but no operation that writes a rule, and Phase 11's `CreateEntitlementRule`/`DeleteEntitlementRule` were left as unwired seams. Phase 18's "a rule editor that mandates preview confirmation before saving" was therefore vacuous — there was no save. | Three operations added: `GET /admin/platforms/{id}/groups`, `GET /admin/platforms/{id}/rules`, and `PUT /admin/platforms/{id}/rules` (a full, transactional replace). The save requires a **`preview_token`** returned by the preview endpoint and recomputed server-side over the rules actually submitted, so an unpreviewed — or a since-edited — rule set cannot be saved by **any** client, not merely by one that renders the editor. | §6.8, §7 Phase 18 |
+| **B19** | **The exposure board mixed platforms.** `GetExposureBoard` is scoped to one platform, but its audit-side query had no platform predicate, so platform A's board listed every other platform's pending revocations alongside its own. | A platform-scoped variant backs the board. The unscoped query remains, correctly, for Gate 2's installation-wide latency measurement. | §6.8, Gate 2 |
+
+Three further observations were made and are **not** fixed in Phase 18, because fixing them
+belongs to a later phase. They are recorded so no later phase has to rediscover them:
+
+* **`catalogue.Boot` has no caller in the running system.** Phase 2 delivered the full boot
+  sequence (discover `D_max`, fetch the spec at `D_max`, ingest, mark blocked) and nothing outside
+  an integration test invokes it: no `serve` path, no CLI command, no job. A deployed installation
+  therefore never ingests the route catalogue. Phase 18 made `Boot` record `D_max` when it does
+  run, and `GetDMax` falls back soundly to ESI's rollover date when it has not, so the pin bound
+  holds either way — but the catalogue itself remains unpopulated until some phase calls `Boot`.
+* **`hangar admin bootstrap-token` mints a token the API cannot accept.** The command creates an
+  `app.api_token` row and prints a secret described as usable "as a Bearer token ... once Phase 15
+  lands". Phase 15 landed; no middleware authenticates a request by API token — only the
+  `hangar_session` cookie (`internal/api/middleware/session.go`). §12's third-party token surface
+  is therefore unreachable, which also means Phase 19's `/api/v2` shim has no way for a
+  third-party client to authenticate.
+* **`esi_ledger_divergence` and the rest of §16's metric set do not exist.** `internal/telemetry
+  /metrics.go` is a bare Prometheus registry. Phase 20 owns the metric surface alongside the gate
+  harnesses that read it. Phase 18's rate-limit dashboard computes divergence from
+  `app.esi_ledger_bucket` and `app.esi_ledger_entry` directly rather than waiting for it.
 
 ### Findings carried forward from v3.0's own revision record
 
@@ -690,6 +729,13 @@ JSON object or array, never as an encoded scalar. A client must never have to de
 HANGAR response before it can read it. Hex encoding is reserved for genuinely binary columns
 (hashes, ciphertext, wrapped key material), none of which may be serialised to a client at all.
 
+**Dates are date strings and intervals are seconds. [v3.1 — B14]** A PostgreSQL `date` column — a
+route's `compatibility_date`, a pin advance's `old_pin`/`new_pin` — is emitted as a `YYYY-MM-DD`
+string, never as a timestamp (which would invite a local-time conversion that shifts it a day) and
+never as the driver's own struct. An `interval` column — a route's `cache_age`, a rate-limit
+window — is emitted as whole seconds. A NULL of either is `null`, never a zero date or a zero
+duration: the same empty-versus-unavailable distinction this section draws for collections.
+
 The endpoint set is unchanged from v3.0 and is reproduced here in full so that this document is
 self-contained. `docs/03_IMPLEMENTATION_ROADMAP.md` records the phase that delivers each group.
 
@@ -818,11 +864,25 @@ self-contained. `docs/03_IMPLEMENTATION_ROADMAP.md` records the phase that deliv
 * `GET /api/v1/admin/esi/ratelimits`, `/esi/errorlimit`
 * **`GET /api/v1/admin/esi/replicas`** *(live replica registry and the resulting ledger mode —
   new in v3.1, §4.1.3)*
+* **`GET /api/v1/admin/esi/catalogue/pin/history`** *(recorded pin advances, each with its
+  computed route diff — new in v3.1, §0 B13: a diff nobody can read afterwards is not an audit
+  trail)*
 * `GET /api/v1/admin/platforms`, `POST /api/v1/admin/platforms/{id}/rules/preview`,
   `POST /api/v1/admin/platforms/{id}/lockdown`
-* `GET /api/v1/admin/provisioning/exposures`, `/provisioning/audit`
+* **`GET /api/v1/admin/platforms/{id}/groups`**, **`GET /api/v1/admin/platforms/{id}/rules`**,
+  **`PUT /api/v1/admin/platforms/{id}/rules`** *(the rule editor's read and write sides. The PUT is
+  a full transactional replace and requires the `preview_token` the preview endpoint returned for
+  that exact rule set: an unpreviewed — or a since-edited — rule set cannot be saved by any client.
+  New in v3.1, §0 B18)*
+* **`GET /api/v1/admin/provisioning/exposures?platform_id=`** *(query parameter, not a path
+  segment — §0 B16)*, `/provisioning/audit`
 * `GET /api/v1/admin/alerts/dead-letter`, `/alerts/unknown-types`
+* **`POST /api/v1/admin/alerts/unknown-types/{type}/acknowledge`** *(writes `acknowledged_at` —
+  new in v3.1, §0 B17)*
 * **`GET /api/v1/admin/scopes/unknown`** *(newly observed scope strings pending acknowledgement)*
+* **`POST /api/v1/admin/scopes/unknown/acknowledge`** *(the scope travels in the BODY: it is
+  opaque under Principle 14 and may carry characters a proxy would normalise in a path segment.
+  New in v3.1, §0 B17)*
 * `GET /api/v1/admin/scopes`, `PUT /api/v1/admin/scopes`
 * `GET /api/v1/admin/users`, `PATCH /api/v1/admin/users/{id}`
 * `GET /api/v1/admin/security-log`

@@ -207,5 +207,198 @@
     "applications": {
       "pending": "Candidatures en attente"
     }
+  },
+  "admin": {
+    "acknowledge": "Accuser réception",
+    "tabs": {
+      "sync": "État de synchro",
+      "routes": "Catalogue de routes",
+      "esi": "Épinglage de compatibilité",
+      "rateLimits": "Limites de débit",
+      "replicas": "Réplicas",
+      "scopes": "Scopes inconnus",
+      "platforms": "Plateformes",
+      "alerts": "Alertes",
+      "users": "Utilisateurs",
+      "security": "Journal de sécurité"
+    },
+    "sync": {
+      "totalRoutes": "Routes ingérées",
+      "schedulableRoutes": "Planifiables",
+      "blockedRoutes": "Bloquées par l'épingle",
+      "compatibilityPin": "Épingle de compatibilité",
+      "dMaxLabel": "Plafond (D_max)",
+      "dMaxRecorded": "du dernier import",
+      "dMaxFallback": "repli sur la bascule",
+      "subscriptionsHeading": "Abonnements de synchro"
+    },
+    "routes": {
+      "heading": "Catalogue de routes ESI",
+      "method": "Méthode",
+      "path": "Chemin",
+      "operationId": "Opération",
+      "compatibilityDate": "Date de compatibilité",
+      "blocked": "Bloquée",
+      "cacheMode": "Mode de cache",
+      "rateLimitGroup": "Groupe de limite",
+      "pagination": "Pagination",
+      "identifierTypes": "Types d'identifiants",
+      "specFragment": "Fragment de spec",
+      "noValue": "Non enregistré"
+    },
+    "esi": {
+      "blockedHeading": "Routes bloquées par l'épingle de compatibilité",
+      "pinHistoryHeading": "Historique de l'épingle",
+      "pinHistory": {
+        "advancedAt": "Déplacée le",
+        "oldPin": "De",
+        "newPin": "Vers",
+        "actor": "Auteur",
+        "diff": "Diff des routes",
+        "diffNotRecorded": "Non enregistré",
+        "diffSummary": "+{{unblocked}} débloquées / −{{blocked}} bloquées"
+      }
+    },
+    "pin": {
+      "heading": "Avancer l'épingle de compatibilité",
+      "current": "Épinglé au {{date}}",
+      "candidateLabel": "Date visée",
+      "candidatePlaceholder": "AAAA-MM-JJ",
+      "preview": "Prévisualiser",
+      "previewing": "Calcul en cours…",
+      "previewFailed": "La prévisualisation n'a pas pu être calculée.",
+      "stalePreview": "La date a changé. Prévisualisez à nouveau avant d'avancer.",
+      "outOfRange": "{{candidate}} est postérieure à D_max ({{dMax}}). ESI ne l'a pas publiée ; le serveur refusera.",
+      "confirmLabel": "J'ai lu le diff des routes ci-dessus et je veux déplacer l'épingle.",
+      "advance": "Avancer l'épingle",
+      "advancing": "Déplacement…",
+      "advanced": "Épingle déplacée au {{date}}.",
+      "advanceFailed": "L'épingle n'a pas pu être déplacée.",
+      "dMax": "D_max {{date}}",
+      "noRoutesChange": "Aucune route ne change. Les {{count}} routes gardent leur état.",
+      "newlyUnblocked": "Nouvellement débloquées ({{count}})",
+      "newlyBlocked": "Nouvellement bloquées ({{count}})",
+      "none": "Aucune"
+    },
+    "rateLimits": {
+      "heading": "Compartiments du registre",
+      "group": "Groupe",
+      "userKey": "Clé utilisateur",
+      "maxTokens": "Jetons max",
+      "localRemaining": "Restant local",
+      "serverRemaining": "Restant serveur",
+      "divergence": "Divergence",
+      "serverObservedAt": "Serveur observé",
+      "worstDivergence": "Divergence maximale",
+      "notObserved": "Non observé",
+      "gateHint": "Le Gate 1 tolère au plus {{tolerance}} requête de divergence par groupe.",
+      "bucketsBreaching": "Compartiments hors tolérance",
+      "bucketsBreachingHint": "Une divergence durable annonce un échec du Gate 1.",
+      "bucketsUnobserved": "Compartiments jamais observés",
+      "bucketsUnobservedHint": "Aucun en-tête de limite n'a encore été vu pour ceux-ci."
+    },
+    "errorLimit": {
+      "heading": "Budget d'erreurs ESI",
+      "errorCount": "Erreurs dans la fenêtre",
+      "windowStart": "Début de fenêtre",
+      "paused": "Passerelle",
+      "pausedYes": "En pause",
+      "pausedNo": "Active"
+    },
+    "replicas": {
+      "heading": "Réplicas actifs",
+      "modeLabel": "Mode du registre",
+      "modeSolo": "Solo",
+      "modeClustered": "Cluster",
+      "liveCount": "Réplicas actifs",
+      "derivedNote": "Le mode du registre découle du nombre de réplicas actifs ; il ne se règle jamais à la main."
+    },
+    "scopes": {
+      "heading": "Scopes en attente d'accusé",
+      "scope": "Scope",
+      "firstSeen": "Vu la première fois",
+      "action": "Action"
+    },
+    "alerts": {
+      "deadLetterHeading": "Livraisons en file morte",
+      "unknownTypesHeading": "Types de notification en attente",
+      "createdAt": "Créé",
+      "alertType": "Alerte",
+      "channel": "Type de canal",
+      "channelName": "Canal",
+      "attempts": "Tentatives",
+      "lastAttempt": "Dernière tentative",
+      "lastError": "Dernière erreur",
+      "action": "Action",
+      "requeue": "Réenfiler",
+      "type": "Type",
+      "firstSeen": "Vu la première fois",
+      "lastSeen": "Vu la dernière fois",
+      "occurrences": "Occurrences",
+      "sample": "Charge utile",
+      "viewSample": "Voir",
+      "noSample": "Aucune charge utile d'exemple n'a été enregistrée."
+    },
+    "platforms": {
+      "heading": "Plateformes de provisionnement",
+      "name": "Nom",
+      "kind": "Type",
+      "enabled": "Activée",
+      "lockdown": "État",
+      "lockedDown": "Gelée",
+      "live": "Active",
+      "lock": "Geler le provisionnement",
+      "unlock": "Reprendre le provisionnement",
+      "reasonPlaceholder": "Motif du gel"
+    },
+    "rules": {
+      "heading": "Règles d'habilitation",
+      "add": "Ajouter une règle",
+      "noGroups": "Cette plateforme n'a aucun groupe à accorder.",
+      "empty": "Aucune règle. Tout le monde perd tous les groupes de cette plateforme.",
+      "sourceKind": "Source",
+      "sourceRef": "Référence",
+      "group": "Groupe",
+      "effect": "Effet",
+      "remove": "Supprimer la règle",
+      "preview": "Prévisualiser",
+      "previewing": "Calcul en cours…",
+      "previewFailed": "La prévisualisation n'a pas pu être calculée.",
+      "stalePreview": "Les règles ont changé. Prévisualisez à nouveau avant d'enregistrer.",
+      "save": "Enregistrer",
+      "saving": "Enregistrement…",
+      "saved": "Règles enregistrées.",
+      "saveFailed": "Les règles n'ont pas pu être enregistrées.",
+      "mustPreview": "Prévisualisez et confirmez avant d'enregistrer.",
+      "confirmLabel": "J'ai lu l'effet ci-dessus et je veux enregistrer ces règles.",
+      "losing": "{{count}} utilisateurs perdent un groupe",
+      "gaining": "{{count}} utilisateurs gagnent un groupe",
+      "noUsersAffected": "Aucun utilisateur ne change de groupe avec ces règles."
+    },
+    "exposures": {
+      "heading": "Tableau des expositions",
+      "kind": "Type",
+      "pending": "En attente",
+      "mismatched": "Divergent",
+      "user": "Utilisateur",
+      "action": "Action",
+      "reason": "Motif",
+      "eventAt": "Événement le",
+      "age": "Âge",
+      "noAge": "—"
+    },
+    "users": {
+      "heading": "Utilisateurs"
+    },
+    "security": {
+      "heading": "Journal de sécurité",
+      "filterByUser": "Filtrer par utilisateur",
+      "userIdPlaceholder": "UUID utilisateur",
+      "occurredAt": "Quand",
+      "action": "Action",
+      "actor": "Auteur",
+      "target": "Cible",
+      "ip": "IP"
+    }
   }
 }

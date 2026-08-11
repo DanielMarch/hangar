@@ -14,6 +14,11 @@ type BootResult struct {
 	Pin           time.Time
 	StaleSnapshot bool   // true when the embedded snapshot was used instead of a live fetch
 	Source        string // "live" | "embedded-snapshot"
+	// DMaxRecorded reports whether DMax made it into app.setting for
+	// AdvancePin's server-side bound check ([v3.1 — B13]). False means the
+	// bound falls back to the rollover date until the next successful
+	// ingest — sound, just looser.
+	DMaxRecorded bool
 	SyncResult
 }
 
@@ -51,7 +56,22 @@ func Boot(ctx context.Context, client *http.Client, store Store, now time.Time) 
 		return BootResult{}, fmt.Errorf("catalogue: boot: %w", err)
 	}
 
+	// [v3.1 — B13] Persist the D_max this ingest observed. Boot has always
+	// computed it and returned it in BootResult, but nothing stored it, so
+	// AdvancePin had no ceiling to validate a candidate pin against. This
+	// is the only writer of the setting; GetDMax is the only reader, and it
+	// falls back to the rollover date when no ingest has run yet.
+	//
+	// A failure here does NOT fail the boot: the catalogue is ingested and
+	// usable, and GetDMax's fallback is sound without this row. Losing the
+	// tighter bound is worth less than losing the ingest.
+	dMaxRecorded := true
+	if err := SetDMax(ctx, store, dMax); err != nil {
+		dMaxRecorded = false
+	}
+
 	return BootResult{
+		DMaxRecorded:  dMaxRecorded,
 		DMax:          dMax,
 		Pin:           pin,
 		StaleSnapshot: stale,

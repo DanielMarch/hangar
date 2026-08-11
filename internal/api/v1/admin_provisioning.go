@@ -11,7 +11,11 @@ package v1
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -126,6 +130,121 @@ func DeleteEntitlementRule(ctx context.Context, pool store.Pool, urgent *provisi
 	return firstErr
 }
 
+// RuleSetPreviewToken is the mechanism that makes "saving an entitlement
+// rule set without previewing it" impossible SERVER-side, not merely
+// discouraged in the UI (Phase 18: "a rule saved without preview is how an
+// accidental mass revocation happens").
+//
+// It is a digest over the platform and the exact rule set. The preview
+// endpoint returns it alongside the diffs; the save endpoint recomputes it
+// over the rules actually submitted and refuses anything that does not
+// match. So a save can only succeed for a rule set that was previewed, and
+// editing even one rule after previewing invalidates the token — which is
+// the case that matters, since a stale token would otherwise let an
+// operator preview a harmless change and save a catastrophic one.
+//
+// Stateless on purpose: no server-side "pending preview" row to expire,
+// clean up, or leak between administrators, and it works unchanged across
+// replicas. It is an integrity check on a workflow, NOT a security
+// boundary — the caller already holds provisioning.entitlements.manage —
+// so a plain digest is the right primitive and there is no secret to key
+// it with.
+func RuleSetPreviewToken(platformID uuid.UUID, rules []RuleInput) string {
+	// Canonical form: each rule as a tab-separated tuple, the whole set
+	// sorted. Sorted because the rule set is a SET — reordering the same
+	// rules in the editor must not invalidate a preview that already showed
+	// their exact effect. Tab-separated because none of the four fields can
+	// contain a tab (source_ref is an EVE id or a HANGAR uuid; effect and
+	// source_kind are closed Go-side sets).
+	lines := make([]string, len(rules))
+	for i, r := range rules {
+		lines[i] = strings.Join([]string{r.SourceKind, r.SourceRef, r.GroupID.String(), r.Effect}, "\t")
+	}
+	sort.Strings(lines)
+
+	h := sha256.New()
+	h.Write([]byte(platformID.String()))
+	h.Write([]byte{0})
+	for _, l := range lines {
+		h.Write([]byte(l))
+		h.Write([]byte{'\n'})
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// ReplacePlatformRules is PUT /api/v1/admin/platforms/{id}/rules — a full
+// replace of one platform's entitlement rule set, in one transaction, so a
+// half-applied rule set can never be evaluated against.
+//
+// PHASE 18. No endpoint has ever written an entitlement rule: Phase 11
+// left CreateEntitlementRule/DeleteEntitlementRule here as unwired seams
+// and SRS §6.8 lists only the preview and lockdown routes for a platform,
+// so "a rule editor that mandates preview confirmation before saving" had
+// nothing to save through. Reported at the close of this phase rather than
+// reconciled silently.
+//
+// DELIBERATE LIMITATION, and the reason this does not call
+// DeleteEntitlementRule's bulk-urgent-revocation path: enqueueing an
+// urgent recompute needs a *provisioning.Urgent, which needs a River
+// client, which exists only in the WORKER process (cmd/hangar/work.go),
+// not in the API server. A rule change here therefore takes effect on the
+// next scheduled bulk reconcile rather than within Gate 2's per-user < 60s
+// urgent SLO. That SLO is defined over revocations triggered by an
+// originating EVENT (a token invalidation, an owner-hash change) and is
+// unaffected; an administrator rewriting rules by hand is not that. Wiring
+// the API process to River would be an architectural change well beyond
+// this phase, and is recorded as such rather than half-done here.
+func ReplacePlatformRules(ctx context.Context, pool store.Pool, platformID uuid.UUID, rules []RuleInput) ([]gen.AppEntitlementRule, error) {
+	var created []gen.AppEntitlementRule
+	err := store.WithTx(ctx, pool, func(ctx context.Context, s *store.Store) error {
+		groups, err := s.ListPlatformGroups(ctx, platformID)
+		if err != nil {
+			return fmt.Errorf("v1: listing groups for platform %s: %w", platformID, err)
+		}
+		owned := make(map[uuid.UUID]bool, len(groups))
+		for _, g := range groups {
+			owned[g.GroupID] = true
+		}
+		// Every submitted rule must target a group this platform owns.
+		// Without this check a rule set saved against platform A could
+		// silently rewrite platform B's entitlements — the replace below
+		// only DELETES A's rules, so B's would be added and never removed.
+		for _, r := range rules {
+			if !owned[r.GroupID] {
+				return fmt.Errorf("v1: group %s does not belong to platform %s", r.GroupID, platformID)
+			}
+		}
+
+		existing, err := s.ListEntitlementRulesForPlatform(ctx, platformID)
+		if err != nil {
+			return fmt.Errorf("v1: listing existing rules for platform %s: %w", platformID, err)
+		}
+		for _, e := range existing {
+			if _, err := s.DeleteEntitlementRule(ctx, e.RuleID); err != nil {
+				return fmt.Errorf("v1: deleting rule %s: %w", e.RuleID, err)
+			}
+		}
+		created = make([]gen.AppEntitlementRule, 0, len(rules))
+		for _, r := range rules {
+			row, err := s.CreateEntitlementRule(ctx, gen.CreateEntitlementRuleParams{
+				SourceKind: r.SourceKind,
+				SourceRef:  r.SourceRef,
+				GroupID:    r.GroupID,
+				Effect:     r.Effect,
+			})
+			if err != nil {
+				return fmt.Errorf("v1: creating rule (%s %s -> %s): %w", r.SourceKind, r.SourceRef, r.GroupID, err)
+			}
+			created = append(created, row)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
 // ExposureBoard is the admin dashboard's read model: every provisioning
 // mismatch, cross-referenced with the audit rows still awaiting a
 // platform call. Exactly the two queries 02_DATABASE_SCHEMA.md §4.4
@@ -141,9 +260,15 @@ func GetExposureBoard(ctx context.Context, s *store.Store, platformID uuid.UUID)
 	if err != nil {
 		return ExposureBoard{}, fmt.Errorf("v1: listing exposed provisioning states for platform %s: %w", platformID, err)
 	}
-	pending, err := s.ListPendingProvisioningAudit(ctx)
+	// PHASE 18. Scoped to platformID. This was ListPendingProvisioningAudit,
+	// which has no platform predicate — so the exposure board for one
+	// platform listed every OTHER platform's pending revocations alongside
+	// its own, and an operator reading platform A's board could not tell
+	// which rows were A's. The unscoped query is still correct for Gate 2's
+	// installation-wide latency measurement and is left alone.
+	pending, err := s.ListPendingProvisioningAuditForPlatform(ctx, platformID)
 	if err != nil {
-		return ExposureBoard{}, fmt.Errorf("v1: listing pending provisioning audit: %w", err)
+		return ExposureBoard{}, fmt.Errorf("v1: listing pending provisioning audit for platform %s: %w", platformID, err)
 	}
 	return ExposureBoard{Mismatched: mismatched, Pending: pending}, nil
 }

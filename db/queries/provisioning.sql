@@ -135,6 +135,24 @@ SELECT * FROM app.provisioning_audit
  WHERE platform_call_completed_at IS NULL
  ORDER BY event_at;
 
+-- name: ListPendingProvisioningAuditForPlatform :many
+-- PHASE 18. The per-platform exposure board's audit side.
+-- GetExposureBoard is scoped to one platform, but the query above is not,
+-- so the board for platform A was listing platform B's pending
+-- revocations alongside its own. Added as a scoped variant rather than by
+-- adding a predicate to ListPendingProvisioningAudit, which Gate 2's
+-- installation-wide latency measurement uses unscoped and correctly so.
+--
+-- `age` is deliberately NOT computed here: the exposure board's exit
+-- criterion is that the age comes from event_at, and event_at is on the
+-- row. Computing an age server-side would freeze it at response time,
+-- which is the same "measured from the wrong instant" mistake the
+-- criterion exists to rule out.
+SELECT * FROM app.provisioning_audit
+ WHERE platform_call_completed_at IS NULL
+   AND platform_id = $1
+ ORDER BY event_at;
+
 -- name: ListRecentProvisioningAudit :many
 SELECT * FROM app.provisioning_audit ORDER BY event_at DESC LIMIT sqlc.arg(page_size);
 

@@ -83,7 +83,23 @@ sql:
           # ── JSONB payloads (unparseable notification YAML, spec fragments,
           #    generic alert render data) stay as raw bytes: Principle 14 forbids
           #    validating shapes we do not control. ──
+          #
+          # PHASE 18 (SRS v3.1 §0 defect B12). The `nullable: true` variant
+          # below did NOT exist before, so a NULLABLE jsonb column fell back
+          # to sqlc's default and generated a plain `[]byte` — indistinguishable
+          # by type from a genuinely binary `bytea` column. That is what
+          # internal/api/dto/row.go keys on to decide nested-JSON versus hex,
+          # so app.corporation.palette, app.notification_unknown_type
+          # .sample_payload and app.character_notification.payload were
+          # hex-encoded on the wire even after B12's converter fix, while the
+          # 42 NOT NULL jsonb fields were repaired. §6's rule is about the
+          # COLUMN's type, not its nullability; making both variants generate
+          # json.RawMessage is what lets the converter enforce it by type
+          # rather than by sniffing the bytes.
           - db_type: "jsonb"
+            go_type: "encoding/json.RawMessage"
+          - db_type: "jsonb"
+            nullable: true
             go_type: "encoding/json.RawMessage"
 
           # ── intervals (route TTLs, coalescing windows) ──

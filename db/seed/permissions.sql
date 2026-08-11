@@ -29,6 +29,7 @@ INSERT INTO app.permission (permission, description, category) VALUES
     ('admin.esi.view', 'View ESI gateway state: blocked routes, rate limits, error budget and replicas', 'admin'),
     ('admin.platforms.view', 'View configured provisioning platforms', 'admin'),
     ('admin.scopes.view', 'View newly observed ESI scope strings pending acknowledgement', 'admin'),
+    ('admin.scopes.acknowledge', 'Acknowledge a newly observed ESI scope string', 'admin'),
     ('provisioning.platforms.manage', 'Configure Discord/TeamSpeak/Mumble platform connections', 'provisioning'),
     ('provisioning.entitlements.manage', 'Edit entitlement rules that grant platform groups', 'provisioning'),
     ('provisioning.audit.view', 'View the provisioning audit trail', 'provisioning'),

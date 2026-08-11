@@ -207,5 +207,198 @@
     "applications": {
       "pending": "대기 중인 신청"
     }
+  },
+  "admin": {
+    "acknowledge": "확인 처리",
+    "tabs": {
+      "sync": "동기화 상태",
+      "routes": "라우트 카탈로그",
+      "esi": "호환성 핀",
+      "rateLimits": "속도 제한",
+      "replicas": "레플리카",
+      "scopes": "미확인 스코프",
+      "platforms": "플랫폼",
+      "alerts": "알림",
+      "users": "사용자",
+      "security": "보안 로그"
+    },
+    "sync": {
+      "totalRoutes": "수집된 라우트",
+      "schedulableRoutes": "예약 가능",
+      "blockedRoutes": "핀으로 차단됨",
+      "compatibilityPin": "호환성 핀",
+      "dMaxLabel": "상한 (D_max)",
+      "dMaxRecorded": "최근 수집 기준",
+      "dMaxFallback": "롤오버 대체값",
+      "subscriptionsHeading": "동기화 구독"
+    },
+    "routes": {
+      "heading": "ESI 라우트 카탈로그",
+      "method": "메서드",
+      "path": "경로",
+      "operationId": "오퍼레이션",
+      "compatibilityDate": "호환성 날짜",
+      "blocked": "차단됨",
+      "cacheMode": "캐시 모드",
+      "rateLimitGroup": "속도 제한 그룹",
+      "pagination": "페이지네이션",
+      "identifierTypes": "식별자 타입",
+      "specFragment": "스펙 조각",
+      "noValue": "기록 없음"
+    },
+    "esi": {
+      "blockedHeading": "호환성 핀으로 차단된 라우트",
+      "pinHistoryHeading": "핀 변경 이력",
+      "pinHistory": {
+        "advancedAt": "변경 시각",
+        "oldPin": "이전",
+        "newPin": "이후",
+        "actor": "실행자",
+        "diff": "라우트 차이",
+        "diffNotRecorded": "기록 없음",
+        "diffSummary": "+{{unblocked}} 해제 / −{{blocked}} 차단"
+      }
+    },
+    "pin": {
+      "heading": "호환성 핀 이동",
+      "current": "현재 {{date}}로 고정됨",
+      "candidateLabel": "대상 날짜",
+      "candidatePlaceholder": "YYYY-MM-DD",
+      "preview": "미리보기",
+      "previewing": "계산 중…",
+      "previewFailed": "미리보기를 계산하지 못했습니다.",
+      "stalePreview": "날짜가 변경되었습니다. 이동 전에 다시 미리보기하세요.",
+      "outOfRange": "{{candidate}}은(는) D_max({{dMax}})보다 최신입니다. ESI가 공개하지 않았으므로 서버가 거부합니다.",
+      "confirmLabel": "위 라우트 차이를 확인했으며 핀을 이동합니다.",
+      "advance": "핀 이동",
+      "advancing": "이동 중…",
+      "advanced": "핀을 {{date}}로 이동했습니다.",
+      "advanceFailed": "핀을 이동하지 못했습니다.",
+      "dMax": "D_max {{date}}",
+      "noRoutesChange": "변경되는 라우트가 없습니다. {{count}}개 모두 현재 상태를 유지합니다.",
+      "newlyUnblocked": "새로 해제됨 ({{count}})",
+      "newlyBlocked": "새로 차단됨 ({{count}})",
+      "none": "없음"
+    },
+    "rateLimits": {
+      "heading": "원장 버킷",
+      "group": "그룹",
+      "userKey": "사용자 키",
+      "maxTokens": "최대 토큰",
+      "localRemaining": "로컬 잔량",
+      "serverRemaining": "서버 잔량",
+      "divergence": "편차",
+      "serverObservedAt": "서버 관측",
+      "worstDivergence": "최대 편차",
+      "notObserved": "관측 안 됨",
+      "gateHint": "Gate 1은 그룹당 최대 {{tolerance}}건의 편차만 허용합니다.",
+      "bucketsBreaching": "허용치 초과 버킷",
+      "bucketsBreachingHint": "지속적인 편차는 Gate 1 실패의 전조입니다.",
+      "bucketsUnobserved": "관측된 적 없는 버킷",
+      "bucketsUnobservedHint": "아직 속도 제한 헤더를 받지 못했습니다."
+    },
+    "errorLimit": {
+      "heading": "ESI 오류 예산",
+      "errorCount": "구간 내 오류",
+      "windowStart": "구간 시작",
+      "paused": "게이트웨이",
+      "pausedYes": "일시 정지",
+      "pausedNo": "동작 중"
+    },
+    "replicas": {
+      "heading": "활성 레플리카",
+      "modeLabel": "원장 모드",
+      "modeSolo": "단독",
+      "modeClustered": "클러스터",
+      "liveCount": "활성 레플리카",
+      "derivedNote": "원장 모드는 활성 레플리카 수에서 도출되며 수동으로 설정하지 않습니다."
+    },
+    "scopes": {
+      "heading": "확인 대기 중인 스코프",
+      "scope": "스코프",
+      "firstSeen": "최초 관측",
+      "action": "작업"
+    },
+    "alerts": {
+      "deadLetterHeading": "데드레터 전송",
+      "unknownTypesHeading": "확인 대기 중인 알림 타입",
+      "createdAt": "생성",
+      "alertType": "알림",
+      "channel": "채널 종류",
+      "channelName": "채널",
+      "attempts": "시도",
+      "lastAttempt": "마지막 시도",
+      "lastError": "마지막 오류",
+      "action": "작업",
+      "requeue": "재시도 큐에 넣기",
+      "type": "타입",
+      "firstSeen": "최초 관측",
+      "lastSeen": "최근 관측",
+      "occurrences": "발생 횟수",
+      "sample": "페이로드",
+      "viewSample": "보기",
+      "noSample": "샘플 페이로드가 기록되지 않았습니다."
+    },
+    "platforms": {
+      "heading": "프로비저닝 플랫폼",
+      "name": "이름",
+      "kind": "종류",
+      "enabled": "활성",
+      "lockdown": "상태",
+      "lockedDown": "동결됨",
+      "live": "운영 중",
+      "lock": "프로비저닝 동결",
+      "unlock": "프로비저닝 재개",
+      "reasonPlaceholder": "동결 사유"
+    },
+    "rules": {
+      "heading": "권한 규칙",
+      "add": "규칙 추가",
+      "noGroups": "이 플랫폼에는 부여할 그룹이 없습니다.",
+      "empty": "규칙이 없습니다. 모든 사용자가 이 플랫폼의 모든 그룹을 잃습니다.",
+      "sourceKind": "소스",
+      "sourceRef": "참조",
+      "group": "그룹",
+      "effect": "효과",
+      "remove": "규칙 삭제",
+      "preview": "미리보기",
+      "previewing": "계산 중…",
+      "previewFailed": "미리보기를 계산하지 못했습니다.",
+      "stalePreview": "규칙이 변경되었습니다. 저장 전에 다시 미리보기하세요.",
+      "save": "규칙 저장",
+      "saving": "저장 중…",
+      "saved": "규칙을 저장했습니다.",
+      "saveFailed": "규칙을 저장하지 못했습니다.",
+      "mustPreview": "저장 전에 미리보기하고 확인하세요.",
+      "confirmLabel": "위 영향을 확인했으며 이 규칙을 저장합니다.",
+      "losing": "{{count}}명이 그룹을 잃습니다",
+      "gaining": "{{count}}명이 그룹을 얻습니다",
+      "noUsersAffected": "이 규칙으로 그룹이 바뀌는 사용자가 없습니다."
+    },
+    "exposures": {
+      "heading": "노출 보드",
+      "kind": "종류",
+      "pending": "대기 중",
+      "mismatched": "불일치",
+      "user": "사용자",
+      "action": "작업",
+      "reason": "사유",
+      "eventAt": "이벤트 시각",
+      "age": "경과",
+      "noAge": "—"
+    },
+    "users": {
+      "heading": "사용자"
+    },
+    "security": {
+      "heading": "보안 로그",
+      "filterByUser": "사용자로 필터",
+      "userIdPlaceholder": "사용자 UUID",
+      "occurredAt": "시각",
+      "action": "작업",
+      "actor": "실행자",
+      "target": "대상",
+      "ip": "IP"
+    }
   }
 }

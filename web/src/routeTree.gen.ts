@@ -13,6 +13,17 @@ import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as CallbackRouteImport } from './routes/callback'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthedIndexRouteImport } from './routes/_authed/index'
+import { Route as AuthedAdminRouteImport } from './routes/_authed/admin'
+import { Route as AuthedAdminIndexRouteImport } from './routes/_authed/admin/index'
+import { Route as AuthedAdminAlertsRouteImport } from './routes/_authed/admin/alerts'
+import { Route as AuthedAdminEsiRouteImport } from './routes/_authed/admin/esi'
+import { Route as AuthedAdminPlatformsRouteImport } from './routes/_authed/admin/platforms'
+import { Route as AuthedAdminRatelimitsRouteImport } from './routes/_authed/admin/ratelimits'
+import { Route as AuthedAdminReplicasRouteImport } from './routes/_authed/admin/replicas'
+import { Route as AuthedAdminRoutesRouteImport } from './routes/_authed/admin/routes'
+import { Route as AuthedAdminScopesRouteImport } from './routes/_authed/admin/scopes'
+import { Route as AuthedAdminSecurityRouteImport } from './routes/_authed/admin/security'
+import { Route as AuthedAdminUsersRouteImport } from './routes/_authed/admin/users'
 import { Route as AuthedCharactersIndexRouteImport } from './routes/_authed/characters/index'
 import { Route as AuthedCharactersCharacterIdRouteImport } from './routes/_authed/characters/$characterId'
 import { Route as AuthedCorporationsIndexRouteImport } from './routes/_authed/corporations/index'
@@ -63,6 +74,61 @@ const AuthedIndexRoute = AuthedIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedAdminRoute = AuthedAdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedAdminIndexRoute = AuthedAdminIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AuthedAdminRoute,
+} as any)
+const AuthedAdminAlertsRoute = AuthedAdminAlertsRouteImport.update({
+  id: '/alerts',
+  path: '/alerts',
+  getParentRoute: () => AuthedAdminRoute,
+} as any)
+const AuthedAdminEsiRoute = AuthedAdminEsiRouteImport.update({
+  id: '/esi',
+  path: '/esi',
+  getParentRoute: () => AuthedAdminRoute,
+} as any)
+const AuthedAdminPlatformsRoute = AuthedAdminPlatformsRouteImport.update({
+  id: '/platforms',
+  path: '/platforms',
+  getParentRoute: () => AuthedAdminRoute,
+} as any)
+const AuthedAdminRatelimitsRoute = AuthedAdminRatelimitsRouteImport.update({
+  id: '/ratelimits',
+  path: '/ratelimits',
+  getParentRoute: () => AuthedAdminRoute,
+} as any)
+const AuthedAdminReplicasRoute = AuthedAdminReplicasRouteImport.update({
+  id: '/replicas',
+  path: '/replicas',
+  getParentRoute: () => AuthedAdminRoute,
+} as any)
+const AuthedAdminRoutesRoute = AuthedAdminRoutesRouteImport.update({
+  id: '/routes',
+  path: '/routes',
+  getParentRoute: () => AuthedAdminRoute,
+} as any)
+const AuthedAdminScopesRoute = AuthedAdminScopesRouteImport.update({
+  id: '/scopes',
+  path: '/scopes',
+  getParentRoute: () => AuthedAdminRoute,
+} as any)
+const AuthedAdminSecurityRoute = AuthedAdminSecurityRouteImport.update({
+  id: '/security',
+  path: '/security',
+  getParentRoute: () => AuthedAdminRoute,
+} as any)
+const AuthedAdminUsersRoute = AuthedAdminUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => AuthedAdminRoute,
 } as any)
 const AuthedCharactersIndexRoute = AuthedCharactersIndexRouteImport.update({
   id: '/characters/',
@@ -251,9 +317,20 @@ export interface FileRoutesByFullPath {
   '/': typeof AuthedIndexRoute
   '/callback': typeof CallbackRoute
   '/login': typeof LoginRoute
+  '/admin': typeof AuthedAdminRouteWithChildren
+  '/admin/alerts': typeof AuthedAdminAlertsRoute
+  '/admin/esi': typeof AuthedAdminEsiRoute
+  '/admin/platforms': typeof AuthedAdminPlatformsRoute
+  '/admin/ratelimits': typeof AuthedAdminRatelimitsRoute
+  '/admin/replicas': typeof AuthedAdminReplicasRoute
+  '/admin/routes': typeof AuthedAdminRoutesRoute
+  '/admin/scopes': typeof AuthedAdminScopesRoute
+  '/admin/security': typeof AuthedAdminSecurityRoute
+  '/admin/users': typeof AuthedAdminUsersRoute
   '/characters/$characterId': typeof AuthedCharactersCharacterIdRouteWithChildren
   '/corporations/$corporationId': typeof AuthedCorporationsCorporationIdRouteWithChildren
   '/squads/$squadId': typeof AuthedSquadsSquadIdRouteWithChildren
+  '/admin/': typeof AuthedAdminIndexRoute
   '/characters/': typeof AuthedCharactersIndexRoute
   '/corporations/': typeof AuthedCorporationsIndexRoute
   '/squads/': typeof AuthedSquadsIndexRoute
@@ -287,6 +364,16 @@ export interface FileRoutesByTo {
   '/callback': typeof CallbackRoute
   '/login': typeof LoginRoute
   '/': typeof AuthedIndexRoute
+  '/admin/alerts': typeof AuthedAdminAlertsRoute
+  '/admin/esi': typeof AuthedAdminEsiRoute
+  '/admin/platforms': typeof AuthedAdminPlatformsRoute
+  '/admin/ratelimits': typeof AuthedAdminRatelimitsRoute
+  '/admin/replicas': typeof AuthedAdminReplicasRoute
+  '/admin/routes': typeof AuthedAdminRoutesRoute
+  '/admin/scopes': typeof AuthedAdminScopesRoute
+  '/admin/security': typeof AuthedAdminSecurityRoute
+  '/admin/users': typeof AuthedAdminUsersRoute
+  '/admin': typeof AuthedAdminIndexRoute
   '/characters': typeof AuthedCharactersIndexRoute
   '/corporations': typeof AuthedCorporationsIndexRoute
   '/squads': typeof AuthedSquadsIndexRoute
@@ -321,10 +408,21 @@ export interface FileRoutesById {
   '/_authed': typeof AuthedRouteWithChildren
   '/callback': typeof CallbackRoute
   '/login': typeof LoginRoute
+  '/_authed/admin': typeof AuthedAdminRouteWithChildren
   '/_authed/': typeof AuthedIndexRoute
+  '/_authed/admin/alerts': typeof AuthedAdminAlertsRoute
+  '/_authed/admin/esi': typeof AuthedAdminEsiRoute
+  '/_authed/admin/platforms': typeof AuthedAdminPlatformsRoute
+  '/_authed/admin/ratelimits': typeof AuthedAdminRatelimitsRoute
+  '/_authed/admin/replicas': typeof AuthedAdminReplicasRoute
+  '/_authed/admin/routes': typeof AuthedAdminRoutesRoute
+  '/_authed/admin/scopes': typeof AuthedAdminScopesRoute
+  '/_authed/admin/security': typeof AuthedAdminSecurityRoute
+  '/_authed/admin/users': typeof AuthedAdminUsersRoute
   '/_authed/characters/$characterId': typeof AuthedCharactersCharacterIdRouteWithChildren
   '/_authed/corporations/$corporationId': typeof AuthedCorporationsCorporationIdRouteWithChildren
   '/_authed/squads/$squadId': typeof AuthedSquadsSquadIdRouteWithChildren
+  '/_authed/admin/': typeof AuthedAdminIndexRoute
   '/_authed/characters/': typeof AuthedCharactersIndexRoute
   '/_authed/corporations/': typeof AuthedCorporationsIndexRoute
   '/_authed/squads/': typeof AuthedSquadsIndexRoute
@@ -360,9 +458,20 @@ export interface FileRouteTypes {
     | '/'
     | '/callback'
     | '/login'
+    | '/admin'
+    | '/admin/alerts'
+    | '/admin/esi'
+    | '/admin/platforms'
+    | '/admin/ratelimits'
+    | '/admin/replicas'
+    | '/admin/routes'
+    | '/admin/scopes'
+    | '/admin/security'
+    | '/admin/users'
     | '/characters/$characterId'
     | '/corporations/$corporationId'
     | '/squads/$squadId'
+    | '/admin/'
     | '/characters/'
     | '/corporations/'
     | '/squads/'
@@ -396,6 +505,16 @@ export interface FileRouteTypes {
     | '/callback'
     | '/login'
     | '/'
+    | '/admin/alerts'
+    | '/admin/esi'
+    | '/admin/platforms'
+    | '/admin/ratelimits'
+    | '/admin/replicas'
+    | '/admin/routes'
+    | '/admin/scopes'
+    | '/admin/security'
+    | '/admin/users'
+    | '/admin'
     | '/characters'
     | '/corporations'
     | '/squads'
@@ -429,10 +548,21 @@ export interface FileRouteTypes {
     | '/_authed'
     | '/callback'
     | '/login'
+    | '/_authed/admin'
     | '/_authed/'
+    | '/_authed/admin/alerts'
+    | '/_authed/admin/esi'
+    | '/_authed/admin/platforms'
+    | '/_authed/admin/ratelimits'
+    | '/_authed/admin/replicas'
+    | '/_authed/admin/routes'
+    | '/_authed/admin/scopes'
+    | '/_authed/admin/security'
+    | '/_authed/admin/users'
     | '/_authed/characters/$characterId'
     | '/_authed/corporations/$corporationId'
     | '/_authed/squads/$squadId'
+    | '/_authed/admin/'
     | '/_authed/characters/'
     | '/_authed/corporations/'
     | '/_authed/squads/'
@@ -498,6 +628,83 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof AuthedIndexRouteImport
       parentRoute: typeof AuthedRoute
+    }
+    '/_authed/admin': {
+      id: '/_authed/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AuthedAdminRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/admin/': {
+      id: '/_authed/admin/'
+      path: '/'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AuthedAdminIndexRouteImport
+      parentRoute: typeof AuthedAdminRoute
+    }
+    '/_authed/admin/alerts': {
+      id: '/_authed/admin/alerts'
+      path: '/alerts'
+      fullPath: '/admin/alerts'
+      preLoaderRoute: typeof AuthedAdminAlertsRouteImport
+      parentRoute: typeof AuthedAdminRoute
+    }
+    '/_authed/admin/esi': {
+      id: '/_authed/admin/esi'
+      path: '/esi'
+      fullPath: '/admin/esi'
+      preLoaderRoute: typeof AuthedAdminEsiRouteImport
+      parentRoute: typeof AuthedAdminRoute
+    }
+    '/_authed/admin/platforms': {
+      id: '/_authed/admin/platforms'
+      path: '/platforms'
+      fullPath: '/admin/platforms'
+      preLoaderRoute: typeof AuthedAdminPlatformsRouteImport
+      parentRoute: typeof AuthedAdminRoute
+    }
+    '/_authed/admin/ratelimits': {
+      id: '/_authed/admin/ratelimits'
+      path: '/ratelimits'
+      fullPath: '/admin/ratelimits'
+      preLoaderRoute: typeof AuthedAdminRatelimitsRouteImport
+      parentRoute: typeof AuthedAdminRoute
+    }
+    '/_authed/admin/replicas': {
+      id: '/_authed/admin/replicas'
+      path: '/replicas'
+      fullPath: '/admin/replicas'
+      preLoaderRoute: typeof AuthedAdminReplicasRouteImport
+      parentRoute: typeof AuthedAdminRoute
+    }
+    '/_authed/admin/routes': {
+      id: '/_authed/admin/routes'
+      path: '/routes'
+      fullPath: '/admin/routes'
+      preLoaderRoute: typeof AuthedAdminRoutesRouteImport
+      parentRoute: typeof AuthedAdminRoute
+    }
+    '/_authed/admin/scopes': {
+      id: '/_authed/admin/scopes'
+      path: '/scopes'
+      fullPath: '/admin/scopes'
+      preLoaderRoute: typeof AuthedAdminScopesRouteImport
+      parentRoute: typeof AuthedAdminRoute
+    }
+    '/_authed/admin/security': {
+      id: '/_authed/admin/security'
+      path: '/security'
+      fullPath: '/admin/security'
+      preLoaderRoute: typeof AuthedAdminSecurityRouteImport
+      parentRoute: typeof AuthedAdminRoute
+    }
+    '/_authed/admin/users': {
+      id: '/_authed/admin/users'
+      path: '/users'
+      fullPath: '/admin/users'
+      preLoaderRoute: typeof AuthedAdminUsersRouteImport
+      parentRoute: typeof AuthedAdminRoute
     }
     '/_authed/characters/': {
       id: '/_authed/characters/'
@@ -719,6 +926,36 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AuthedAdminRouteChildren {
+  AuthedAdminAlertsRoute: typeof AuthedAdminAlertsRoute
+  AuthedAdminEsiRoute: typeof AuthedAdminEsiRoute
+  AuthedAdminPlatformsRoute: typeof AuthedAdminPlatformsRoute
+  AuthedAdminRatelimitsRoute: typeof AuthedAdminRatelimitsRoute
+  AuthedAdminReplicasRoute: typeof AuthedAdminReplicasRoute
+  AuthedAdminRoutesRoute: typeof AuthedAdminRoutesRoute
+  AuthedAdminScopesRoute: typeof AuthedAdminScopesRoute
+  AuthedAdminSecurityRoute: typeof AuthedAdminSecurityRoute
+  AuthedAdminUsersRoute: typeof AuthedAdminUsersRoute
+  AuthedAdminIndexRoute: typeof AuthedAdminIndexRoute
+}
+
+const AuthedAdminRouteChildren: AuthedAdminRouteChildren = {
+  AuthedAdminAlertsRoute: AuthedAdminAlertsRoute,
+  AuthedAdminEsiRoute: AuthedAdminEsiRoute,
+  AuthedAdminPlatformsRoute: AuthedAdminPlatformsRoute,
+  AuthedAdminRatelimitsRoute: AuthedAdminRatelimitsRoute,
+  AuthedAdminReplicasRoute: AuthedAdminReplicasRoute,
+  AuthedAdminRoutesRoute: AuthedAdminRoutesRoute,
+  AuthedAdminScopesRoute: AuthedAdminScopesRoute,
+  AuthedAdminSecurityRoute: AuthedAdminSecurityRoute,
+  AuthedAdminUsersRoute: AuthedAdminUsersRoute,
+  AuthedAdminIndexRoute: AuthedAdminIndexRoute,
+}
+
+const AuthedAdminRouteWithChildren = AuthedAdminRoute._addFileChildren(
+  AuthedAdminRouteChildren,
+)
+
 interface AuthedCharactersCharacterIdRouteChildren {
   AuthedCharactersCharacterIdAssetsRoute: typeof AuthedCharactersCharacterIdAssetsRoute
   AuthedCharactersCharacterIdCalendarRoute: typeof AuthedCharactersCharacterIdCalendarRoute
@@ -821,6 +1058,7 @@ const AuthedSquadsSquadIdRouteWithChildren =
   AuthedSquadsSquadIdRoute._addFileChildren(AuthedSquadsSquadIdRouteChildren)
 
 interface AuthedRouteChildren {
+  AuthedAdminRoute: typeof AuthedAdminRouteWithChildren
   AuthedIndexRoute: typeof AuthedIndexRoute
   AuthedCharactersCharacterIdRoute: typeof AuthedCharactersCharacterIdRouteWithChildren
   AuthedCorporationsCorporationIdRoute: typeof AuthedCorporationsCorporationIdRouteWithChildren
@@ -831,6 +1069,7 @@ interface AuthedRouteChildren {
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
+  AuthedAdminRoute: AuthedAdminRouteWithChildren,
   AuthedIndexRoute: AuthedIndexRoute,
   AuthedCharactersCharacterIdRoute:
     AuthedCharactersCharacterIdRouteWithChildren,

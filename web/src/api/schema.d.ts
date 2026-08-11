@@ -55,6 +55,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/alerts/unknown-types/{type}/acknowledge": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Acknowledge one unrecognised notification type */
+    post: operations["admin-alerts-unknown-types-acknowledge"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/esi/catalogue/blocked": {
     parameters: {
       query?: never;
@@ -89,6 +106,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/esi/catalogue/pin/history": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Compatibility pin advance history, with the recorded route diff */
+    get: operations["admin-esi-pin-history"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/esi/catalogue/pin/preview": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Preview the route diff for a candidate compatibility date (non-mutating) */
+    post: operations["admin-esi-pin-preview"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/esi/errorlimit": {
     parameters: {
       query?: never;
@@ -113,7 +164,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Rate limit ledger buckets */
+    /** Rate limit ledger buckets, with per-bucket ledger divergence */
     get: operations["admin-esi-ratelimits"];
     put?: never;
     post?: never;
@@ -157,6 +208,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/platforms/{id}/groups": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Groups one platform offers as entitlement targets */
+    get: operations["admin-platform-groups"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/platforms/{id}/lockdown": {
     parameters: {
       query?: never;
@@ -168,6 +236,24 @@ export interface paths {
     put?: never;
     /** Freeze or unfreeze outbound provisioning for one platform */
     post: operations["admin-platform-lockdown"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/platforms/{id}/rules": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Current entitlement rule set for one platform */
+    get: operations["admin-platform-rules"];
+    /** Replace one platform's entitlement rule set (requires a matching preview token) */
+    put: operations["admin-platform-rules-replace"];
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -254,6 +340,23 @@ export interface paths {
     get: operations["admin-scopes-unknown"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/scopes/unknown/acknowledge": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Acknowledge one newly observed scope string */
+    post: operations["admin-scopes-unknown-acknowledge"];
     delete?: never;
     options?: never;
     head?: never;
@@ -2668,6 +2771,16 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    AcknowledgeScopeInBody: {
+      /**
+       * Format: uri
+       * @description A URL to the JSON Schema for this object.
+       * @example https://example.com/schemas/AcknowledgeScopeInBody.json
+       */
+      readonly $schema?: string;
+      /** @description The scope string, verbatim and unparsed (Principle 14). */
+      scope: string;
+    };
     AdvancePinInBody: {
       /**
        * Format: uri
@@ -2791,6 +2904,14 @@ export interface components {
       source_kind: string;
       source_ref: string;
     };
+    Item1: {
+      /** @enum {string} */
+      effect: "grant" | "deny";
+      /** Format: uuid */
+      group_id: string;
+      source_kind: string;
+      source_ref: string;
+    };
     "ItemMapStringInterface {}": {
       /**
        * Format: uri
@@ -2842,6 +2963,33 @@ export interface components {
       next_cursor: string;
       prev_cursor: string;
     };
+    PinPreview: {
+      candidate_pin: string;
+      current_pin: string;
+      d_max: string;
+      d_max_source: string;
+      diff: components["schemas"]["RouteDiff"];
+      within_bounds: boolean;
+    };
+    PinPreviewOutBody: {
+      /**
+       * Format: uri
+       * @description A URL to the JSON Schema for this object.
+       * @example https://example.com/schemas/PinPreviewOutBody.json
+       */
+      readonly $schema?: string;
+      data: components["schemas"]["PinPreview"];
+    };
+    PreviewPinInBody: {
+      /**
+       * Format: uri
+       * @description A URL to the JSON Schema for this object.
+       * @example https://example.com/schemas/PreviewPinInBody.json
+       */
+      readonly $schema?: string;
+      /** @description Candidate compatibility date, YYYY-MM-DD. Nothing is changed by previewing it. */
+      new_pin: string;
+    };
     ReauthorizeOutBody: {
       /**
        * Format: uri
@@ -2850,6 +2998,17 @@ export interface components {
        */
       readonly $schema?: string;
       redirect_url: string;
+    };
+    ReplaceRulesInBody: {
+      /**
+       * Format: uri
+       * @description A URL to the JSON Schema for this object.
+       * @example https://example.com/schemas/ReplaceRulesInBody.json
+       */
+      readonly $schema?: string;
+      /** @description The token POST .../rules/preview returned for this exact rule set. Required: a rule set that has not been previewed cannot be saved. */
+      preview_token: string;
+      rules: components["schemas"]["Item1"][] | null;
     };
     ResolveApplicationInBody: {
       /**
@@ -2879,6 +3038,20 @@ export interface components {
       effect: "allow" | "deny";
       permission: string;
     };
+    RouteChange: {
+      compatibility_date: string;
+      method: string;
+      operation_id: string;
+      upstream_path: string;
+    };
+    RouteDiff: {
+      new_pin: string;
+      newly_blocked: components["schemas"]["RouteChange"][] | null;
+      newly_unblocked: components["schemas"]["RouteChange"][] | null;
+      old_pin: string;
+      /** Format: int64 */
+      unchanged: number;
+    };
     RulesPreviewInBody: {
       /**
        * Format: uri
@@ -2896,6 +3069,20 @@ export interface components {
        */
       readonly $schema?: string;
       diffs:
+        | {
+            [key: string]: unknown;
+          }[]
+        | null;
+      preview_token: string;
+    };
+    RulesSavedOutBody: {
+      /**
+       * Format: uri
+       * @description A URL to the JSON Schema for this object.
+       * @example https://example.com/schemas/RulesSavedOutBody.json
+       */
+      readonly $schema?: string;
+      rules:
         | {
             [key: string]: unknown;
           }[]
@@ -3078,6 +3265,36 @@ export interface operations {
       };
     };
   };
+  "admin-alerts-unknown-types-acknowledge": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The unrecognised notification type, verbatim. */
+        type: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
   "admin-esi-catalogue-blocked": {
     parameters: {
       query?: never;
@@ -3127,6 +3344,68 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ItemMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-esi-pin-history": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-esi-pin-preview": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PreviewPinInBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PinPreviewOutBody"];
         };
       };
       /** @description Error */
@@ -3256,6 +3535,38 @@ export interface operations {
       };
     };
   };
+  "admin-platform-groups": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description HANGAR-assigned UUID. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
   "admin-platform-lockdown": {
     parameters: {
       query?: never;
@@ -3278,6 +3589,73 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ItemMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-platform-rules": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description HANGAR-assigned UUID. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-platform-rules-replace": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ReplaceRulesInBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RulesSavedOutBody"];
         };
       };
       /** @description Error */
@@ -3357,12 +3735,12 @@ export interface operations {
   };
   "admin-provisioning-exposures": {
     parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description HANGAR-assigned UUID. */
-        id: string;
+      query?: {
+        /** @description The platform whose exposure board to return. */
+        platform_id?: string;
       };
+      header?: never;
+      path?: never;
       cookie?: never;
     };
     requestBody?: never;
@@ -3466,6 +3844,37 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["CollectionMapStringInterface {}"];
         };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-scopes-unknown-acknowledge": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AcknowledgeScopeInBody"];
+      };
+    };
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Error */
       default: {

@@ -66,5 +66,12 @@ export default defineConfig({
     passWithNoTests: true,
     css: false,
     setupFiles: ["./src/test-setup.ts"],
+    // PHASE 18: Vitest's default `include` is **/*.{test,spec}.?(c|m)[jt]s?(x)
+    // across the whole project, which swallowed web/e2e/*.spec.ts the moment
+    // that directory gained files — and a Playwright spec loaded by Vitest
+    // fails with a confusing "Playwright Test did not expect test.describe()
+    // to be called here". The two suites are separate runners with separate
+    // entrypoints (`pnpm test` and `pnpm e2e`); scope Vitest to src/.
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
   },
 });

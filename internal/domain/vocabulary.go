@@ -114,6 +114,14 @@ var Permissions = []Permission{
 	{"admin.esi.view", "admin", "View ESI gateway state: blocked routes, rate limits, error budget and replicas"},
 	{"admin.platforms.view", "admin", "View configured provisioning platforms"},
 	{"admin.scopes.view", "admin", "View newly observed ESI scope strings pending acknowledgement"},
+	// PHASE 18 ADDITION. The scope board's counterpart to
+	// alerting.unknown_types.acknowledge, which Phase 14 defined but whose
+	// scope-side twin nobody ever did — so the unknown-scope board could be
+	// read and never cleared. Acknowledging is a separate authority from
+	// viewing for the same reason it is on the alerting side: it is an
+	// assertion that a human has looked at a novel scope grammar and
+	// decided what it means.
+	{"admin.scopes.acknowledge", "admin", "Acknowledge a newly observed ESI scope string"},
 
 	// -- provisioning --
 	{"provisioning.platforms.manage", "provisioning", "Configure Discord/TeamSpeak/Mumble platform connections"},
