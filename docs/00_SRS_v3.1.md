@@ -18,8 +18,8 @@
 Eleven defects were found in v3.0. Seven were structural (B1–B7); four were under-specifications
 that would have produced divergent implementations (B8–B11). All are corrected in this revision.
 Two more (B12–B13) were raised later, against the running system, at the Phase 17 close-out, and
-six more (B14–B19) at the Phase 18 close-out; both sets are recorded in their own subsections
-below.
+eight more (B14–B21) at the Phase 18 close-out; both sets are recorded in their own subsections
+below. Every one of B1–B21 is closed.
 
 | # | Defect in v3.0 | Resolution in v3.1 | Sections |
 | :--- | :--- | :--- | :--- |
@@ -49,10 +49,10 @@ rather than against v3.0, and are corrected here for Phase 18 to build on.
 
 ### Findings raised during implementation **[added at the Phase 18 close-out]**
 
-Closing B12 and B13 required touching every §6.8 surface, and doing so surfaced six further
-defects. Five are in the delivered system rather than in this document, and are recorded here
-because §6.8's endpoint list is the thing they contradict; the sixth (B14) is a genuine
-under-specification of the same kind as B12. All six are **fixed in Phase 18** — none is
+Closing B12 and B13 required touching every §6.8 surface, and doing so surfaced eight further
+defects (B14–B21). Most are in the delivered system rather than in this document, and are recorded
+here because §6.8's endpoint list is the thing they contradict; B14 is a genuine
+under-specification of the same kind as B12. **All eight are fixed in Phase 18** — none is
 outstanding — and they are written down rather than reconciled silently because each was found by
 running the thing, not by reading it.
 
@@ -65,25 +65,24 @@ running the thing, not by reading it.
 | **B18** | **The entitlement rule editor had nothing to save through.** §6.8 lists the rule *preview* and *lockdown* operations for a platform but no operation that writes a rule, and Phase 11's `CreateEntitlementRule`/`DeleteEntitlementRule` were left as unwired seams. Phase 18's "a rule editor that mandates preview confirmation before saving" was therefore vacuous — there was no save. | Three operations added: `GET /admin/platforms/{id}/groups`, `GET /admin/platforms/{id}/rules`, and `PUT /admin/platforms/{id}/rules` (a full, transactional replace). The save requires a **`preview_token`** returned by the preview endpoint and recomputed server-side over the rules actually submitted, so an unpreviewed — or a since-edited — rule set cannot be saved by **any** client, not merely by one that renders the editor. | §6.8, §7 Phase 18 |
 | **B19** | **The exposure board mixed platforms.** `GetExposureBoard` is scoped to one platform, but its audit-side query had no platform predicate, so platform A's board listed every other platform's pending revocations alongside its own. | A platform-scoped variant backs the board. The unscoped query remains, correctly, for Gate 2's installation-wide latency measurement. | §6.8, Gate 2 |
 
-Three further observations were made and are **not** fixed in Phase 18, because fixing them
-belongs to a later phase. They are recorded so no later phase has to rediscover them:
+Three further observations were made. Two were initially deferred and then **closed inside Phase
+18** after review, because both were functional gaps in the delivered system rather than
+scheduling questions — a deployment that cannot ingest its route catalogue and cannot authenticate
+a third-party token is not a working deployment, whatever its exit criteria say. They are written
+up in full because each had been latent for many phases:
 
-* **`catalogue.Boot` has no caller in the running system.** Phase 2 delivered the full boot
-  sequence (discover `D_max`, fetch the spec at `D_max`, ingest, mark blocked) and nothing outside
-  an integration test invokes it: no `serve` path, no CLI command, no job. A deployed installation
-  therefore never ingests the route catalogue. Phase 18 made `Boot` record `D_max` when it does
-  run, and `GetDMax` falls back soundly to ESI's rollover date when it has not, so the pin bound
-  holds either way — but the catalogue itself remains unpopulated until some phase calls `Boot`.
-* **`hangar admin bootstrap-token` mints a token the API cannot accept.** The command creates an
-  `app.api_token` row and prints a secret described as usable "as a Bearer token ... once Phase 15
-  lands". Phase 15 landed; no middleware authenticates a request by API token — only the
-  `hangar_session` cookie (`internal/api/middleware/session.go`). §12's third-party token surface
-  is therefore unreachable, which also means Phase 19's `/api/v2` shim has no way for a
-  third-party client to authenticate.
+| # | Defect | Resolution | Sections |
+| :--- | :--- | :--- | :--- |
+| **B20** | **`catalogue.Boot` had no caller in the running system.** Phase 2 delivered the whole boot sequence (discover `D_max`, fetch the spec **at** `D_max`, ingest every operation, mark routes newer than the pin `blocked_by_pin`) and nothing outside an integration test ever invoked it — no `serve` path, no command, no job. A deployed installation therefore never populated `app.esi_route`; and since `app.sync_subscription` carries a `route_id` foreign key into that table, **nothing in the ESI sync layer could run, or even be configured**. Phase 18's own Route Catalogue viewer and blocked-by-pin board were empty on every real deployment, which is how it surfaced. | Two callers, one definition. `hangar admin ingest-catalogue` is the explicit operator action; `serve` additionally runs the same ingest in the background at startup, non-fatally, so a single-box installation needs no second command (§2's "single-process default", the same reasoning the in-process planner already uses). It is idempotent, so every replica doing it on every restart is safe, and **the pin is never advanced as a side effect** — `Boot` only reads and seeds it. | §5.1, §7 Phase 2, §7 Phase 18 |
+| **B21** | **`hangar admin bootstrap-token` minted a token no middleware accepted.** The command has created `app.api_token` rows since Phase 1 and printed its secret with the words "Use it as a Bearer token ... once Phase 15 lands". Phase 15 landed and wired the token *management* endpoints, but nothing ever authenticated a request **by** a token — `hangar_session` was the only credential any middleware read. So the bootstrap token, whose entire purpose is to be the way into a fresh installation before any human has completed SSO, was useless, and §12's third-party surface (which Principle 6 and Phase 19's `/api/v2` shim both depend on) was unreachable. | `internal/api/middleware/apitoken.go` resolves `Authorization: Bearer <token_id>.<secret>` by SHA-256 hash, rejecting revoked and expired tokens, and populates the same context user id `ResolveSession` does. Critically the token's own `permissions` array is applied as a **cap**: §12 and capability 47 both call these tokens *scoped*, so resolving one to its owner and stopping there would hand every narrowly-scoped integration the owner's full RBAC. A permission must now be in **both** the user's materialised set and the token's scope. Token resolution runs before cookie resolution and a request presenting both gets the token's — the *lesser* — authority. | §6.1, §12, §7 Phase 18 |
+
+The third is genuinely a later phase's, and is left open deliberately:
+
 * **`esi_ledger_divergence` and the rest of §16's metric set do not exist.** `internal/telemetry
   /metrics.go` is a bare Prometheus registry. Phase 20 owns the metric surface alongside the gate
   harnesses that read it. Phase 18's rate-limit dashboard computes divergence from
-  `app.esi_ledger_bucket` and `app.esi_ledger_entry` directly rather than waiting for it.
+  `app.esi_ledger_bucket` and `app.esi_ledger_entry` directly rather than waiting for it, so no
+  Phase 18 criterion depends on the metric existing.
 
 ### Findings carried forward from v3.0's own revision record
 

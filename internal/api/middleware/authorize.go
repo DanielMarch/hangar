@@ -28,7 +28,10 @@ import (
 
 type contextKey int
 
-const userIDContextKey contextKey = iota
+const (
+	userIDContextKey contextKey = iota
+	tokenScopeContextKey
+)
 
 // WithUserID returns a context carrying the authenticated user's id.
 // Called by whatever session-resolving middleware runs before
@@ -42,6 +45,54 @@ func WithUserID(ctx context.Context, userID uuid.UUID) context.Context {
 func UserIDFromContext(ctx context.Context) (uuid.UUID, bool) {
 	id, ok := ctx.Value(userIDContextKey).(uuid.UUID)
 	return id, ok
+}
+
+// tokenScope is the permission cap an API-token-authenticated request
+// carries. Absent for a cookie session, which has no scope of its own.
+type tokenScope struct {
+	tokenID     uuid.UUID
+	permissions map[string]bool
+}
+
+// WithTokenScope records that this request was authenticated by an API
+// token, and which permissions THAT TOKEN was granted.
+//
+// This is a cap, not a grant. SRS §12 and Appendix capability 47 both call
+// these tokens *scoped*: `app.api_token.permissions` is a subset a user
+// chose to expose to one integration. Resolving a token to its owner's
+// user id and stopping there would hand every narrowly-scoped token the
+// owner's FULL effective permissions — a privilege escalation, and the
+// exact thing scoping exists to prevent. RequirePermission below therefore
+// requires the permission to be in BOTH the user's materialised set and
+// the token's scope.
+func WithTokenScope(ctx context.Context, tokenID uuid.UUID, permissions []string) context.Context {
+	set := make(map[string]bool, len(permissions))
+	for _, p := range permissions {
+		set[p] = true
+	}
+	return context.WithValue(ctx, tokenScopeContextKey, tokenScope{tokenID: tokenID, permissions: set})
+}
+
+// TokenIDFromContext returns the API token this request was authenticated
+// by, if it was authenticated by one at all.
+func TokenIDFromContext(ctx context.Context) (uuid.UUID, bool) {
+	scope, ok := ctx.Value(tokenScopeContextKey).(tokenScope)
+	if !ok {
+		return uuid.Nil, false
+	}
+	return scope.tokenID, true
+}
+
+// tokenPermits reports whether the request's credential allows
+// `permission` — always true for a cookie session, which carries no scope
+// of its own, and true for a token only when the permission is inside the
+// token's own grant set.
+func tokenPermits(ctx context.Context, permission string) bool {
+	scope, ok := ctx.Value(tokenScopeContextKey).(tokenScope)
+	if !ok {
+		return true
+	}
+	return scope.permissions[permission]
 }
 
 // RequirePermission returns middleware that 401s a request with no user
@@ -58,6 +109,16 @@ func RequirePermission(s *store.Store, permission string) func(http.Handler) htt
 			userID, ok := UserIDFromContext(r.Context())
 			if !ok {
 				http.Error(w, "unauthenticated", http.StatusUnauthorized)
+				return
+			}
+
+			// An API-token-authenticated request is additionally capped by
+			// the token's OWN permission set (see WithTokenScope). Checked
+			// before the database lookup because it needs no database, and
+			// checked as a 403 rather than a 401: the credential is valid,
+			// it simply does not carry this permission.
+			if !tokenPermits(r.Context(), permission) {
+				http.Error(w, "forbidden: this API token's scope does not include "+permission, http.StatusForbidden)
 				return
 			}
 

@@ -11,5 +11,6 @@ func newAdminCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newAdminVerifyIdentifierTypesCmd())
 	cmd.AddCommand(newAdminBootstrapTokenCmd())
+	cmd.AddCommand(newAdminIngestCatalogueCmd())
 	return cmd
 }

@@ -60,7 +60,14 @@ var Version = "0.0.0-dev"
 // build the API without paying for a middleware chain that needs a live
 // Store.
 func Handler(mux *http.ServeMux, s *store.Store) http.Handler {
-	return middleware.ResolveSession(s)(mux)
+	// Token first, then cookie. ResolveSession leaves an already-identified
+	// request alone, so a caller presenting both gets the TOKEN's identity
+	// — which is the safe precedence, because a token additionally carries
+	// a permission scope that caps it and a cookie does not. Resolving the
+	// cookie first would silently upgrade a scoped integration to the
+	// owner's full authority whenever a browser cookie happened to ride
+	// along.
+	return middleware.ResolveAPIToken(s)(middleware.ResolveSession(s)(mux))
 }
 
 // RequirePermission adapts middleware.RequirePermission's net/http

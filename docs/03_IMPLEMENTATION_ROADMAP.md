@@ -1726,15 +1726,30 @@ module inside its own error boundary rendering a local retry.
 
 ## Phase 18 — Frontend III (Admin & observability)
 
-**Status: DELIVERED.** All eight exit criteria pass. B12 and B13 are closed; closing them
-surfaced six further defects (B14–B19, SRS §0 "Findings raised during implementation [added at the
-Phase 18 close-out]"), all of which are also fixed in this phase. Three observations that belong
-to later phases are recorded there rather than fixed here — most importantly that
-**`catalogue.Boot` has no caller in the running system**, so a deployed installation never ingests
-the route catalogue. That is not a Phase 18 regression (it has been true since Phase 2) and it does
-not weaken the pin bound, which falls back soundly to ESI's own rollover date; but the Route
-Catalogue viewer and the blocked-by-pin board are both empty on a real deployment until some phase
-calls `Boot`. **A phase should claim it.**
+**Status: CLOSED CLEAN.** All eight exit criteria pass. B12 and B13 are closed; closing them
+surfaced eight further defects (B14–B21, SRS §0 "Findings raised during implementation [added at
+the Phase 18 close-out]"), **all of which are also fixed in this phase**.
+
+Two of those eight were initially deferred to a later phase and then closed here after review,
+because both were functional gaps rather than scheduling questions:
+
+* **B20 — `catalogue.Boot` had no caller in the running system.** Latent since Phase 2. Because
+  `app.sync_subscription` foreign-keys into `app.esi_route`, an empty catalogue meant nothing in
+  the ESI sync layer could run *or even be configured*, and Phase 18's own catalogue screens were
+  empty on every real deployment. Now wired two ways: `hangar admin ingest-catalogue`, and a
+  non-fatal background ingest at `serve` startup. The pin is never advanced as a side effect.
+* **B21 — `hangar admin bootstrap-token` minted a token no middleware accepted.** Latent since
+  Phase 15. The only way into a fresh installation before anyone has completed SSO did not work.
+  Bearer-token authentication now exists, with the token's own `permissions` array applied as a
+  **cap** — resolving a scoped token to its owner without that cap would have been a privilege
+  escalation.
+
+One item remains open by design and belongs to Phase 20: §16's Prometheus metric set
+(`esi_ledger_divergence` and the rest) does not exist. No Phase 18 criterion depends on it — the
+rate-limit dashboard computes divergence from the ledger tables directly.
+
+The other standing item, retrofitting e2e coverage over Phases 16–17, was explicitly scoped **out**
+of this phase and remains a scheduling question, not a defect.
 
 **Objective.** The administrator surfaces, **and the backend work they depend on**.
 

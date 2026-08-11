@@ -43,7 +43,16 @@ func newAdminBootstrapTokenCmd() *cobra.Command {
 			fmt.Println()
 			fmt.Println(secret)
 			fmt.Println()
-			fmt.Println("Use it as a Bearer token, or Basic-auth style, against the HTTP API once Phase 15 lands.")
+			// PHASE 18: this line used to promise Bearer-token access
+			// "once Phase 15 lands". Phase 15 landed and wired the token
+			// MANAGEMENT endpoints, but nothing authenticated a request by
+			// token, so the secret this command prints was unusable for
+			// anything. internal/api/middleware/apitoken.go closes that;
+			// the instruction below is now true, and exercised by
+			// TestBootstrapTokenAuthenticatesAgainstTheAPI.
+			fmt.Println("Use it as a Bearer token against the HTTP API:")
+			fmt.Println()
+			fmt.Println("    curl -H \"Authorization: Bearer " + secret + "\" <public-url>/api/v1/me")
 			return nil
 		},
 	}

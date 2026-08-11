@@ -29,6 +29,17 @@ const SessionCookieName = "hangar_session"
 func ResolveSession(s *store.Store) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// PHASE 18: an API token already identified this request
+			// (apitoken.go runs first — see api.Handler's own comment). Do
+			// not re-identify it from a cookie: the token carries a
+			// permission SCOPE and a cookie does not, so overwriting the
+			// token's identity with the cookie's would silently upgrade a
+			// scoped integration to the cookie holder's full authority.
+			// A request presenting both gets the lesser authority.
+			if _, already := UserIDFromContext(r.Context()); already {
+				next.ServeHTTP(w, r)
+				return
+			}
 			cookie, err := r.Cookie(SessionCookieName)
 			if err != nil || cookie.Value == "" {
 				next.ServeHTTP(w, r)

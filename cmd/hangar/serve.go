@@ -76,6 +76,30 @@ func runServe(ctx context.Context) error {
 	}
 	defer stopPlanner()
 
+	// §2 "Single-process default", same reasoning as the planner above: a
+	// one-box installation must not have to run a second command before
+	// anything works. Without this, app.esi_route stays empty — and since
+	// app.sync_subscription foreign-keys into it, NOTHING in the ESI sync
+	// layer can run, not even be configured.
+	//
+	// Deliberately: in the background (a startup HTTP call to ESI must not
+	// delay the listener), non-fatal (an ESI outage must not stop the API
+	// serving cached data — catalogue.Boot already falls back to the
+	// embedded snapshot before giving up), and idempotent, so every replica
+	// doing this on every restart is safe. It never advances the pin.
+	go func() {
+		ingestCtx, cancel := context.WithTimeout(hbCtx, ingestTimeout)
+		defer cancel()
+		if _, err := ingestCatalogue(ingestCtx, pool, logger); err != nil {
+			if hbCtx.Err() == nil {
+				logger.ErrorContext(ingestCtx,
+					"hangar: esi catalogue ingest failed at startup — the route catalogue may be empty or stale; "+
+						"run 'hangar admin ingest-catalogue' once ESI is reachable",
+					"error", err)
+			}
+		}
+	}()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
