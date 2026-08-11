@@ -1,5 +1,7 @@
 {
-  "app": { "name": "HANGAR" },
+  "app": {
+    "name": "HANGAR"
+  },
   "nav": {
     "dashboard": "ダッシュボード",
     "characters": "キャラクター",
@@ -12,7 +14,12 @@
     "logout": "ログアウト",
     "retry": "再試行",
     "collapseSidebar": "サイドバーを折りたたむ",
-    "expandSidebar": "サイドバーを展開する"
+    "expandSidebar": "サイドバーを展開する",
+    "loadMore": "もっと読み込む",
+    "approve": "承認",
+    "reject": "却下",
+    "close": "閉じる",
+    "search": "検索"
   },
   "login": {
     "heading": "HANGAR へようこそ",
@@ -38,7 +45,167 @@
   "errors": {
     "boundaryTitle": "問題が発生しました",
     "boundaryBody": "このセクションを読み込めませんでした。",
-    "retry": "再試行"
+    "retry": "再試行",
+    "forbiddenTitle": "アクセス権がありません",
+    "forbiddenBody": "これを表示する権限がありません。"
   },
-  "breadcrumbs": { "home": "ホーム" }
+  "breadcrumbs": {
+    "home": "ホーム"
+  },
+  "dataTable": {
+    "filterPlaceholder": "絞り込み…",
+    "noResults": "結果がありません。",
+    "loading": "読み込み中…"
+  },
+  "columns": {
+    "date": "日付",
+    "description": "説明",
+    "type": "種別",
+    "typeId": "種別",
+    "status": "状態",
+    "amount": "金額",
+    "balance": "残高",
+    "price": "価格",
+    "reward": "報酬",
+    "collateral": "担保",
+    "unitPrice": "単価",
+    "quantity": "数量",
+    "buy": "購入?",
+    "itemId": "アイテム",
+    "locationId": "場所",
+    "flag": "フラグ",
+    "skill": "スキル",
+    "level": "レベル",
+    "sp": "SP",
+    "queuePosition": "#",
+    "start": "開始",
+    "finish": "終了",
+    "expires": "期限",
+    "bidder": "入札者"
+  },
+  "characters": {
+    "heading": "キャラクター",
+    "notFound": "キャラクターが見つかりません。",
+    "tabs": {
+      "sheet": "概要",
+      "skills": "スキル",
+      "assets": "資産",
+      "wallet": "ウォレット",
+      "contracts": "契約",
+      "mail": "メール",
+      "pi": "惑星間交流",
+      "calendar": "カレンダー",
+      "industry": "産業",
+      "killmails": "キルメール",
+      "intel": "インテル"
+    },
+    "sheet": {
+      "corporation": "コーポレーション",
+      "security": "セキュリティステータス",
+      "birthday": "誕生日",
+      "title": "称号"
+    },
+    "skills": {
+      "totalSp": "合計スキルポイント",
+      "queue": "スキルキュー",
+      "trained": "習得済みスキル"
+    },
+    "assets": {
+      "location": "場所",
+      "quantity": "数量",
+      "name": "名前",
+      "depth": "深さ"
+    },
+    "wallet": {
+      "journal": "ジャーナル",
+      "transactions": "取引",
+      "balance": "残高"
+    },
+    "contracts": {
+      "heading": "契約",
+      "items": "アイテム",
+      "bids": "入札",
+      "noItems": "この契約にはアイテムがありません。",
+      "noBids": "この契約への入札はありません。"
+    },
+    "mail": {
+      "inbox": "受信箱",
+      "from": "送信者",
+      "subject": "件名",
+      "sentAt": "送信日時",
+      "noSelection": "メッセージを選択してください。",
+      "loadingBody": "メッセージを読み込み中…"
+    },
+    "pi": {
+      "colonies": "コロニー",
+      "noColonies": "惑星コロニーはありません。"
+    },
+    "calendar": {
+      "heading": "カレンダー"
+    },
+    "industry": {
+      "heading": "産業ジョブ"
+    },
+    "killmails": {
+      "heading": "キルメール"
+    },
+    "intel": {
+      "heading": "インテル"
+    }
+  },
+  "corporations": {
+    "heading": "コーポレーション",
+    "notFound": "コーポレーションが見つかりません。",
+    "tabs": {
+      "sheet": "概要",
+      "members": "メンバー",
+      "wallets": "ウォレット",
+      "ledgers": "台帳",
+      "structures": "ストラクチャー",
+      "starbases": "スターベース",
+      "skyhooks": "スカイフック",
+      "projects": "プロジェクト",
+      "mining": "採掘"
+    },
+    "wallets": {
+      "division": "部門",
+      "journal": "ジャーナル",
+      "transactions": "取引"
+    },
+    "ledgers": {
+      "bounties": "報奨金",
+      "mining": "採掘",
+      "pi": "PI"
+    },
+    "structures": {
+      "heading": "ストラクチャー"
+    },
+    "starbases": {
+      "heading": "スターベース"
+    },
+    "skyhooks": {
+      "heading": "スカイフック"
+    },
+    "projects": {
+      "heading": "プロジェクト",
+      "contributors": "貢献者"
+    },
+    "mining": {
+      "extractions": "採掘作業",
+      "observers": "監視装置"
+    }
+  },
+  "squads": {
+    "heading": "スカッド",
+    "notFound": "スカッドが見つかりません。",
+    "tabs": {
+      "members": "メンバー",
+      "moderators": "モデレーター",
+      "roles": "ロール",
+      "applications": "応募"
+    },
+    "applications": {
+      "pending": "保留中の応募"
+    }
+  }
 }

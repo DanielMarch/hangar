@@ -82,6 +82,9 @@ importers:
       date-fns:
         specifier: ^4.1.0
         version: 4.4.0
+      dompurify:
+        specifier: ^3.4.13
+        version: 3.4.13
       i18next:
         specifier: ^25.5.0
         version: 25.10.10(typescript@5.9.3)
@@ -2265,6 +2268,12 @@ packages:
         integrity: sha512-xMAgYwceFhRA2zY+XbEA7mxYbA093wdiW8Vu6gZPGWy9cmOyU9XesH1tNcEWsKFd5Vzrqx5T3D38PWx1FIIXkA==,
       }
 
+  "@types/trusted-types@2.0.7":
+    resolution:
+      {
+        integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==,
+      }
+
   "@types/yauzl@2.10.3":
     resolution:
       {
@@ -2963,6 +2972,12 @@ packages:
     resolution:
       {
         integrity: sha512-X7BJ2yElsnOJ30pZF4uIIDfBEVgF4XEBxL9Bxhy6dnrm5hkzqmsWHGTiHqRiITNhMyFLyAiWndIJP7Z1NTteDg==,
+      }
+
+  dompurify@3.4.13:
+    resolution:
+      {
+        integrity: sha512-2vmYIoqjze2d+kakP8S/nS5shfsl587kzwEjcGlTdiksUVgFHnFCsLYDVj/JNqJVOQZGSYBTmuycv0PodwmnMQ==,
       }
 
   eastasianwidth@0.2.0:
@@ -6662,6 +6677,9 @@ snapshots:
 
   "@types/statuses@2.0.6": {}
 
+  "@types/trusted-types@2.0.7":
+    optional: true
+
   "@types/yauzl@2.10.3":
     dependencies:
       "@types/node": 22.20.1
@@ -7092,6 +7110,10 @@ snapshots:
   diff@8.0.4: {}
 
   dom-accessibility-api@0.5.16: {}
+
+  dompurify@3.4.13:
+    optionalDependencies:
+      "@types/trusted-types": 2.0.7
 
   eastasianwidth@0.2.0: {}
 

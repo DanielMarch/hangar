@@ -1,5 +1,7 @@
 {
-  "app": { "name": "HANGAR" },
+  "app": {
+    "name": "HANGAR"
+  },
   "nav": {
     "dashboard": "Панель управления",
     "characters": "Персонажи",
@@ -12,7 +14,12 @@
     "logout": "Выйти",
     "retry": "Повторить",
     "collapseSidebar": "Свернуть боковую панель",
-    "expandSidebar": "Развернуть боковую панель"
+    "expandSidebar": "Развернуть боковую панель",
+    "loadMore": "Загрузить ещё",
+    "approve": "Одобрить",
+    "reject": "Отклонить",
+    "close": "Закрыть",
+    "search": "Поиск"
   },
   "login": {
     "heading": "Добро пожаловать в HANGAR",
@@ -38,7 +45,167 @@
   "errors": {
     "boundaryTitle": "Что-то пошло не так",
     "boundaryBody": "Не удалось загрузить этот раздел.",
-    "retry": "Повторить"
+    "retry": "Повторить",
+    "forbiddenTitle": "Нет доступа",
+    "forbiddenBody": "У вас нет прав на просмотр этого раздела."
   },
-  "breadcrumbs": { "home": "Главная" }
+  "breadcrumbs": {
+    "home": "Главная"
+  },
+  "dataTable": {
+    "filterPlaceholder": "Фильтр…",
+    "noResults": "Нет результатов.",
+    "loading": "Загрузка…"
+  },
+  "columns": {
+    "date": "Дата",
+    "description": "Описание",
+    "type": "Тип",
+    "typeId": "Тип",
+    "status": "Статус",
+    "amount": "Сумма",
+    "balance": "Баланс",
+    "price": "Цена",
+    "reward": "Награда",
+    "collateral": "Залог",
+    "unitPrice": "Цена за единицу",
+    "quantity": "Кол-во",
+    "buy": "Покупка?",
+    "itemId": "Предмет",
+    "locationId": "Местоположение",
+    "flag": "Флаг",
+    "skill": "Навык",
+    "level": "Уровень",
+    "sp": "ОН",
+    "queuePosition": "#",
+    "start": "Начало",
+    "finish": "Окончание",
+    "expires": "Истекает",
+    "bidder": "Участник торгов"
+  },
+  "characters": {
+    "heading": "Персонажи",
+    "notFound": "Персонаж не найден.",
+    "tabs": {
+      "sheet": "Профиль",
+      "skills": "Навыки",
+      "assets": "Имущество",
+      "wallet": "Кошелёк",
+      "contracts": "Контракты",
+      "mail": "Почта",
+      "pi": "Планетарное взаимодействие",
+      "calendar": "Календарь",
+      "industry": "Промышленность",
+      "killmails": "Килмейлы",
+      "intel": "Разведка"
+    },
+    "sheet": {
+      "corporation": "Корпорация",
+      "security": "Статус безопасности",
+      "birthday": "День рождения",
+      "title": "Титул"
+    },
+    "skills": {
+      "totalSp": "Всего очков навыков",
+      "queue": "Очередь навыков",
+      "trained": "Изученные навыки"
+    },
+    "assets": {
+      "location": "Местоположение",
+      "quantity": "Количество",
+      "name": "Название",
+      "depth": "Глубина"
+    },
+    "wallet": {
+      "journal": "Журнал",
+      "transactions": "Транзакции",
+      "balance": "Баланс"
+    },
+    "contracts": {
+      "heading": "Контракты",
+      "items": "Предметы",
+      "bids": "Ставки",
+      "noItems": "В этом контракте нет предметов.",
+      "noBids": "Ставок по этому контракту нет."
+    },
+    "mail": {
+      "inbox": "Входящие",
+      "from": "От",
+      "subject": "Тема",
+      "sentAt": "Отправлено",
+      "noSelection": "Выберите сообщение для чтения.",
+      "loadingBody": "Загрузка сообщения…"
+    },
+    "pi": {
+      "colonies": "Колонии",
+      "noColonies": "Нет планетарных колоний."
+    },
+    "calendar": {
+      "heading": "Календарь"
+    },
+    "industry": {
+      "heading": "Промышленные работы"
+    },
+    "killmails": {
+      "heading": "Килмейлы"
+    },
+    "intel": {
+      "heading": "Разведка"
+    }
+  },
+  "corporations": {
+    "heading": "Корпорации",
+    "notFound": "Корпорация не найдена.",
+    "tabs": {
+      "sheet": "Профиль",
+      "members": "Участники",
+      "wallets": "Кошельки",
+      "ledgers": "Реестры",
+      "structures": "Сооружения",
+      "starbases": "Звёздные базы",
+      "skyhooks": "Скайхуки",
+      "projects": "Проекты",
+      "mining": "Добыча"
+    },
+    "wallets": {
+      "division": "Подразделение",
+      "journal": "Журнал",
+      "transactions": "Транзакции"
+    },
+    "ledgers": {
+      "bounties": "Награды",
+      "mining": "Добыча",
+      "pi": "PI"
+    },
+    "structures": {
+      "heading": "Сооружения"
+    },
+    "starbases": {
+      "heading": "Звёздные базы"
+    },
+    "skyhooks": {
+      "heading": "Скайхуки"
+    },
+    "projects": {
+      "heading": "Проекты",
+      "contributors": "Участники проекта"
+    },
+    "mining": {
+      "extractions": "Извлечения",
+      "observers": "Наблюдатели"
+    }
+  },
+  "squads": {
+    "heading": "Отряды",
+    "notFound": "Отряд не найден.",
+    "tabs": {
+      "members": "Участники",
+      "moderators": "Модераторы",
+      "roles": "Роли",
+      "applications": "Заявки"
+    },
+    "applications": {
+      "pending": "Заявки на рассмотрении"
+    }
+  }
 }

@@ -1,5 +1,7 @@
 {
-  "app": { "name": "HANGAR" },
+  "app": {
+    "name": "HANGAR"
+  },
   "nav": {
     "dashboard": "대시보드",
     "characters": "캐릭터",
@@ -12,7 +14,12 @@
     "logout": "로그아웃",
     "retry": "다시 시도",
     "collapseSidebar": "사이드바 접기",
-    "expandSidebar": "사이드바 펼치기"
+    "expandSidebar": "사이드바 펼치기",
+    "loadMore": "더 불러오기",
+    "approve": "승인",
+    "reject": "거절",
+    "close": "닫기",
+    "search": "검색"
   },
   "login": {
     "heading": "HANGAR에 오신 것을 환영합니다",
@@ -38,7 +45,167 @@
   "errors": {
     "boundaryTitle": "문제가 발생했습니다",
     "boundaryBody": "이 섹션을 불러오지 못했습니다.",
-    "retry": "다시 시도"
+    "retry": "다시 시도",
+    "forbiddenTitle": "접근 권한 없음",
+    "forbiddenBody": "이것을 볼 권한이 없습니다."
   },
-  "breadcrumbs": { "home": "홈" }
+  "breadcrumbs": {
+    "home": "홈"
+  },
+  "dataTable": {
+    "filterPlaceholder": "필터…",
+    "noResults": "결과가 없습니다.",
+    "loading": "불러오는 중…"
+  },
+  "columns": {
+    "date": "날짜",
+    "description": "설명",
+    "type": "유형",
+    "typeId": "유형",
+    "status": "상태",
+    "amount": "금액",
+    "balance": "잔액",
+    "price": "가격",
+    "reward": "보상",
+    "collateral": "담보",
+    "unitPrice": "단가",
+    "quantity": "수량",
+    "buy": "구매?",
+    "itemId": "아이템",
+    "locationId": "위치",
+    "flag": "플래그",
+    "skill": "스킬",
+    "level": "레벨",
+    "sp": "SP",
+    "queuePosition": "#",
+    "start": "시작",
+    "finish": "종료",
+    "expires": "만료",
+    "bidder": "입찰자"
+  },
+  "characters": {
+    "heading": "캐릭터",
+    "notFound": "캐릭터를 찾을 수 없습니다.",
+    "tabs": {
+      "sheet": "개요",
+      "skills": "스킬",
+      "assets": "자산",
+      "wallet": "지갑",
+      "contracts": "계약",
+      "mail": "메일",
+      "pi": "행성간 교류",
+      "calendar": "캘린더",
+      "industry": "산업",
+      "killmails": "킬메일",
+      "intel": "정보"
+    },
+    "sheet": {
+      "corporation": "코퍼레이션",
+      "security": "보안 상태",
+      "birthday": "생일",
+      "title": "직함"
+    },
+    "skills": {
+      "totalSp": "총 스킬 포인트",
+      "queue": "스킬 대기열",
+      "trained": "습득한 스킬"
+    },
+    "assets": {
+      "location": "위치",
+      "quantity": "수량",
+      "name": "이름",
+      "depth": "깊이"
+    },
+    "wallet": {
+      "journal": "저널",
+      "transactions": "거래 내역",
+      "balance": "잔액"
+    },
+    "contracts": {
+      "heading": "계약",
+      "items": "아이템",
+      "bids": "입찰",
+      "noItems": "이 계약에는 아이템이 없습니다.",
+      "noBids": "이 계약에 입찰이 없습니다."
+    },
+    "mail": {
+      "inbox": "받은편지함",
+      "from": "보낸사람",
+      "subject": "제목",
+      "sentAt": "보낸시각",
+      "noSelection": "메시지를 선택하세요.",
+      "loadingBody": "메시지를 불러오는 중…"
+    },
+    "pi": {
+      "colonies": "식민지",
+      "noColonies": "행성 식민지가 없습니다."
+    },
+    "calendar": {
+      "heading": "캘린더"
+    },
+    "industry": {
+      "heading": "산업 작업"
+    },
+    "killmails": {
+      "heading": "킬메일"
+    },
+    "intel": {
+      "heading": "정보"
+    }
+  },
+  "corporations": {
+    "heading": "코퍼레이션",
+    "notFound": "코퍼레이션을 찾을 수 없습니다.",
+    "tabs": {
+      "sheet": "개요",
+      "members": "멤버",
+      "wallets": "지갑",
+      "ledgers": "장부",
+      "structures": "구조물",
+      "starbases": "스타베이스",
+      "skyhooks": "스카이훅",
+      "projects": "프로젝트",
+      "mining": "채굴"
+    },
+    "wallets": {
+      "division": "부서",
+      "journal": "저널",
+      "transactions": "거래 내역"
+    },
+    "ledgers": {
+      "bounties": "현상금",
+      "mining": "채굴",
+      "pi": "PI"
+    },
+    "structures": {
+      "heading": "구조물"
+    },
+    "starbases": {
+      "heading": "스타베이스"
+    },
+    "skyhooks": {
+      "heading": "스카이훅"
+    },
+    "projects": {
+      "heading": "프로젝트",
+      "contributors": "기여자"
+    },
+    "mining": {
+      "extractions": "채굴 작업",
+      "observers": "관측 장치"
+    }
+  },
+  "squads": {
+    "heading": "스쿼드",
+    "notFound": "스쿼드를 찾을 수 없습니다.",
+    "tabs": {
+      "members": "멤버",
+      "moderators": "운영진",
+      "roles": "역할",
+      "applications": "가입 신청"
+    },
+    "applications": {
+      "pending": "대기 중인 신청"
+    }
+  }
 }

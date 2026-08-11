@@ -13,6 +13,37 @@ import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as CallbackRouteImport } from './routes/callback'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthedIndexRouteImport } from './routes/_authed/index'
+import { Route as AuthedCharactersIndexRouteImport } from './routes/_authed/characters/index'
+import { Route as AuthedCharactersCharacterIdRouteImport } from './routes/_authed/characters/$characterId'
+import { Route as AuthedCorporationsIndexRouteImport } from './routes/_authed/corporations/index'
+import { Route as AuthedCorporationsCorporationIdRouteImport } from './routes/_authed/corporations/$corporationId'
+import { Route as AuthedSquadsIndexRouteImport } from './routes/_authed/squads/index'
+import { Route as AuthedSquadsSquadIdRouteImport } from './routes/_authed/squads/$squadId'
+import { Route as AuthedCharactersCharacterIdIndexRouteImport } from './routes/_authed/characters/$characterId/index'
+import { Route as AuthedCharactersCharacterIdAssetsRouteImport } from './routes/_authed/characters/$characterId/assets'
+import { Route as AuthedCharactersCharacterIdCalendarRouteImport } from './routes/_authed/characters/$characterId/calendar'
+import { Route as AuthedCharactersCharacterIdContractsRouteImport } from './routes/_authed/characters/$characterId/contracts'
+import { Route as AuthedCharactersCharacterIdIndustryRouteImport } from './routes/_authed/characters/$characterId/industry'
+import { Route as AuthedCharactersCharacterIdIntelRouteImport } from './routes/_authed/characters/$characterId/intel'
+import { Route as AuthedCharactersCharacterIdKillmailsRouteImport } from './routes/_authed/characters/$characterId/killmails'
+import { Route as AuthedCharactersCharacterIdMailRouteImport } from './routes/_authed/characters/$characterId/mail'
+import { Route as AuthedCharactersCharacterIdPiRouteImport } from './routes/_authed/characters/$characterId/pi'
+import { Route as AuthedCharactersCharacterIdSkillsRouteImport } from './routes/_authed/characters/$characterId/skills'
+import { Route as AuthedCharactersCharacterIdWalletRouteImport } from './routes/_authed/characters/$characterId/wallet'
+import { Route as AuthedCorporationsCorporationIdIndexRouteImport } from './routes/_authed/corporations/$corporationId/index'
+import { Route as AuthedCorporationsCorporationIdLedgersRouteImport } from './routes/_authed/corporations/$corporationId/ledgers'
+import { Route as AuthedCorporationsCorporationIdMembersRouteImport } from './routes/_authed/corporations/$corporationId/members'
+import { Route as AuthedCorporationsCorporationIdMiningRouteImport } from './routes/_authed/corporations/$corporationId/mining'
+import { Route as AuthedCorporationsCorporationIdProjectsRouteImport } from './routes/_authed/corporations/$corporationId/projects'
+import { Route as AuthedCorporationsCorporationIdSkyhooksRouteImport } from './routes/_authed/corporations/$corporationId/skyhooks'
+import { Route as AuthedCorporationsCorporationIdStarbasesRouteImport } from './routes/_authed/corporations/$corporationId/starbases'
+import { Route as AuthedCorporationsCorporationIdStructuresRouteImport } from './routes/_authed/corporations/$corporationId/structures'
+import { Route as AuthedCorporationsCorporationIdWalletsRouteImport } from './routes/_authed/corporations/$corporationId/wallets'
+import { Route as AuthedSquadsSquadIdIndexRouteImport } from './routes/_authed/squads/$squadId/index'
+import { Route as AuthedSquadsSquadIdApplicationsRouteImport } from './routes/_authed/squads/$squadId/applications'
+import { Route as AuthedSquadsSquadIdMembersRouteImport } from './routes/_authed/squads/$squadId/members'
+import { Route as AuthedSquadsSquadIdModeratorsRouteImport } from './routes/_authed/squads/$squadId/moderators'
+import { Route as AuthedSquadsSquadIdRolesRouteImport } from './routes/_authed/squads/$squadId/roles'
 
 const AuthedRoute = AuthedRouteImport.update({
   id: '/_authed',
@@ -33,16 +64,257 @@ const AuthedIndexRoute = AuthedIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AuthedRoute,
 } as any)
+const AuthedCharactersIndexRoute = AuthedCharactersIndexRouteImport.update({
+  id: '/characters/',
+  path: '/characters/',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedCharactersCharacterIdRoute =
+  AuthedCharactersCharacterIdRouteImport.update({
+    id: '/characters/$characterId',
+    path: '/characters/$characterId',
+    getParentRoute: () => AuthedRoute,
+  } as any)
+const AuthedCorporationsIndexRoute = AuthedCorporationsIndexRouteImport.update({
+  id: '/corporations/',
+  path: '/corporations/',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedCorporationsCorporationIdRoute =
+  AuthedCorporationsCorporationIdRouteImport.update({
+    id: '/corporations/$corporationId',
+    path: '/corporations/$corporationId',
+    getParentRoute: () => AuthedRoute,
+  } as any)
+const AuthedSquadsIndexRoute = AuthedSquadsIndexRouteImport.update({
+  id: '/squads/',
+  path: '/squads/',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedSquadsSquadIdRoute = AuthedSquadsSquadIdRouteImport.update({
+  id: '/squads/$squadId',
+  path: '/squads/$squadId',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedCharactersCharacterIdIndexRoute =
+  AuthedCharactersCharacterIdIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthedCharactersCharacterIdRoute,
+  } as any)
+const AuthedCharactersCharacterIdAssetsRoute =
+  AuthedCharactersCharacterIdAssetsRouteImport.update({
+    id: '/assets',
+    path: '/assets',
+    getParentRoute: () => AuthedCharactersCharacterIdRoute,
+  } as any)
+const AuthedCharactersCharacterIdCalendarRoute =
+  AuthedCharactersCharacterIdCalendarRouteImport.update({
+    id: '/calendar',
+    path: '/calendar',
+    getParentRoute: () => AuthedCharactersCharacterIdRoute,
+  } as any)
+const AuthedCharactersCharacterIdContractsRoute =
+  AuthedCharactersCharacterIdContractsRouteImport.update({
+    id: '/contracts',
+    path: '/contracts',
+    getParentRoute: () => AuthedCharactersCharacterIdRoute,
+  } as any)
+const AuthedCharactersCharacterIdIndustryRoute =
+  AuthedCharactersCharacterIdIndustryRouteImport.update({
+    id: '/industry',
+    path: '/industry',
+    getParentRoute: () => AuthedCharactersCharacterIdRoute,
+  } as any)
+const AuthedCharactersCharacterIdIntelRoute =
+  AuthedCharactersCharacterIdIntelRouteImport.update({
+    id: '/intel',
+    path: '/intel',
+    getParentRoute: () => AuthedCharactersCharacterIdRoute,
+  } as any)
+const AuthedCharactersCharacterIdKillmailsRoute =
+  AuthedCharactersCharacterIdKillmailsRouteImport.update({
+    id: '/killmails',
+    path: '/killmails',
+    getParentRoute: () => AuthedCharactersCharacterIdRoute,
+  } as any)
+const AuthedCharactersCharacterIdMailRoute =
+  AuthedCharactersCharacterIdMailRouteImport.update({
+    id: '/mail',
+    path: '/mail',
+    getParentRoute: () => AuthedCharactersCharacterIdRoute,
+  } as any)
+const AuthedCharactersCharacterIdPiRoute =
+  AuthedCharactersCharacterIdPiRouteImport.update({
+    id: '/pi',
+    path: '/pi',
+    getParentRoute: () => AuthedCharactersCharacterIdRoute,
+  } as any)
+const AuthedCharactersCharacterIdSkillsRoute =
+  AuthedCharactersCharacterIdSkillsRouteImport.update({
+    id: '/skills',
+    path: '/skills',
+    getParentRoute: () => AuthedCharactersCharacterIdRoute,
+  } as any)
+const AuthedCharactersCharacterIdWalletRoute =
+  AuthedCharactersCharacterIdWalletRouteImport.update({
+    id: '/wallet',
+    path: '/wallet',
+    getParentRoute: () => AuthedCharactersCharacterIdRoute,
+  } as any)
+const AuthedCorporationsCorporationIdIndexRoute =
+  AuthedCorporationsCorporationIdIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthedCorporationsCorporationIdRoute,
+  } as any)
+const AuthedCorporationsCorporationIdLedgersRoute =
+  AuthedCorporationsCorporationIdLedgersRouteImport.update({
+    id: '/ledgers',
+    path: '/ledgers',
+    getParentRoute: () => AuthedCorporationsCorporationIdRoute,
+  } as any)
+const AuthedCorporationsCorporationIdMembersRoute =
+  AuthedCorporationsCorporationIdMembersRouteImport.update({
+    id: '/members',
+    path: '/members',
+    getParentRoute: () => AuthedCorporationsCorporationIdRoute,
+  } as any)
+const AuthedCorporationsCorporationIdMiningRoute =
+  AuthedCorporationsCorporationIdMiningRouteImport.update({
+    id: '/mining',
+    path: '/mining',
+    getParentRoute: () => AuthedCorporationsCorporationIdRoute,
+  } as any)
+const AuthedCorporationsCorporationIdProjectsRoute =
+  AuthedCorporationsCorporationIdProjectsRouteImport.update({
+    id: '/projects',
+    path: '/projects',
+    getParentRoute: () => AuthedCorporationsCorporationIdRoute,
+  } as any)
+const AuthedCorporationsCorporationIdSkyhooksRoute =
+  AuthedCorporationsCorporationIdSkyhooksRouteImport.update({
+    id: '/skyhooks',
+    path: '/skyhooks',
+    getParentRoute: () => AuthedCorporationsCorporationIdRoute,
+  } as any)
+const AuthedCorporationsCorporationIdStarbasesRoute =
+  AuthedCorporationsCorporationIdStarbasesRouteImport.update({
+    id: '/starbases',
+    path: '/starbases',
+    getParentRoute: () => AuthedCorporationsCorporationIdRoute,
+  } as any)
+const AuthedCorporationsCorporationIdStructuresRoute =
+  AuthedCorporationsCorporationIdStructuresRouteImport.update({
+    id: '/structures',
+    path: '/structures',
+    getParentRoute: () => AuthedCorporationsCorporationIdRoute,
+  } as any)
+const AuthedCorporationsCorporationIdWalletsRoute =
+  AuthedCorporationsCorporationIdWalletsRouteImport.update({
+    id: '/wallets',
+    path: '/wallets',
+    getParentRoute: () => AuthedCorporationsCorporationIdRoute,
+  } as any)
+const AuthedSquadsSquadIdIndexRoute =
+  AuthedSquadsSquadIdIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthedSquadsSquadIdRoute,
+  } as any)
+const AuthedSquadsSquadIdApplicationsRoute =
+  AuthedSquadsSquadIdApplicationsRouteImport.update({
+    id: '/applications',
+    path: '/applications',
+    getParentRoute: () => AuthedSquadsSquadIdRoute,
+  } as any)
+const AuthedSquadsSquadIdMembersRoute =
+  AuthedSquadsSquadIdMembersRouteImport.update({
+    id: '/members',
+    path: '/members',
+    getParentRoute: () => AuthedSquadsSquadIdRoute,
+  } as any)
+const AuthedSquadsSquadIdModeratorsRoute =
+  AuthedSquadsSquadIdModeratorsRouteImport.update({
+    id: '/moderators',
+    path: '/moderators',
+    getParentRoute: () => AuthedSquadsSquadIdRoute,
+  } as any)
+const AuthedSquadsSquadIdRolesRoute =
+  AuthedSquadsSquadIdRolesRouteImport.update({
+    id: '/roles',
+    path: '/roles',
+    getParentRoute: () => AuthedSquadsSquadIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthedIndexRoute
   '/callback': typeof CallbackRoute
   '/login': typeof LoginRoute
+  '/characters/$characterId': typeof AuthedCharactersCharacterIdRouteWithChildren
+  '/corporations/$corporationId': typeof AuthedCorporationsCorporationIdRouteWithChildren
+  '/squads/$squadId': typeof AuthedSquadsSquadIdRouteWithChildren
+  '/characters/': typeof AuthedCharactersIndexRoute
+  '/corporations/': typeof AuthedCorporationsIndexRoute
+  '/squads/': typeof AuthedSquadsIndexRoute
+  '/characters/$characterId/assets': typeof AuthedCharactersCharacterIdAssetsRoute
+  '/characters/$characterId/calendar': typeof AuthedCharactersCharacterIdCalendarRoute
+  '/characters/$characterId/contracts': typeof AuthedCharactersCharacterIdContractsRoute
+  '/characters/$characterId/industry': typeof AuthedCharactersCharacterIdIndustryRoute
+  '/characters/$characterId/intel': typeof AuthedCharactersCharacterIdIntelRoute
+  '/characters/$characterId/killmails': typeof AuthedCharactersCharacterIdKillmailsRoute
+  '/characters/$characterId/mail': typeof AuthedCharactersCharacterIdMailRoute
+  '/characters/$characterId/pi': typeof AuthedCharactersCharacterIdPiRoute
+  '/characters/$characterId/skills': typeof AuthedCharactersCharacterIdSkillsRoute
+  '/characters/$characterId/wallet': typeof AuthedCharactersCharacterIdWalletRoute
+  '/corporations/$corporationId/ledgers': typeof AuthedCorporationsCorporationIdLedgersRoute
+  '/corporations/$corporationId/members': typeof AuthedCorporationsCorporationIdMembersRoute
+  '/corporations/$corporationId/mining': typeof AuthedCorporationsCorporationIdMiningRoute
+  '/corporations/$corporationId/projects': typeof AuthedCorporationsCorporationIdProjectsRoute
+  '/corporations/$corporationId/skyhooks': typeof AuthedCorporationsCorporationIdSkyhooksRoute
+  '/corporations/$corporationId/starbases': typeof AuthedCorporationsCorporationIdStarbasesRoute
+  '/corporations/$corporationId/structures': typeof AuthedCorporationsCorporationIdStructuresRoute
+  '/corporations/$corporationId/wallets': typeof AuthedCorporationsCorporationIdWalletsRoute
+  '/squads/$squadId/applications': typeof AuthedSquadsSquadIdApplicationsRoute
+  '/squads/$squadId/members': typeof AuthedSquadsSquadIdMembersRoute
+  '/squads/$squadId/moderators': typeof AuthedSquadsSquadIdModeratorsRoute
+  '/squads/$squadId/roles': typeof AuthedSquadsSquadIdRolesRoute
+  '/characters/$characterId/': typeof AuthedCharactersCharacterIdIndexRoute
+  '/corporations/$corporationId/': typeof AuthedCorporationsCorporationIdIndexRoute
+  '/squads/$squadId/': typeof AuthedSquadsSquadIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/callback': typeof CallbackRoute
   '/login': typeof LoginRoute
   '/': typeof AuthedIndexRoute
+  '/characters': typeof AuthedCharactersIndexRoute
+  '/corporations': typeof AuthedCorporationsIndexRoute
+  '/squads': typeof AuthedSquadsIndexRoute
+  '/characters/$characterId/assets': typeof AuthedCharactersCharacterIdAssetsRoute
+  '/characters/$characterId/calendar': typeof AuthedCharactersCharacterIdCalendarRoute
+  '/characters/$characterId/contracts': typeof AuthedCharactersCharacterIdContractsRoute
+  '/characters/$characterId/industry': typeof AuthedCharactersCharacterIdIndustryRoute
+  '/characters/$characterId/intel': typeof AuthedCharactersCharacterIdIntelRoute
+  '/characters/$characterId/killmails': typeof AuthedCharactersCharacterIdKillmailsRoute
+  '/characters/$characterId/mail': typeof AuthedCharactersCharacterIdMailRoute
+  '/characters/$characterId/pi': typeof AuthedCharactersCharacterIdPiRoute
+  '/characters/$characterId/skills': typeof AuthedCharactersCharacterIdSkillsRoute
+  '/characters/$characterId/wallet': typeof AuthedCharactersCharacterIdWalletRoute
+  '/corporations/$corporationId/ledgers': typeof AuthedCorporationsCorporationIdLedgersRoute
+  '/corporations/$corporationId/members': typeof AuthedCorporationsCorporationIdMembersRoute
+  '/corporations/$corporationId/mining': typeof AuthedCorporationsCorporationIdMiningRoute
+  '/corporations/$corporationId/projects': typeof AuthedCorporationsCorporationIdProjectsRoute
+  '/corporations/$corporationId/skyhooks': typeof AuthedCorporationsCorporationIdSkyhooksRoute
+  '/corporations/$corporationId/starbases': typeof AuthedCorporationsCorporationIdStarbasesRoute
+  '/corporations/$corporationId/structures': typeof AuthedCorporationsCorporationIdStructuresRoute
+  '/corporations/$corporationId/wallets': typeof AuthedCorporationsCorporationIdWalletsRoute
+  '/squads/$squadId/applications': typeof AuthedSquadsSquadIdApplicationsRoute
+  '/squads/$squadId/members': typeof AuthedSquadsSquadIdMembersRoute
+  '/squads/$squadId/moderators': typeof AuthedSquadsSquadIdModeratorsRoute
+  '/squads/$squadId/roles': typeof AuthedSquadsSquadIdRolesRoute
+  '/characters/$characterId': typeof AuthedCharactersCharacterIdIndexRoute
+  '/corporations/$corporationId': typeof AuthedCorporationsCorporationIdIndexRoute
+  '/squads/$squadId': typeof AuthedSquadsSquadIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -50,13 +322,145 @@ export interface FileRoutesById {
   '/callback': typeof CallbackRoute
   '/login': typeof LoginRoute
   '/_authed/': typeof AuthedIndexRoute
+  '/_authed/characters/$characterId': typeof AuthedCharactersCharacterIdRouteWithChildren
+  '/_authed/corporations/$corporationId': typeof AuthedCorporationsCorporationIdRouteWithChildren
+  '/_authed/squads/$squadId': typeof AuthedSquadsSquadIdRouteWithChildren
+  '/_authed/characters/': typeof AuthedCharactersIndexRoute
+  '/_authed/corporations/': typeof AuthedCorporationsIndexRoute
+  '/_authed/squads/': typeof AuthedSquadsIndexRoute
+  '/_authed/characters/$characterId/assets': typeof AuthedCharactersCharacterIdAssetsRoute
+  '/_authed/characters/$characterId/calendar': typeof AuthedCharactersCharacterIdCalendarRoute
+  '/_authed/characters/$characterId/contracts': typeof AuthedCharactersCharacterIdContractsRoute
+  '/_authed/characters/$characterId/industry': typeof AuthedCharactersCharacterIdIndustryRoute
+  '/_authed/characters/$characterId/intel': typeof AuthedCharactersCharacterIdIntelRoute
+  '/_authed/characters/$characterId/killmails': typeof AuthedCharactersCharacterIdKillmailsRoute
+  '/_authed/characters/$characterId/mail': typeof AuthedCharactersCharacterIdMailRoute
+  '/_authed/characters/$characterId/pi': typeof AuthedCharactersCharacterIdPiRoute
+  '/_authed/characters/$characterId/skills': typeof AuthedCharactersCharacterIdSkillsRoute
+  '/_authed/characters/$characterId/wallet': typeof AuthedCharactersCharacterIdWalletRoute
+  '/_authed/corporations/$corporationId/ledgers': typeof AuthedCorporationsCorporationIdLedgersRoute
+  '/_authed/corporations/$corporationId/members': typeof AuthedCorporationsCorporationIdMembersRoute
+  '/_authed/corporations/$corporationId/mining': typeof AuthedCorporationsCorporationIdMiningRoute
+  '/_authed/corporations/$corporationId/projects': typeof AuthedCorporationsCorporationIdProjectsRoute
+  '/_authed/corporations/$corporationId/skyhooks': typeof AuthedCorporationsCorporationIdSkyhooksRoute
+  '/_authed/corporations/$corporationId/starbases': typeof AuthedCorporationsCorporationIdStarbasesRoute
+  '/_authed/corporations/$corporationId/structures': typeof AuthedCorporationsCorporationIdStructuresRoute
+  '/_authed/corporations/$corporationId/wallets': typeof AuthedCorporationsCorporationIdWalletsRoute
+  '/_authed/squads/$squadId/applications': typeof AuthedSquadsSquadIdApplicationsRoute
+  '/_authed/squads/$squadId/members': typeof AuthedSquadsSquadIdMembersRoute
+  '/_authed/squads/$squadId/moderators': typeof AuthedSquadsSquadIdModeratorsRoute
+  '/_authed/squads/$squadId/roles': typeof AuthedSquadsSquadIdRolesRoute
+  '/_authed/characters/$characterId/': typeof AuthedCharactersCharacterIdIndexRoute
+  '/_authed/corporations/$corporationId/': typeof AuthedCorporationsCorporationIdIndexRoute
+  '/_authed/squads/$squadId/': typeof AuthedSquadsSquadIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/callback' | '/login'
+  fullPaths:
+    | '/'
+    | '/callback'
+    | '/login'
+    | '/characters/$characterId'
+    | '/corporations/$corporationId'
+    | '/squads/$squadId'
+    | '/characters/'
+    | '/corporations/'
+    | '/squads/'
+    | '/characters/$characterId/assets'
+    | '/characters/$characterId/calendar'
+    | '/characters/$characterId/contracts'
+    | '/characters/$characterId/industry'
+    | '/characters/$characterId/intel'
+    | '/characters/$characterId/killmails'
+    | '/characters/$characterId/mail'
+    | '/characters/$characterId/pi'
+    | '/characters/$characterId/skills'
+    | '/characters/$characterId/wallet'
+    | '/corporations/$corporationId/ledgers'
+    | '/corporations/$corporationId/members'
+    | '/corporations/$corporationId/mining'
+    | '/corporations/$corporationId/projects'
+    | '/corporations/$corporationId/skyhooks'
+    | '/corporations/$corporationId/starbases'
+    | '/corporations/$corporationId/structures'
+    | '/corporations/$corporationId/wallets'
+    | '/squads/$squadId/applications'
+    | '/squads/$squadId/members'
+    | '/squads/$squadId/moderators'
+    | '/squads/$squadId/roles'
+    | '/characters/$characterId/'
+    | '/corporations/$corporationId/'
+    | '/squads/$squadId/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/callback' | '/login' | '/'
-  id: '__root__' | '/_authed' | '/callback' | '/login' | '/_authed/'
+  to:
+    | '/callback'
+    | '/login'
+    | '/'
+    | '/characters'
+    | '/corporations'
+    | '/squads'
+    | '/characters/$characterId/assets'
+    | '/characters/$characterId/calendar'
+    | '/characters/$characterId/contracts'
+    | '/characters/$characterId/industry'
+    | '/characters/$characterId/intel'
+    | '/characters/$characterId/killmails'
+    | '/characters/$characterId/mail'
+    | '/characters/$characterId/pi'
+    | '/characters/$characterId/skills'
+    | '/characters/$characterId/wallet'
+    | '/corporations/$corporationId/ledgers'
+    | '/corporations/$corporationId/members'
+    | '/corporations/$corporationId/mining'
+    | '/corporations/$corporationId/projects'
+    | '/corporations/$corporationId/skyhooks'
+    | '/corporations/$corporationId/starbases'
+    | '/corporations/$corporationId/structures'
+    | '/corporations/$corporationId/wallets'
+    | '/squads/$squadId/applications'
+    | '/squads/$squadId/members'
+    | '/squads/$squadId/moderators'
+    | '/squads/$squadId/roles'
+    | '/characters/$characterId'
+    | '/corporations/$corporationId'
+    | '/squads/$squadId'
+  id:
+    | '__root__'
+    | '/_authed'
+    | '/callback'
+    | '/login'
+    | '/_authed/'
+    | '/_authed/characters/$characterId'
+    | '/_authed/corporations/$corporationId'
+    | '/_authed/squads/$squadId'
+    | '/_authed/characters/'
+    | '/_authed/corporations/'
+    | '/_authed/squads/'
+    | '/_authed/characters/$characterId/assets'
+    | '/_authed/characters/$characterId/calendar'
+    | '/_authed/characters/$characterId/contracts'
+    | '/_authed/characters/$characterId/industry'
+    | '/_authed/characters/$characterId/intel'
+    | '/_authed/characters/$characterId/killmails'
+    | '/_authed/characters/$characterId/mail'
+    | '/_authed/characters/$characterId/pi'
+    | '/_authed/characters/$characterId/skills'
+    | '/_authed/characters/$characterId/wallet'
+    | '/_authed/corporations/$corporationId/ledgers'
+    | '/_authed/corporations/$corporationId/members'
+    | '/_authed/corporations/$corporationId/mining'
+    | '/_authed/corporations/$corporationId/projects'
+    | '/_authed/corporations/$corporationId/skyhooks'
+    | '/_authed/corporations/$corporationId/starbases'
+    | '/_authed/corporations/$corporationId/structures'
+    | '/_authed/corporations/$corporationId/wallets'
+    | '/_authed/squads/$squadId/applications'
+    | '/_authed/squads/$squadId/members'
+    | '/_authed/squads/$squadId/moderators'
+    | '/_authed/squads/$squadId/roles'
+    | '/_authed/characters/$characterId/'
+    | '/_authed/corporations/$corporationId/'
+    | '/_authed/squads/$squadId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -95,15 +499,347 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedIndexRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/characters/': {
+      id: '/_authed/characters/'
+      path: '/characters'
+      fullPath: '/characters/'
+      preLoaderRoute: typeof AuthedCharactersIndexRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/characters/$characterId': {
+      id: '/_authed/characters/$characterId'
+      path: '/characters/$characterId'
+      fullPath: '/characters/$characterId'
+      preLoaderRoute: typeof AuthedCharactersCharacterIdRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/corporations/': {
+      id: '/_authed/corporations/'
+      path: '/corporations'
+      fullPath: '/corporations/'
+      preLoaderRoute: typeof AuthedCorporationsIndexRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/corporations/$corporationId': {
+      id: '/_authed/corporations/$corporationId'
+      path: '/corporations/$corporationId'
+      fullPath: '/corporations/$corporationId'
+      preLoaderRoute: typeof AuthedCorporationsCorporationIdRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/squads/': {
+      id: '/_authed/squads/'
+      path: '/squads'
+      fullPath: '/squads/'
+      preLoaderRoute: typeof AuthedSquadsIndexRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/squads/$squadId': {
+      id: '/_authed/squads/$squadId'
+      path: '/squads/$squadId'
+      fullPath: '/squads/$squadId'
+      preLoaderRoute: typeof AuthedSquadsSquadIdRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/characters/$characterId/': {
+      id: '/_authed/characters/$characterId/'
+      path: '/'
+      fullPath: '/characters/$characterId/'
+      preLoaderRoute: typeof AuthedCharactersCharacterIdIndexRouteImport
+      parentRoute: typeof AuthedCharactersCharacterIdRoute
+    }
+    '/_authed/characters/$characterId/assets': {
+      id: '/_authed/characters/$characterId/assets'
+      path: '/assets'
+      fullPath: '/characters/$characterId/assets'
+      preLoaderRoute: typeof AuthedCharactersCharacterIdAssetsRouteImport
+      parentRoute: typeof AuthedCharactersCharacterIdRoute
+    }
+    '/_authed/characters/$characterId/calendar': {
+      id: '/_authed/characters/$characterId/calendar'
+      path: '/calendar'
+      fullPath: '/characters/$characterId/calendar'
+      preLoaderRoute: typeof AuthedCharactersCharacterIdCalendarRouteImport
+      parentRoute: typeof AuthedCharactersCharacterIdRoute
+    }
+    '/_authed/characters/$characterId/contracts': {
+      id: '/_authed/characters/$characterId/contracts'
+      path: '/contracts'
+      fullPath: '/characters/$characterId/contracts'
+      preLoaderRoute: typeof AuthedCharactersCharacterIdContractsRouteImport
+      parentRoute: typeof AuthedCharactersCharacterIdRoute
+    }
+    '/_authed/characters/$characterId/industry': {
+      id: '/_authed/characters/$characterId/industry'
+      path: '/industry'
+      fullPath: '/characters/$characterId/industry'
+      preLoaderRoute: typeof AuthedCharactersCharacterIdIndustryRouteImport
+      parentRoute: typeof AuthedCharactersCharacterIdRoute
+    }
+    '/_authed/characters/$characterId/intel': {
+      id: '/_authed/characters/$characterId/intel'
+      path: '/intel'
+      fullPath: '/characters/$characterId/intel'
+      preLoaderRoute: typeof AuthedCharactersCharacterIdIntelRouteImport
+      parentRoute: typeof AuthedCharactersCharacterIdRoute
+    }
+    '/_authed/characters/$characterId/killmails': {
+      id: '/_authed/characters/$characterId/killmails'
+      path: '/killmails'
+      fullPath: '/characters/$characterId/killmails'
+      preLoaderRoute: typeof AuthedCharactersCharacterIdKillmailsRouteImport
+      parentRoute: typeof AuthedCharactersCharacterIdRoute
+    }
+    '/_authed/characters/$characterId/mail': {
+      id: '/_authed/characters/$characterId/mail'
+      path: '/mail'
+      fullPath: '/characters/$characterId/mail'
+      preLoaderRoute: typeof AuthedCharactersCharacterIdMailRouteImport
+      parentRoute: typeof AuthedCharactersCharacterIdRoute
+    }
+    '/_authed/characters/$characterId/pi': {
+      id: '/_authed/characters/$characterId/pi'
+      path: '/pi'
+      fullPath: '/characters/$characterId/pi'
+      preLoaderRoute: typeof AuthedCharactersCharacterIdPiRouteImport
+      parentRoute: typeof AuthedCharactersCharacterIdRoute
+    }
+    '/_authed/characters/$characterId/skills': {
+      id: '/_authed/characters/$characterId/skills'
+      path: '/skills'
+      fullPath: '/characters/$characterId/skills'
+      preLoaderRoute: typeof AuthedCharactersCharacterIdSkillsRouteImport
+      parentRoute: typeof AuthedCharactersCharacterIdRoute
+    }
+    '/_authed/characters/$characterId/wallet': {
+      id: '/_authed/characters/$characterId/wallet'
+      path: '/wallet'
+      fullPath: '/characters/$characterId/wallet'
+      preLoaderRoute: typeof AuthedCharactersCharacterIdWalletRouteImport
+      parentRoute: typeof AuthedCharactersCharacterIdRoute
+    }
+    '/_authed/corporations/$corporationId/': {
+      id: '/_authed/corporations/$corporationId/'
+      path: '/'
+      fullPath: '/corporations/$corporationId/'
+      preLoaderRoute: typeof AuthedCorporationsCorporationIdIndexRouteImport
+      parentRoute: typeof AuthedCorporationsCorporationIdRoute
+    }
+    '/_authed/corporations/$corporationId/ledgers': {
+      id: '/_authed/corporations/$corporationId/ledgers'
+      path: '/ledgers'
+      fullPath: '/corporations/$corporationId/ledgers'
+      preLoaderRoute: typeof AuthedCorporationsCorporationIdLedgersRouteImport
+      parentRoute: typeof AuthedCorporationsCorporationIdRoute
+    }
+    '/_authed/corporations/$corporationId/members': {
+      id: '/_authed/corporations/$corporationId/members'
+      path: '/members'
+      fullPath: '/corporations/$corporationId/members'
+      preLoaderRoute: typeof AuthedCorporationsCorporationIdMembersRouteImport
+      parentRoute: typeof AuthedCorporationsCorporationIdRoute
+    }
+    '/_authed/corporations/$corporationId/mining': {
+      id: '/_authed/corporations/$corporationId/mining'
+      path: '/mining'
+      fullPath: '/corporations/$corporationId/mining'
+      preLoaderRoute: typeof AuthedCorporationsCorporationIdMiningRouteImport
+      parentRoute: typeof AuthedCorporationsCorporationIdRoute
+    }
+    '/_authed/corporations/$corporationId/projects': {
+      id: '/_authed/corporations/$corporationId/projects'
+      path: '/projects'
+      fullPath: '/corporations/$corporationId/projects'
+      preLoaderRoute: typeof AuthedCorporationsCorporationIdProjectsRouteImport
+      parentRoute: typeof AuthedCorporationsCorporationIdRoute
+    }
+    '/_authed/corporations/$corporationId/skyhooks': {
+      id: '/_authed/corporations/$corporationId/skyhooks'
+      path: '/skyhooks'
+      fullPath: '/corporations/$corporationId/skyhooks'
+      preLoaderRoute: typeof AuthedCorporationsCorporationIdSkyhooksRouteImport
+      parentRoute: typeof AuthedCorporationsCorporationIdRoute
+    }
+    '/_authed/corporations/$corporationId/starbases': {
+      id: '/_authed/corporations/$corporationId/starbases'
+      path: '/starbases'
+      fullPath: '/corporations/$corporationId/starbases'
+      preLoaderRoute: typeof AuthedCorporationsCorporationIdStarbasesRouteImport
+      parentRoute: typeof AuthedCorporationsCorporationIdRoute
+    }
+    '/_authed/corporations/$corporationId/structures': {
+      id: '/_authed/corporations/$corporationId/structures'
+      path: '/structures'
+      fullPath: '/corporations/$corporationId/structures'
+      preLoaderRoute: typeof AuthedCorporationsCorporationIdStructuresRouteImport
+      parentRoute: typeof AuthedCorporationsCorporationIdRoute
+    }
+    '/_authed/corporations/$corporationId/wallets': {
+      id: '/_authed/corporations/$corporationId/wallets'
+      path: '/wallets'
+      fullPath: '/corporations/$corporationId/wallets'
+      preLoaderRoute: typeof AuthedCorporationsCorporationIdWalletsRouteImport
+      parentRoute: typeof AuthedCorporationsCorporationIdRoute
+    }
+    '/_authed/squads/$squadId/': {
+      id: '/_authed/squads/$squadId/'
+      path: '/'
+      fullPath: '/squads/$squadId/'
+      preLoaderRoute: typeof AuthedSquadsSquadIdIndexRouteImport
+      parentRoute: typeof AuthedSquadsSquadIdRoute
+    }
+    '/_authed/squads/$squadId/applications': {
+      id: '/_authed/squads/$squadId/applications'
+      path: '/applications'
+      fullPath: '/squads/$squadId/applications'
+      preLoaderRoute: typeof AuthedSquadsSquadIdApplicationsRouteImport
+      parentRoute: typeof AuthedSquadsSquadIdRoute
+    }
+    '/_authed/squads/$squadId/members': {
+      id: '/_authed/squads/$squadId/members'
+      path: '/members'
+      fullPath: '/squads/$squadId/members'
+      preLoaderRoute: typeof AuthedSquadsSquadIdMembersRouteImport
+      parentRoute: typeof AuthedSquadsSquadIdRoute
+    }
+    '/_authed/squads/$squadId/moderators': {
+      id: '/_authed/squads/$squadId/moderators'
+      path: '/moderators'
+      fullPath: '/squads/$squadId/moderators'
+      preLoaderRoute: typeof AuthedSquadsSquadIdModeratorsRouteImport
+      parentRoute: typeof AuthedSquadsSquadIdRoute
+    }
+    '/_authed/squads/$squadId/roles': {
+      id: '/_authed/squads/$squadId/roles'
+      path: '/roles'
+      fullPath: '/squads/$squadId/roles'
+      preLoaderRoute: typeof AuthedSquadsSquadIdRolesRouteImport
+      parentRoute: typeof AuthedSquadsSquadIdRoute
+    }
   }
 }
 
+interface AuthedCharactersCharacterIdRouteChildren {
+  AuthedCharactersCharacterIdAssetsRoute: typeof AuthedCharactersCharacterIdAssetsRoute
+  AuthedCharactersCharacterIdCalendarRoute: typeof AuthedCharactersCharacterIdCalendarRoute
+  AuthedCharactersCharacterIdContractsRoute: typeof AuthedCharactersCharacterIdContractsRoute
+  AuthedCharactersCharacterIdIndustryRoute: typeof AuthedCharactersCharacterIdIndustryRoute
+  AuthedCharactersCharacterIdIntelRoute: typeof AuthedCharactersCharacterIdIntelRoute
+  AuthedCharactersCharacterIdKillmailsRoute: typeof AuthedCharactersCharacterIdKillmailsRoute
+  AuthedCharactersCharacterIdMailRoute: typeof AuthedCharactersCharacterIdMailRoute
+  AuthedCharactersCharacterIdPiRoute: typeof AuthedCharactersCharacterIdPiRoute
+  AuthedCharactersCharacterIdSkillsRoute: typeof AuthedCharactersCharacterIdSkillsRoute
+  AuthedCharactersCharacterIdWalletRoute: typeof AuthedCharactersCharacterIdWalletRoute
+  AuthedCharactersCharacterIdIndexRoute: typeof AuthedCharactersCharacterIdIndexRoute
+}
+
+const AuthedCharactersCharacterIdRouteChildren: AuthedCharactersCharacterIdRouteChildren =
+  {
+    AuthedCharactersCharacterIdAssetsRoute:
+      AuthedCharactersCharacterIdAssetsRoute,
+    AuthedCharactersCharacterIdCalendarRoute:
+      AuthedCharactersCharacterIdCalendarRoute,
+    AuthedCharactersCharacterIdContractsRoute:
+      AuthedCharactersCharacterIdContractsRoute,
+    AuthedCharactersCharacterIdIndustryRoute:
+      AuthedCharactersCharacterIdIndustryRoute,
+    AuthedCharactersCharacterIdIntelRoute:
+      AuthedCharactersCharacterIdIntelRoute,
+    AuthedCharactersCharacterIdKillmailsRoute:
+      AuthedCharactersCharacterIdKillmailsRoute,
+    AuthedCharactersCharacterIdMailRoute: AuthedCharactersCharacterIdMailRoute,
+    AuthedCharactersCharacterIdPiRoute: AuthedCharactersCharacterIdPiRoute,
+    AuthedCharactersCharacterIdSkillsRoute:
+      AuthedCharactersCharacterIdSkillsRoute,
+    AuthedCharactersCharacterIdWalletRoute:
+      AuthedCharactersCharacterIdWalletRoute,
+    AuthedCharactersCharacterIdIndexRoute:
+      AuthedCharactersCharacterIdIndexRoute,
+  }
+
+const AuthedCharactersCharacterIdRouteWithChildren =
+  AuthedCharactersCharacterIdRoute._addFileChildren(
+    AuthedCharactersCharacterIdRouteChildren,
+  )
+
+interface AuthedCorporationsCorporationIdRouteChildren {
+  AuthedCorporationsCorporationIdLedgersRoute: typeof AuthedCorporationsCorporationIdLedgersRoute
+  AuthedCorporationsCorporationIdMembersRoute: typeof AuthedCorporationsCorporationIdMembersRoute
+  AuthedCorporationsCorporationIdMiningRoute: typeof AuthedCorporationsCorporationIdMiningRoute
+  AuthedCorporationsCorporationIdProjectsRoute: typeof AuthedCorporationsCorporationIdProjectsRoute
+  AuthedCorporationsCorporationIdSkyhooksRoute: typeof AuthedCorporationsCorporationIdSkyhooksRoute
+  AuthedCorporationsCorporationIdStarbasesRoute: typeof AuthedCorporationsCorporationIdStarbasesRoute
+  AuthedCorporationsCorporationIdStructuresRoute: typeof AuthedCorporationsCorporationIdStructuresRoute
+  AuthedCorporationsCorporationIdWalletsRoute: typeof AuthedCorporationsCorporationIdWalletsRoute
+  AuthedCorporationsCorporationIdIndexRoute: typeof AuthedCorporationsCorporationIdIndexRoute
+}
+
+const AuthedCorporationsCorporationIdRouteChildren: AuthedCorporationsCorporationIdRouteChildren =
+  {
+    AuthedCorporationsCorporationIdLedgersRoute:
+      AuthedCorporationsCorporationIdLedgersRoute,
+    AuthedCorporationsCorporationIdMembersRoute:
+      AuthedCorporationsCorporationIdMembersRoute,
+    AuthedCorporationsCorporationIdMiningRoute:
+      AuthedCorporationsCorporationIdMiningRoute,
+    AuthedCorporationsCorporationIdProjectsRoute:
+      AuthedCorporationsCorporationIdProjectsRoute,
+    AuthedCorporationsCorporationIdSkyhooksRoute:
+      AuthedCorporationsCorporationIdSkyhooksRoute,
+    AuthedCorporationsCorporationIdStarbasesRoute:
+      AuthedCorporationsCorporationIdStarbasesRoute,
+    AuthedCorporationsCorporationIdStructuresRoute:
+      AuthedCorporationsCorporationIdStructuresRoute,
+    AuthedCorporationsCorporationIdWalletsRoute:
+      AuthedCorporationsCorporationIdWalletsRoute,
+    AuthedCorporationsCorporationIdIndexRoute:
+      AuthedCorporationsCorporationIdIndexRoute,
+  }
+
+const AuthedCorporationsCorporationIdRouteWithChildren =
+  AuthedCorporationsCorporationIdRoute._addFileChildren(
+    AuthedCorporationsCorporationIdRouteChildren,
+  )
+
+interface AuthedSquadsSquadIdRouteChildren {
+  AuthedSquadsSquadIdApplicationsRoute: typeof AuthedSquadsSquadIdApplicationsRoute
+  AuthedSquadsSquadIdMembersRoute: typeof AuthedSquadsSquadIdMembersRoute
+  AuthedSquadsSquadIdModeratorsRoute: typeof AuthedSquadsSquadIdModeratorsRoute
+  AuthedSquadsSquadIdRolesRoute: typeof AuthedSquadsSquadIdRolesRoute
+  AuthedSquadsSquadIdIndexRoute: typeof AuthedSquadsSquadIdIndexRoute
+}
+
+const AuthedSquadsSquadIdRouteChildren: AuthedSquadsSquadIdRouteChildren = {
+  AuthedSquadsSquadIdApplicationsRoute: AuthedSquadsSquadIdApplicationsRoute,
+  AuthedSquadsSquadIdMembersRoute: AuthedSquadsSquadIdMembersRoute,
+  AuthedSquadsSquadIdModeratorsRoute: AuthedSquadsSquadIdModeratorsRoute,
+  AuthedSquadsSquadIdRolesRoute: AuthedSquadsSquadIdRolesRoute,
+  AuthedSquadsSquadIdIndexRoute: AuthedSquadsSquadIdIndexRoute,
+}
+
+const AuthedSquadsSquadIdRouteWithChildren =
+  AuthedSquadsSquadIdRoute._addFileChildren(AuthedSquadsSquadIdRouteChildren)
+
 interface AuthedRouteChildren {
   AuthedIndexRoute: typeof AuthedIndexRoute
+  AuthedCharactersCharacterIdRoute: typeof AuthedCharactersCharacterIdRouteWithChildren
+  AuthedCorporationsCorporationIdRoute: typeof AuthedCorporationsCorporationIdRouteWithChildren
+  AuthedSquadsSquadIdRoute: typeof AuthedSquadsSquadIdRouteWithChildren
+  AuthedCharactersIndexRoute: typeof AuthedCharactersIndexRoute
+  AuthedCorporationsIndexRoute: typeof AuthedCorporationsIndexRoute
+  AuthedSquadsIndexRoute: typeof AuthedSquadsIndexRoute
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedIndexRoute: AuthedIndexRoute,
+  AuthedCharactersCharacterIdRoute:
+    AuthedCharactersCharacterIdRouteWithChildren,
+  AuthedCorporationsCorporationIdRoute:
+    AuthedCorporationsCorporationIdRouteWithChildren,
+  AuthedSquadsSquadIdRoute: AuthedSquadsSquadIdRouteWithChildren,
+  AuthedCharactersIndexRoute: AuthedCharactersIndexRoute,
+  AuthedCorporationsIndexRoute: AuthedCorporationsIndexRoute,
+  AuthedSquadsIndexRoute: AuthedSquadsIndexRoute,
 }
 
 const AuthedRouteWithChildren =

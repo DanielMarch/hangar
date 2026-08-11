@@ -1,8 +1,7 @@
 // Persistent collapsible left sidebar (SRS §8.2). Collapse state is
 // client-only UI chrome, owned by Zustand (web/src/stores/ui.ts) — never
-// server data. Nav entries beyond Dashboard are placeholders until their
-// routes land (characters/corporations -> Phase 17, admin -> Phase 18); they
-// render disabled rather than linking to routes that do not exist yet.
+// server data. Admin is still a placeholder until Phase 18's routes land;
+// characters/corporations/squads (Phase 17) are real now.
 import { Link, useMatches } from "@tanstack/react-router";
 import {
   Building2,
@@ -30,9 +29,24 @@ const NAV_ITEMS = [
     to: "/" as const,
     enabled: true,
   },
-  { labelKey: "nav.characters", icon: Users, enabled: false },
-  { labelKey: "nav.corporations", icon: Building2, enabled: false },
-  { labelKey: "nav.squads", icon: Shield, enabled: false },
+  {
+    labelKey: "nav.characters",
+    icon: Users,
+    to: "/characters" as const,
+    enabled: true,
+  },
+  {
+    labelKey: "nav.corporations",
+    icon: Building2,
+    to: "/corporations" as const,
+    enabled: true,
+  },
+  {
+    labelKey: "nav.squads",
+    icon: Shield,
+    to: "/squads" as const,
+    enabled: true,
+  },
 ];
 
 export function Sidebar() {
@@ -81,7 +95,11 @@ export function Sidebar() {
       <nav className="flex flex-1 flex-col gap-1 p-2">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
-          const active = item.enabled && item.to === currentPath;
+          const active =
+            item.enabled &&
+            (item.to === "/"
+              ? currentPath === "/"
+              : currentPath?.startsWith(item.to));
           const content = (
             <span
               className={cn(

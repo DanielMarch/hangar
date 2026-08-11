@@ -1,5 +1,7 @@
 {
-  "app": { "name": "HANGAR" },
+  "app": {
+    "name": "HANGAR"
+  },
   "nav": {
     "dashboard": "Dashboard",
     "characters": "Characters",
@@ -12,7 +14,12 @@
     "logout": "Log out",
     "retry": "Retry",
     "collapseSidebar": "Collapse sidebar",
-    "expandSidebar": "Expand sidebar"
+    "expandSidebar": "Expand sidebar",
+    "loadMore": "Load more",
+    "approve": "Approve",
+    "reject": "Reject",
+    "close": "Close",
+    "search": "Search"
   },
   "login": {
     "heading": "Welcome to HANGAR",
@@ -38,7 +45,167 @@
   "errors": {
     "boundaryTitle": "Something went wrong",
     "boundaryBody": "This section failed to load.",
-    "retry": "Retry"
+    "retry": "Retry",
+    "forbiddenTitle": "No access",
+    "forbiddenBody": "You don't have permission to view this."
   },
-  "breadcrumbs": { "home": "Home" }
+  "breadcrumbs": {
+    "home": "Home"
+  },
+  "dataTable": {
+    "filterPlaceholder": "Filter…",
+    "noResults": "No results.",
+    "loading": "Loading…"
+  },
+  "columns": {
+    "date": "Date",
+    "description": "Description",
+    "type": "Type",
+    "typeId": "Type",
+    "status": "Status",
+    "amount": "Amount",
+    "balance": "Balance",
+    "price": "Price",
+    "reward": "Reward",
+    "collateral": "Collateral",
+    "unitPrice": "Unit price",
+    "quantity": "Qty",
+    "buy": "Buy?",
+    "itemId": "Item",
+    "locationId": "Location",
+    "flag": "Flag",
+    "skill": "Skill",
+    "level": "Level",
+    "sp": "SP",
+    "queuePosition": "#",
+    "start": "Start",
+    "finish": "Finish",
+    "expires": "Expires",
+    "bidder": "Bidder"
+  },
+  "characters": {
+    "heading": "Characters",
+    "notFound": "Character not found.",
+    "tabs": {
+      "sheet": "Sheet",
+      "skills": "Skills",
+      "assets": "Assets",
+      "wallet": "Wallet",
+      "contracts": "Contracts",
+      "mail": "Mail",
+      "pi": "Planetary Interaction",
+      "calendar": "Calendar",
+      "industry": "Industry",
+      "killmails": "Killmails",
+      "intel": "Intel"
+    },
+    "sheet": {
+      "corporation": "Corporation",
+      "security": "Security status",
+      "birthday": "Birthday",
+      "title": "Title"
+    },
+    "skills": {
+      "totalSp": "Total skill points",
+      "queue": "Skill queue",
+      "trained": "Trained skills"
+    },
+    "assets": {
+      "location": "Location",
+      "quantity": "Quantity",
+      "name": "Name",
+      "depth": "Depth"
+    },
+    "wallet": {
+      "journal": "Journal",
+      "transactions": "Transactions",
+      "balance": "Balance"
+    },
+    "contracts": {
+      "heading": "Contracts",
+      "items": "Items",
+      "bids": "Bids",
+      "noItems": "This contract has no items.",
+      "noBids": "No bids on this contract."
+    },
+    "mail": {
+      "inbox": "Inbox",
+      "from": "From",
+      "subject": "Subject",
+      "sentAt": "Sent",
+      "noSelection": "Select a message to read it.",
+      "loadingBody": "Loading message…"
+    },
+    "pi": {
+      "colonies": "Colonies",
+      "noColonies": "No planetary colonies."
+    },
+    "calendar": {
+      "heading": "Calendar"
+    },
+    "industry": {
+      "heading": "Industry jobs"
+    },
+    "killmails": {
+      "heading": "Killmails"
+    },
+    "intel": {
+      "heading": "Intel"
+    }
+  },
+  "corporations": {
+    "heading": "Corporations",
+    "notFound": "Corporation not found.",
+    "tabs": {
+      "sheet": "Sheet",
+      "members": "Members",
+      "wallets": "Wallets",
+      "ledgers": "Ledgers",
+      "structures": "Structures",
+      "starbases": "Starbases",
+      "skyhooks": "Skyhooks",
+      "projects": "Projects",
+      "mining": "Mining"
+    },
+    "wallets": {
+      "division": "Division",
+      "journal": "Journal",
+      "transactions": "Transactions"
+    },
+    "ledgers": {
+      "bounties": "Bounties",
+      "mining": "Mining",
+      "pi": "PI"
+    },
+    "structures": {
+      "heading": "Structures"
+    },
+    "starbases": {
+      "heading": "Starbases"
+    },
+    "skyhooks": {
+      "heading": "Skyhooks"
+    },
+    "projects": {
+      "heading": "Projects",
+      "contributors": "Contributors"
+    },
+    "mining": {
+      "extractions": "Extractions",
+      "observers": "Observers"
+    }
+  },
+  "squads": {
+    "heading": "Squads",
+    "notFound": "Squad not found.",
+    "tabs": {
+      "members": "Members",
+      "moderators": "Moderators",
+      "roles": "Roles",
+      "applications": "Applications"
+    },
+    "applications": {
+      "pending": "Pending applications"
+    }
+  }
 }

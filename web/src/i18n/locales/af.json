@@ -1,5 +1,7 @@
 {
-  "app": { "name": "HANGAR" },
+  "app": {
+    "name": "HANGAR"
+  },
   "nav": {
     "dashboard": "Paneelbord",
     "characters": "Karakters",
@@ -12,7 +14,12 @@
     "logout": "Meld af",
     "retry": "Probeer weer",
     "collapseSidebar": "Vou kantbalk toe",
-    "expandSidebar": "Brei kantbalk uit"
+    "expandSidebar": "Brei kantbalk uit",
+    "loadMore": "Laai meer",
+    "approve": "Keur goed",
+    "reject": "Verwerp",
+    "close": "Maak toe",
+    "search": "Soek"
   },
   "login": {
     "heading": "Welkom by HANGAR",
@@ -38,7 +45,167 @@
   "errors": {
     "boundaryTitle": "Iets het verkeerd geloop",
     "boundaryBody": "Hierdie afdeling kon nie laai nie.",
-    "retry": "Probeer weer"
+    "retry": "Probeer weer",
+    "forbiddenTitle": "Geen toegang nie",
+    "forbiddenBody": "Jy het nie toestemming om dit te sien nie."
   },
-  "breadcrumbs": { "home": "Tuis" }
+  "breadcrumbs": {
+    "home": "Tuis"
+  },
+  "dataTable": {
+    "filterPlaceholder": "Filter…",
+    "noResults": "Geen resultate nie.",
+    "loading": "Laai tans…"
+  },
+  "columns": {
+    "date": "Datum",
+    "description": "Beskrywing",
+    "type": "Tipe",
+    "typeId": "Tipe",
+    "status": "Status",
+    "amount": "Bedrag",
+    "balance": "Saldo",
+    "price": "Prys",
+    "reward": "Beloning",
+    "collateral": "Sekuriteit",
+    "unitPrice": "Eenheidsprys",
+    "quantity": "Hvhd",
+    "buy": "Koop?",
+    "itemId": "Item",
+    "locationId": "Ligging",
+    "flag": "Vlag",
+    "skill": "Vaardigheid",
+    "level": "Vlak",
+    "sp": "VP",
+    "queuePosition": "#",
+    "start": "Begin",
+    "finish": "Einde",
+    "expires": "Verval",
+    "bidder": "Bieder"
+  },
+  "characters": {
+    "heading": "Karakters",
+    "notFound": "Karakter nie gevind nie.",
+    "tabs": {
+      "sheet": "Oorsig",
+      "skills": "Vaardighede",
+      "assets": "Bates",
+      "wallet": "Beursie",
+      "contracts": "Kontrakte",
+      "mail": "Pos",
+      "pi": "Planetêre interaksie",
+      "calendar": "Kalender",
+      "industry": "Nywerheid",
+      "killmails": "Doodmeldings",
+      "intel": "Intel"
+    },
+    "sheet": {
+      "corporation": "Korporasie",
+      "security": "Sekuriteitstatus",
+      "birthday": "Verjaardag",
+      "title": "Titel"
+    },
+    "skills": {
+      "totalSp": "Totale vaardigheidspunte",
+      "queue": "Vaardigheidsry",
+      "trained": "Afgerigte vaardighede"
+    },
+    "assets": {
+      "location": "Ligging",
+      "quantity": "Hoeveelheid",
+      "name": "Naam",
+      "depth": "Diepte"
+    },
+    "wallet": {
+      "journal": "Joernaal",
+      "transactions": "Transaksies",
+      "balance": "Saldo"
+    },
+    "contracts": {
+      "heading": "Kontrakte",
+      "items": "Items",
+      "bids": "Bods",
+      "noItems": "Hierdie kontrak het geen items nie.",
+      "noBids": "Geen bods op hierdie kontrak nie."
+    },
+    "mail": {
+      "inbox": "Inkassie",
+      "from": "Van",
+      "subject": "Onderwerp",
+      "sentAt": "Gestuur",
+      "noSelection": "Kies 'n boodskap om te lees.",
+      "loadingBody": "Boodskap laai tans…"
+    },
+    "pi": {
+      "colonies": "Kolonies",
+      "noColonies": "Geen planetêre kolonies nie."
+    },
+    "calendar": {
+      "heading": "Kalender"
+    },
+    "industry": {
+      "heading": "Nywerheidswerk"
+    },
+    "killmails": {
+      "heading": "Doodmeldings"
+    },
+    "intel": {
+      "heading": "Intel"
+    }
+  },
+  "corporations": {
+    "heading": "Korporasies",
+    "notFound": "Korporasie nie gevind nie.",
+    "tabs": {
+      "sheet": "Oorsig",
+      "members": "Lede",
+      "wallets": "Beursies",
+      "ledgers": "Grootboeke",
+      "structures": "Strukture",
+      "starbases": "Sterbasisse",
+      "skyhooks": "Skyhooks",
+      "projects": "Projekte",
+      "mining": "Mynbou"
+    },
+    "wallets": {
+      "division": "Afdeling",
+      "journal": "Joernaal",
+      "transactions": "Transaksies"
+    },
+    "ledgers": {
+      "bounties": "Beloninge",
+      "mining": "Mynbou",
+      "pi": "PI"
+    },
+    "structures": {
+      "heading": "Strukture"
+    },
+    "starbases": {
+      "heading": "Sterbasisse"
+    },
+    "skyhooks": {
+      "heading": "Skyhooks"
+    },
+    "projects": {
+      "heading": "Projekte",
+      "contributors": "Bydraers"
+    },
+    "mining": {
+      "extractions": "Ontginnings",
+      "observers": "Waarnemers"
+    }
+  },
+  "squads": {
+    "heading": "Spanne",
+    "notFound": "Span nie gevind nie.",
+    "tabs": {
+      "members": "Lede",
+      "moderators": "Moderators",
+      "roles": "Rolle",
+      "applications": "Aansoeke"
+    },
+    "applications": {
+      "pending": "Hangende aansoeke"
+    }
+  }
 }

@@ -53,7 +53,10 @@ export default tseslint.config(
     // (t()/<Trans>), never a bare literal. Scoped to .tsx only — .ts files
     // (stores, api client, lib helpers) legitimately contain string
     // literals (query keys, cookie names, class names) that are not UI copy.
+    // *.test.tsx is exempt: test fixtures assert against literal English on
+    // purpose (mocked API rows, expected DOM text) and are never shipped.
     files: ["**/*.tsx"],
+    ignores: ["**/*.test.tsx"],
     plugins: { i18next },
     rules: {
       "i18next/no-literal-string": [

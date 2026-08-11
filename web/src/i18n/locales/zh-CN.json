@@ -1,5 +1,7 @@
 {
-  "app": { "name": "HANGAR" },
+  "app": {
+    "name": "HANGAR"
+  },
   "nav": {
     "dashboard": "仪表盘",
     "characters": "角色",
@@ -12,7 +14,12 @@
     "logout": "退出登录",
     "retry": "重试",
     "collapseSidebar": "收起侧边栏",
-    "expandSidebar": "展开侧边栏"
+    "expandSidebar": "展开侧边栏",
+    "loadMore": "加载更多",
+    "approve": "批准",
+    "reject": "拒绝",
+    "close": "关闭",
+    "search": "搜索"
   },
   "login": {
     "heading": "欢迎使用 HANGAR",
@@ -38,7 +45,167 @@
   "errors": {
     "boundaryTitle": "出现问题",
     "boundaryBody": "此部分加载失败。",
-    "retry": "重试"
+    "retry": "重试",
+    "forbiddenTitle": "无访问权限",
+    "forbiddenBody": "您没有权限查看此内容。"
   },
-  "breadcrumbs": { "home": "首页" }
+  "breadcrumbs": {
+    "home": "首页"
+  },
+  "dataTable": {
+    "filterPlaceholder": "筛选…",
+    "noResults": "没有结果。",
+    "loading": "加载中…"
+  },
+  "columns": {
+    "date": "日期",
+    "description": "描述",
+    "type": "类型",
+    "typeId": "类型",
+    "status": "状态",
+    "amount": "金额",
+    "balance": "余额",
+    "price": "价格",
+    "reward": "报酬",
+    "collateral": "抵押物",
+    "unitPrice": "单价",
+    "quantity": "数量",
+    "buy": "购买?",
+    "itemId": "物品",
+    "locationId": "位置",
+    "flag": "标志",
+    "skill": "技能",
+    "level": "等级",
+    "sp": "技能点",
+    "queuePosition": "#",
+    "start": "开始",
+    "finish": "结束",
+    "expires": "到期",
+    "bidder": "出价人"
+  },
+  "characters": {
+    "heading": "角色",
+    "notFound": "未找到该角色。",
+    "tabs": {
+      "sheet": "概况",
+      "skills": "技能",
+      "assets": "资产",
+      "wallet": "钱包",
+      "contracts": "合同",
+      "mail": "邮件",
+      "pi": "行星交互",
+      "calendar": "日历",
+      "industry": "工业",
+      "killmails": "击杀记录",
+      "intel": "情报"
+    },
+    "sheet": {
+      "corporation": "军团",
+      "security": "安全等级",
+      "birthday": "生日",
+      "title": "头衔"
+    },
+    "skills": {
+      "totalSp": "总技能点",
+      "queue": "技能队列",
+      "trained": "已学技能"
+    },
+    "assets": {
+      "location": "位置",
+      "quantity": "数量",
+      "name": "名称",
+      "depth": "深度"
+    },
+    "wallet": {
+      "journal": "流水",
+      "transactions": "交易记录",
+      "balance": "余额"
+    },
+    "contracts": {
+      "heading": "合同",
+      "items": "物品",
+      "bids": "出价",
+      "noItems": "此合同没有物品。",
+      "noBids": "此合同没有出价。"
+    },
+    "mail": {
+      "inbox": "收件箱",
+      "from": "发件人",
+      "subject": "主题",
+      "sentAt": "发送时间",
+      "noSelection": "请选择一条消息以阅读。",
+      "loadingBody": "正在加载消息…"
+    },
+    "pi": {
+      "colonies": "殖民地",
+      "noColonies": "没有行星殖民地。"
+    },
+    "calendar": {
+      "heading": "日历"
+    },
+    "industry": {
+      "heading": "工业作业"
+    },
+    "killmails": {
+      "heading": "击杀记录"
+    },
+    "intel": {
+      "heading": "情报"
+    }
+  },
+  "corporations": {
+    "heading": "军团",
+    "notFound": "未找到该军团。",
+    "tabs": {
+      "sheet": "概况",
+      "members": "成员",
+      "wallets": "钱包",
+      "ledgers": "账本",
+      "structures": "建筑",
+      "starbases": "星际基地",
+      "skyhooks": "天钩",
+      "projects": "项目",
+      "mining": "采矿"
+    },
+    "wallets": {
+      "division": "部门",
+      "journal": "流水",
+      "transactions": "交易记录"
+    },
+    "ledgers": {
+      "bounties": "赏金",
+      "mining": "采矿",
+      "pi": "行星交互"
+    },
+    "structures": {
+      "heading": "建筑"
+    },
+    "starbases": {
+      "heading": "星际基地"
+    },
+    "skyhooks": {
+      "heading": "天钩"
+    },
+    "projects": {
+      "heading": "项目",
+      "contributors": "贡献者"
+    },
+    "mining": {
+      "extractions": "开采记录",
+      "observers": "观测器"
+    }
+  },
+  "squads": {
+    "heading": "分队",
+    "notFound": "未找到该分队。",
+    "tabs": {
+      "members": "成员",
+      "moderators": "管理员",
+      "roles": "角色",
+      "applications": "申请"
+    },
+    "applications": {
+      "pending": "待处理申请"
+    }
+  }
 }

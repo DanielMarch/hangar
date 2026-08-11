@@ -1,5 +1,7 @@
 {
-  "app": { "name": "HANGAR" },
+  "app": {
+    "name": "HANGAR"
+  },
   "nav": {
     "dashboard": "Tableau de bord",
     "characters": "Personnages",
@@ -12,7 +14,12 @@
     "logout": "Se déconnecter",
     "retry": "Réessayer",
     "collapseSidebar": "Réduire la barre latérale",
-    "expandSidebar": "Développer la barre latérale"
+    "expandSidebar": "Développer la barre latérale",
+    "loadMore": "Charger plus",
+    "approve": "Approuver",
+    "reject": "Rejeter",
+    "close": "Fermer",
+    "search": "Rechercher"
   },
   "login": {
     "heading": "Bienvenue sur HANGAR",
@@ -38,7 +45,167 @@
   "errors": {
     "boundaryTitle": "Une erreur est survenue",
     "boundaryBody": "Cette section n'a pas pu être chargée.",
-    "retry": "Réessayer"
+    "retry": "Réessayer",
+    "forbiddenTitle": "Accès refusé",
+    "forbiddenBody": "Vous n'avez pas la permission de voir ceci."
   },
-  "breadcrumbs": { "home": "Accueil" }
+  "breadcrumbs": {
+    "home": "Accueil"
+  },
+  "dataTable": {
+    "filterPlaceholder": "Filtrer…",
+    "noResults": "Aucun résultat.",
+    "loading": "Chargement…"
+  },
+  "columns": {
+    "date": "Date",
+    "description": "Description",
+    "type": "Type",
+    "typeId": "Type",
+    "status": "Statut",
+    "amount": "Montant",
+    "balance": "Solde",
+    "price": "Prix",
+    "reward": "Récompense",
+    "collateral": "Garantie",
+    "unitPrice": "Prix unitaire",
+    "quantity": "Qté",
+    "buy": "Achat ?",
+    "itemId": "Objet",
+    "locationId": "Emplacement",
+    "flag": "Indicateur",
+    "skill": "Compétence",
+    "level": "Niveau",
+    "sp": "PC",
+    "queuePosition": "#",
+    "start": "Début",
+    "finish": "Fin",
+    "expires": "Expire",
+    "bidder": "Enchérisseur"
+  },
+  "characters": {
+    "heading": "Personnages",
+    "notFound": "Personnage introuvable.",
+    "tabs": {
+      "sheet": "Fiche",
+      "skills": "Compétences",
+      "assets": "Biens",
+      "wallet": "Portefeuille",
+      "contracts": "Contrats",
+      "mail": "Courrier",
+      "pi": "Interaction planétaire",
+      "calendar": "Calendrier",
+      "industry": "Industrie",
+      "killmails": "Kills",
+      "intel": "Renseignement"
+    },
+    "sheet": {
+      "corporation": "Corporation",
+      "security": "Statut de sécurité",
+      "birthday": "Date de naissance",
+      "title": "Titre"
+    },
+    "skills": {
+      "totalSp": "Points de compétence totaux",
+      "queue": "File de compétences",
+      "trained": "Compétences acquises"
+    },
+    "assets": {
+      "location": "Emplacement",
+      "quantity": "Quantité",
+      "name": "Nom",
+      "depth": "Profondeur"
+    },
+    "wallet": {
+      "journal": "Journal",
+      "transactions": "Transactions",
+      "balance": "Solde"
+    },
+    "contracts": {
+      "heading": "Contrats",
+      "items": "Objets",
+      "bids": "Enchères",
+      "noItems": "Ce contrat ne contient aucun objet.",
+      "noBids": "Aucune enchère sur ce contrat."
+    },
+    "mail": {
+      "inbox": "Boîte de réception",
+      "from": "De",
+      "subject": "Objet",
+      "sentAt": "Envoyé",
+      "noSelection": "Sélectionnez un message pour le lire.",
+      "loadingBody": "Chargement du message…"
+    },
+    "pi": {
+      "colonies": "Colonies",
+      "noColonies": "Aucune colonie planétaire."
+    },
+    "calendar": {
+      "heading": "Calendrier"
+    },
+    "industry": {
+      "heading": "Travaux industriels"
+    },
+    "killmails": {
+      "heading": "Kills"
+    },
+    "intel": {
+      "heading": "Renseignement"
+    }
+  },
+  "corporations": {
+    "heading": "Corporations",
+    "notFound": "Corporation introuvable.",
+    "tabs": {
+      "sheet": "Fiche",
+      "members": "Membres",
+      "wallets": "Portefeuilles",
+      "ledgers": "Registres",
+      "structures": "Structures",
+      "starbases": "Avant-postes",
+      "skyhooks": "Skyhooks",
+      "projects": "Projets",
+      "mining": "Minage"
+    },
+    "wallets": {
+      "division": "Division",
+      "journal": "Journal",
+      "transactions": "Transactions"
+    },
+    "ledgers": {
+      "bounties": "Primes",
+      "mining": "Minage",
+      "pi": "PI"
+    },
+    "structures": {
+      "heading": "Structures"
+    },
+    "starbases": {
+      "heading": "Avant-postes"
+    },
+    "skyhooks": {
+      "heading": "Skyhooks"
+    },
+    "projects": {
+      "heading": "Projets",
+      "contributors": "Contributeurs"
+    },
+    "mining": {
+      "extractions": "Extractions",
+      "observers": "Observateurs"
+    }
+  },
+  "squads": {
+    "heading": "Escouades",
+    "notFound": "Escouade introuvable.",
+    "tabs": {
+      "members": "Membres",
+      "moderators": "Modérateurs",
+      "roles": "Rôles",
+      "applications": "Candidatures"
+    },
+    "applications": {
+      "pending": "Candidatures en attente"
+    }
+  }
 }

@@ -1,5 +1,7 @@
 {
-  "app": { "name": "HANGAR" },
+  "app": {
+    "name": "HANGAR"
+  },
   "nav": {
     "dashboard": "Panou de control",
     "characters": "Personaje",
@@ -12,7 +14,12 @@
     "logout": "Deconectare",
     "retry": "Reîncearcă",
     "collapseSidebar": "Restrânge bara laterală",
-    "expandSidebar": "Extinde bara laterală"
+    "expandSidebar": "Extinde bara laterală",
+    "loadMore": "Încarcă mai multe",
+    "approve": "Aprobă",
+    "reject": "Respinge",
+    "close": "Închide",
+    "search": "Caută"
   },
   "login": {
     "heading": "Bine ai venit la HANGAR",
@@ -38,7 +45,167 @@
   "errors": {
     "boundaryTitle": "Ceva nu a mers bine",
     "boundaryBody": "Această secțiune nu a putut fi încărcată.",
-    "retry": "Reîncearcă"
+    "retry": "Reîncearcă",
+    "forbiddenTitle": "Fără acces",
+    "forbiddenBody": "Nu ai permisiunea să vezi acest conținut."
   },
-  "breadcrumbs": { "home": "Acasă" }
+  "breadcrumbs": {
+    "home": "Acasă"
+  },
+  "dataTable": {
+    "filterPlaceholder": "Filtrează…",
+    "noResults": "Niciun rezultat.",
+    "loading": "Se încarcă…"
+  },
+  "columns": {
+    "date": "Dată",
+    "description": "Descriere",
+    "type": "Tip",
+    "typeId": "Tip",
+    "status": "Stare",
+    "amount": "Sumă",
+    "balance": "Sold",
+    "price": "Preț",
+    "reward": "Recompensă",
+    "collateral": "Garanție",
+    "unitPrice": "Preț unitar",
+    "quantity": "Cant.",
+    "buy": "Cumpărare?",
+    "itemId": "Obiect",
+    "locationId": "Locație",
+    "flag": "Indicator",
+    "skill": "Abilitate",
+    "level": "Nivel",
+    "sp": "PA",
+    "queuePosition": "#",
+    "start": "Început",
+    "finish": "Sfârșit",
+    "expires": "Expiră",
+    "bidder": "Ofertant"
+  },
+  "characters": {
+    "heading": "Personaje",
+    "notFound": "Personajul nu a fost găsit.",
+    "tabs": {
+      "sheet": "Fișă",
+      "skills": "Abilități",
+      "assets": "Bunuri",
+      "wallet": "Portofel",
+      "contracts": "Contracte",
+      "mail": "Mesaje",
+      "pi": "Interacțiune planetară",
+      "calendar": "Calendar",
+      "industry": "Industrie",
+      "killmails": "Killmail-uri",
+      "intel": "Informații"
+    },
+    "sheet": {
+      "corporation": "Corporație",
+      "security": "Stare de securitate",
+      "birthday": "Zi de naștere",
+      "title": "Titlu"
+    },
+    "skills": {
+      "totalSp": "Total puncte de abilitate",
+      "queue": "Coadă de abilități",
+      "trained": "Abilități instruite"
+    },
+    "assets": {
+      "location": "Locație",
+      "quantity": "Cantitate",
+      "name": "Nume",
+      "depth": "Adâncime"
+    },
+    "wallet": {
+      "journal": "Jurnal",
+      "transactions": "Tranzacții",
+      "balance": "Sold"
+    },
+    "contracts": {
+      "heading": "Contracte",
+      "items": "Obiecte",
+      "bids": "Oferte",
+      "noItems": "Acest contract nu are obiecte.",
+      "noBids": "Nicio ofertă pentru acest contract."
+    },
+    "mail": {
+      "inbox": "Mesaje primite",
+      "from": "De la",
+      "subject": "Subiect",
+      "sentAt": "Trimis",
+      "noSelection": "Selectează un mesaj pentru a-l citi.",
+      "loadingBody": "Se încarcă mesajul…"
+    },
+    "pi": {
+      "colonies": "Colonii",
+      "noColonies": "Nicio colonie planetară."
+    },
+    "calendar": {
+      "heading": "Calendar"
+    },
+    "industry": {
+      "heading": "Lucrări industriale"
+    },
+    "killmails": {
+      "heading": "Killmail-uri"
+    },
+    "intel": {
+      "heading": "Informații"
+    }
+  },
+  "corporations": {
+    "heading": "Corporații",
+    "notFound": "Corporația nu a fost găsită.",
+    "tabs": {
+      "sheet": "Fișă",
+      "members": "Membri",
+      "wallets": "Portofele",
+      "ledgers": "Registre",
+      "structures": "Structuri",
+      "starbases": "Baze stelare",
+      "skyhooks": "Skyhooks",
+      "projects": "Proiecte",
+      "mining": "Minerit"
+    },
+    "wallets": {
+      "division": "Divizie",
+      "journal": "Jurnal",
+      "transactions": "Tranzacții"
+    },
+    "ledgers": {
+      "bounties": "Recompense",
+      "mining": "Minerit",
+      "pi": "PI"
+    },
+    "structures": {
+      "heading": "Structuri"
+    },
+    "starbases": {
+      "heading": "Baze stelare"
+    },
+    "skyhooks": {
+      "heading": "Skyhooks"
+    },
+    "projects": {
+      "heading": "Proiecte",
+      "contributors": "Contribuitori"
+    },
+    "mining": {
+      "extractions": "Extracții",
+      "observers": "Observatoare"
+    }
+  },
+  "squads": {
+    "heading": "Echipe",
+    "notFound": "Echipa nu a fost găsită.",
+    "tabs": {
+      "members": "Membri",
+      "moderators": "Moderatori",
+      "roles": "Roluri",
+      "applications": "Cereri"
+    },
+    "applications": {
+      "pending": "Cereri în așteptare"
+    }
+  }
 }

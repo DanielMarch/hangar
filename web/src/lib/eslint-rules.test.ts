@@ -35,6 +35,17 @@ describe("local/no-number-on-isk (TestESLintBlocksNumberOnISK)", () => {
     "parseFloat(walletIsk)",
     "Number(row.isk_balance)",
     "Number.parseFloat(totalIsk)",
+    // Phase 17 widening — internal/domain/money.go's moneyTokens, not just
+    // /isk/i (wallet journal/transaction/contract fields never say "isk").
+    "Number(journal.amount)",
+    "parseFloat(row.balance)",
+    "Number(transaction.unit_price)",
+    "Number(order.escrow)",
+    "parseFloat(job.cost)",
+    "Number(contract.reward)",
+    "Number(contract.collateral)",
+    "Number(contract.buyout)",
+    "parseFloat(bounty.payout)",
   ])("flags %s", (snippet) => {
     const messages = linter.verify(`const x = ${snippet};`, config);
     expect(messages.some((m) => m.ruleId === "local/no-number-on-isk")).toBe(
@@ -46,6 +57,13 @@ describe("local/no-number-on-isk (TestESLintBlocksNumberOnISK)", () => {
     "Number(pageSize)",
     "parseFloat(percentage)",
     "Number(characterId)",
+    // Phase 17 denylist parity with internal/domain/money.go's
+    // notMoneyFields — these contain a money token as a substring-ish word
+    // but are not ISK values.
+    "Number(order.tax_rate)",
+    "parseFloat(character.security_status)",
+    "Number(row.volume_remain)",
+    "Number(item.quantity)",
   ])("does not flag %s", (snippet) => {
     const messages = linter.verify(`const x = ${snippet};`, config);
     expect(messages.some((m) => m.ruleId === "local/no-number-on-isk")).toBe(
