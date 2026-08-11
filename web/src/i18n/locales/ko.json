@@ -1,0 +1,44 @@
+{
+  "app": { "name": "HANGAR" },
+  "nav": {
+    "dashboard": "대시보드",
+    "characters": "캐릭터",
+    "corporations": "코퍼레이션",
+    "squads": "스쿼드",
+    "admin": "관리"
+  },
+  "actions": {
+    "login": "EVE Online으로 로그인",
+    "logout": "로그아웃",
+    "retry": "다시 시도",
+    "collapseSidebar": "사이드바 접기",
+    "expandSidebar": "사이드바 펼치기"
+  },
+  "login": {
+    "heading": "HANGAR에 오신 것을 환영합니다",
+    "subheading": "계속하려면 EVE Online 계정으로 로그인하세요.",
+    "cta": "EVE Online으로 로그인"
+  },
+  "dashboard": {
+    "heading": "대시보드",
+    "serverStatus": "서버 상태",
+    "esiStatus": "ESI 상태",
+    "players": "접속 중인 플레이어",
+    "vip": "VIP 모드",
+    "version": "서버 버전",
+    "healthy": "정상",
+    "degraded": "저하됨"
+  },
+  "sync": {
+    "lastUpdated": "마지막 업데이트: {{time}}",
+    "stale": "오래됨",
+    "unavailable": "사용 불가",
+    "neverSynced": "아직 동기화되지 않음"
+  },
+  "errors": {
+    "boundaryTitle": "문제가 발생했습니다",
+    "boundaryBody": "이 섹션을 불러오지 못했습니다.",
+    "retry": "다시 시도"
+  },
+  "breadcrumbs": { "home": "홈" }
+}

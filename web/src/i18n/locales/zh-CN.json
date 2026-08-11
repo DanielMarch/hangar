@@ -1,0 +1,44 @@
+{
+  "app": { "name": "HANGAR" },
+  "nav": {
+    "dashboard": "仪表盘",
+    "characters": "角色",
+    "corporations": "军团",
+    "squads": "分队",
+    "admin": "管理"
+  },
+  "actions": {
+    "login": "使用 EVE Online 登录",
+    "logout": "退出登录",
+    "retry": "重试",
+    "collapseSidebar": "收起侧边栏",
+    "expandSidebar": "展开侧边栏"
+  },
+  "login": {
+    "heading": "欢迎使用 HANGAR",
+    "subheading": "请使用您的 EVE Online 账号登录以继续。",
+    "cta": "使用 EVE Online 登录"
+  },
+  "dashboard": {
+    "heading": "仪表盘",
+    "serverStatus": "服务器状态",
+    "esiStatus": "ESI 状态",
+    "players": "在线玩家数",
+    "vip": "VIP 模式",
+    "version": "服务器版本",
+    "healthy": "正常",
+    "degraded": "性能下降"
+  },
+  "sync": {
+    "lastUpdated": "最后更新时间 {{time}}",
+    "stale": "数据过期",
+    "unavailable": "不可用",
+    "neverSynced": "尚未同步"
+  },
+  "errors": {
+    "boundaryTitle": "出现问题",
+    "boundaryBody": "此部分加载失败。",
+    "retry": "重试"
+  },
+  "breadcrumbs": { "home": "首页" }
+}

@@ -24,19 +24,15 @@
   "dependencies": {
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-
     "@tanstack/react-router": "^1.132.0",
     "@tanstack/react-query": "^5.90.0",
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.13.0",
     "zustand": "^5.0.8",
-
     "openapi-fetch": "^0.14.0",
     "zod": "^4.1.0",
-
     "i18next": "^25.5.0",
     "react-i18next": "^16.0.0",
-
     "@radix-ui/react-accordion": "^1.2.11",
     "@radix-ui/react-alert-dialog": "^1.1.14",
     "@radix-ui/react-avatar": "^1.1.10",
@@ -54,7 +50,6 @@
     "@radix-ui/react-switch": "^1.2.5",
     "@radix-ui/react-tabs": "^1.1.12",
     "@radix-ui/react-tooltip": "^1.2.7",
-
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "tailwind-merge": "^3.3.1",
@@ -68,18 +63,14 @@
     "typescript": "^5.9.2",
     "vite": "^7.1.5",
     "@vitejs/plugin-react": "^5.0.2",
-
     "tailwindcss": "^4.1.13",
     "@tailwindcss/vite": "^4.1.13",
-
     "@tanstack/router-plugin": "^1.132.0",
     "@tanstack/router-devtools": "^1.132.0",
     "@tanstack/react-query-devtools": "^5.90.0",
-
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@types/node": "^22.18.0",
-
     "eslint": "^9.35.0",
     "typescript-eslint": "^8.44.0",
     "eslint-plugin-react-hooks": "^6.1.0",
@@ -87,7 +78,6 @@
     "eslint-plugin-i18next": "^6.1.4",
     "@eslint/js": "^9.35.0",
     "globals": "^16.4.0",
-
     "vitest": "^3.2.4",
     "@vitest/coverage-v8": "^3.2.4",
     "@testing-library/react": "^16.3.0",
@@ -95,7 +85,6 @@
     "jsdom": "^26.1.0",
     "msw": "^2.11.0",
     "@playwright/test": "^1.55.0",
-
     "openapi-typescript": "^7.9.1",
     "@size-limit/preset-app": "^11.2.0",
     "size-limit": "^11.2.0",

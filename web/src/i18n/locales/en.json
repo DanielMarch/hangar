@@ -1,0 +1,44 @@
+{
+  "app": { "name": "HANGAR" },
+  "nav": {
+    "dashboard": "Dashboard",
+    "characters": "Characters",
+    "corporations": "Corporations",
+    "squads": "Squads",
+    "admin": "Admin"
+  },
+  "actions": {
+    "login": "Log in with EVE Online",
+    "logout": "Log out",
+    "retry": "Retry",
+    "collapseSidebar": "Collapse sidebar",
+    "expandSidebar": "Expand sidebar"
+  },
+  "login": {
+    "heading": "Welcome to HANGAR",
+    "subheading": "Sign in with your EVE Online account to continue.",
+    "cta": "Log in with EVE Online"
+  },
+  "dashboard": {
+    "heading": "Dashboard",
+    "serverStatus": "Server status",
+    "esiStatus": "ESI status",
+    "players": "Players online",
+    "vip": "VIP mode",
+    "version": "Server version",
+    "healthy": "Healthy",
+    "degraded": "Degraded"
+  },
+  "sync": {
+    "lastUpdated": "Last updated {{time}}",
+    "stale": "Stale",
+    "unavailable": "Unavailable",
+    "neverSynced": "Not yet synced"
+  },
+  "errors": {
+    "boundaryTitle": "Something went wrong",
+    "boundaryBody": "This section failed to load.",
+    "retry": "Retry"
+  },
+  "breadcrumbs": { "home": "Home" }
+}

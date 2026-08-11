@@ -29,7 +29,9 @@ export function uiLocales(): string[] {
 export function resolveEsiLanguage(uiLocale: string): string {
   const l = bySource.get(uiLocale);
   if (!l) {
-    throw new Error(`i18n: "${uiLocale}" is not a known UI locale (see internal/i18n/locales.json)`);
+    throw new Error(
+      `i18n: "${uiLocale}" is not a known UI locale (see internal/i18n/locales.json)`,
+    );
   }
   return l.esi;
 }

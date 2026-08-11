@@ -1,0 +1,44 @@
+{
+  "app": { "name": "HANGAR" },
+  "nav": {
+    "dashboard": "Paneelbord",
+    "characters": "Karakters",
+    "corporations": "Korporasies",
+    "squads": "Spanne",
+    "admin": "Administrasie"
+  },
+  "actions": {
+    "login": "Meld aan met EVE Online",
+    "logout": "Meld af",
+    "retry": "Probeer weer",
+    "collapseSidebar": "Vou kantbalk toe",
+    "expandSidebar": "Brei kantbalk uit"
+  },
+  "login": {
+    "heading": "Welkom by HANGAR",
+    "subheading": "Meld aan met jou EVE Online-rekening om voort te gaan.",
+    "cta": "Meld aan met EVE Online"
+  },
+  "dashboard": {
+    "heading": "Paneelbord",
+    "serverStatus": "Bedienerstatus",
+    "esiStatus": "ESI-status",
+    "players": "Spelers aanlyn",
+    "vip": "VIP-modus",
+    "version": "Bedienerweergawe",
+    "healthy": "Gesond",
+    "degraded": "Verswak"
+  },
+  "sync": {
+    "lastUpdated": "Laas bygewerk {{time}}",
+    "stale": "Verouderd",
+    "unavailable": "Nie beskikbaar nie",
+    "neverSynced": "Nog nie gesinkroniseer nie"
+  },
+  "errors": {
+    "boundaryTitle": "Iets het verkeerd geloop",
+    "boundaryBody": "Hierdie afdeling kon nie laai nie.",
+    "retry": "Probeer weer"
+  },
+  "breadcrumbs": { "home": "Tuis" }
+}

@@ -1,0 +1,44 @@
+{
+  "app": { "name": "HANGAR" },
+  "nav": {
+    "dashboard": "Panou de control",
+    "characters": "Personaje",
+    "corporations": "Corporații",
+    "squads": "Echipe",
+    "admin": "Administrare"
+  },
+  "actions": {
+    "login": "Conectare cu EVE Online",
+    "logout": "Deconectare",
+    "retry": "Reîncearcă",
+    "collapseSidebar": "Restrânge bara laterală",
+    "expandSidebar": "Extinde bara laterală"
+  },
+  "login": {
+    "heading": "Bine ai venit la HANGAR",
+    "subheading": "Conectează-te cu contul tău EVE Online pentru a continua.",
+    "cta": "Conectare cu EVE Online"
+  },
+  "dashboard": {
+    "heading": "Panou de control",
+    "serverStatus": "Stare server",
+    "esiStatus": "Stare ESI",
+    "players": "Jucători online",
+    "vip": "Mod VIP",
+    "version": "Versiune server",
+    "healthy": "Funcțional",
+    "degraded": "Degradat"
+  },
+  "sync": {
+    "lastUpdated": "Actualizat {{time}}",
+    "stale": "Neactualizat",
+    "unavailable": "Indisponibil",
+    "neverSynced": "Nesincronizat încă"
+  },
+  "errors": {
+    "boundaryTitle": "Ceva nu a mers bine",
+    "boundaryBody": "Această secțiune nu a putut fi încărcată.",
+    "retry": "Reîncearcă"
+  },
+  "breadcrumbs": { "home": "Acasă" }
+}

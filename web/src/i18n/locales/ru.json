@@ -1,0 +1,44 @@
+{
+  "app": { "name": "HANGAR" },
+  "nav": {
+    "dashboard": "Панель управления",
+    "characters": "Персонажи",
+    "corporations": "Корпорации",
+    "squads": "Отряды",
+    "admin": "Администрирование"
+  },
+  "actions": {
+    "login": "Войти через EVE Online",
+    "logout": "Выйти",
+    "retry": "Повторить",
+    "collapseSidebar": "Свернуть боковую панель",
+    "expandSidebar": "Развернуть боковую панель"
+  },
+  "login": {
+    "heading": "Добро пожаловать в HANGAR",
+    "subheading": "Войдите с помощью учётной записи EVE Online, чтобы продолжить.",
+    "cta": "Войти через EVE Online"
+  },
+  "dashboard": {
+    "heading": "Панель управления",
+    "serverStatus": "Статус сервера",
+    "esiStatus": "Статус ESI",
+    "players": "Игроков онлайн",
+    "vip": "VIP-режим",
+    "version": "Версия сервера",
+    "healthy": "Исправно",
+    "degraded": "Снижена производительность"
+  },
+  "sync": {
+    "lastUpdated": "Обновлено {{time}}",
+    "stale": "Устарело",
+    "unavailable": "Недоступно",
+    "neverSynced": "Ещё не синхронизировано"
+  },
+  "errors": {
+    "boundaryTitle": "Что-то пошло не так",
+    "boundaryBody": "Не удалось загрузить этот раздел.",
+    "retry": "Повторить"
+  },
+  "breadcrumbs": { "home": "Главная" }
+}

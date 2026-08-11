@@ -1,0 +1,44 @@
+{
+  "app": { "name": "HANGAR" },
+  "nav": {
+    "dashboard": "ダッシュボード",
+    "characters": "キャラクター",
+    "corporations": "コーポレーション",
+    "squads": "スカッド",
+    "admin": "管理"
+  },
+  "actions": {
+    "login": "EVE Online でログイン",
+    "logout": "ログアウト",
+    "retry": "再試行",
+    "collapseSidebar": "サイドバーを折りたたむ",
+    "expandSidebar": "サイドバーを展開する"
+  },
+  "login": {
+    "heading": "HANGAR へようこそ",
+    "subheading": "続行するには EVE Online アカウントでログインしてください。",
+    "cta": "EVE Online でログイン"
+  },
+  "dashboard": {
+    "heading": "ダッシュボード",
+    "serverStatus": "サーバーステータス",
+    "esiStatus": "ESI ステータス",
+    "players": "オンラインプレイヤー数",
+    "vip": "VIP モード",
+    "version": "サーバーバージョン",
+    "healthy": "正常",
+    "degraded": "低下"
+  },
+  "sync": {
+    "lastUpdated": "最終更新: {{time}}",
+    "stale": "古い情報",
+    "unavailable": "利用不可",
+    "neverSynced": "未同期"
+  },
+  "errors": {
+    "boundaryTitle": "問題が発生しました",
+    "boundaryBody": "このセクションを読み込めませんでした。",
+    "retry": "再試行"
+  },
+  "breadcrumbs": { "home": "ホーム" }
+}
