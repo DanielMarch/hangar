@@ -15,6 +15,24 @@ jobs:
   ci-strict:
     name: make ci-strict
     runs-on: ubuntu-latest
+    # Throwaway, structurally-valid configuration for the CI database and
+    # for every `hangar` subcommand `make ci-strict` shells out to. These
+    # are NOT secrets: HANGAR_MASTER_KEY is a fixed all-zero 32-byte key and
+    # the SSO values are placeholders that never reach login.eveonline.com.
+    #
+    # PHASE 15.1: the job used to export HANGAR_DB_URL alone, and both
+    # `migrate up` and `check-identifiers` shell out to `hangar`, which
+    # validates the WHOLE configuration at boot and aborts on any missing
+    # secret. That fail-fast behaviour is deliberate (a Phase 0 exit
+    # criterion), so the fix is to supply the configuration rather than to
+    # weaken the check — under STRICT=1 a skipped check-identifiers is a
+    # hard failure, so this job could not have gone green without it.
+    env:
+      HANGAR_DB_URL: postgres://hangar:hangar@localhost:5432/hangar?sslmode=disable
+      HANGAR_MASTER_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      HANGAR_SESSION_SECRET: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      HANGAR_SSO_CLIENT_ID: ci-placeholder-client-id
+      HANGAR_SSO_CLIENT_SECRET: ci-placeholder-client-secret
     services:
       postgres:
         image: postgres:18-alpine
@@ -51,13 +69,9 @@ jobs:
       # under STRICT and needs real schema to check against.
       - name: migrate up
         run: go run ./cmd/hangar migrate up
-        env:
-          HANGAR_DB_URL: postgres://hangar:hangar@localhost:5432/hangar?sslmode=disable
 
       - name: make ci-strict
         run: make ci-strict
-        env:
-          HANGAR_DB_URL: postgres://hangar:hangar@localhost:5432/hangar?sslmode=disable
 
   # SRS §9.2 release matrix: linux/amd64, linux/arm64, windows/amd64. All
   # CGO_ENABLED=0 — a single accidental cgo dependency silently produces a

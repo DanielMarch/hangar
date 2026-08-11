@@ -1547,6 +1547,28 @@ tty-detection outcome, with a bounded `--name-only` list printed on failure inst
 potentially enormous diff. Recorded honestly in the Makefile: if it recurs, add a timeout rather
 than restore the old form — a gate that can hang forever is worse than one that fails.
 
+**Two further pre-existing defects, found only because `make ci-strict` finally ran end to end.**
+Both are latent Phase 0 issues, both would have failed in CI, and both independently corroborate
+Phase 14.1's finding that `make ci` had never actually gone green.
+
+1. **`TestConfigFailsFastOnEachRequiredSecret` could not pass in CI.** Its `setEnv` helper only
+   *set* the variables present in its map, so `delete(env, "HANGAR_DB_URL")` removed the key from
+   the map but left any **ambient** `HANGAR_DB_URL` untouched — the test asserted "loading fails
+   when this secret is missing" while the secret was still present in the process environment.
+   It therefore passed only in a shell exporting none of the five required variables, and failed
+   in the one environment that matters: CI exports `HANGAR_DB_URL` for the `make ci-strict` step.
+   Reproduced on Phase 15's own commit (`46b803b`) to confirm it predates Phase 15.1. Fixed by
+   having `setEnv` explicitly blank every required variable the map omits (via `t.Setenv(k, "")`,
+   which stays hermetic because `t.Setenv` restores on cleanup, and which `internal/config`
+   already treats as missing).
+
+2. **`check-identifiers` had no configuration in CI.** Every `hangar` subcommand validates the
+   *whole* configuration at boot and aborts on any missing secret — deliberate fail-fast
+   behaviour and a Phase 0 exit criterion — but the workflow exported `HANGAR_DB_URL` alone. Under
+   `STRICT=1`, where a skipped check is a hard failure, this gate could never have passed. Fixed
+   by supplying throwaway, structurally-valid placeholder configuration at the job level in both
+   `ci.yml` and `release.yml` rather than by weakening the validation.
+
 **Exit criteria.**
 
 | Test | Assertion |

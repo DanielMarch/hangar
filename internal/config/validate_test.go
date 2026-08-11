@@ -15,11 +15,50 @@ func validKey() string {
 }
 
 // setEnv sets HANGAR_-prefixed env vars for the duration of the test.
+// setEnv installs kv as THE environment for the required-secret variables
+// — every name in requiredSecretEnv that kv does not mention is explicitly
+// blanked, not merely left alone.
+//
+// PHASE 15.1 FIX. This used to only set the keys present in kv, which
+// meant `delete(env, "HANGAR_DB_URL")` removed the key from the map but
+// left any AMBIENT HANGAR_DB_URL untouched — so
+// TestConfigFailsFastOnEachRequiredSecret asserted "loading fails when
+// this secret is missing" while the secret was still perfectly present in
+// the process environment, and the assertion failed.
+//
+// That made the test pass only in a shell with none of the five variables
+// exported, and fail in the one environment that matters most: CI exports
+// HANGAR_DB_URL for the `make ci` / `make ci-strict` step
+// (.github/workflows/ci.yml), so `make test` inside it could never have
+// gone green. It is a latent Phase 0 defect — reproduced on Phase 15's own
+// commit (46b803b) — and corroborates Phase 14.1's finding that `make ci`
+// had never actually run.
+//
+// Blanking rather than unsetting is deliberate: t.Setenv restores the
+// previous value on cleanup, so the test stays hermetic, and
+// internal/config treats "" as missing for all five (requireSecret checks
+// Secret.Empty(), requireString checks v == "").
 func setEnv(t *testing.T, kv map[string]string) {
 	t.Helper()
+	for _, k := range requiredSecretEnv {
+		if _, ok := kv[k]; !ok {
+			t.Setenv(k, "")
+		}
+	}
 	for k, v := range kv {
 		t.Setenv(k, v)
 	}
+}
+
+// requiredSecretEnv is the closed set of environment variables
+// internal/config treats as required secrets — the same list
+// TestConfigFailsFastOnEachRequiredSecret iterates.
+var requiredSecretEnv = []string{
+	"HANGAR_DB_URL",
+	"HANGAR_MASTER_KEY",
+	"HANGAR_SESSION_SECRET",
+	"HANGAR_SSO_CLIENT_ID",
+	"HANGAR_SSO_CLIENT_SECRET",
 }
 
 func fullValidEnv() map[string]string {
@@ -56,14 +95,7 @@ func TestConfigFailsFastOnMissingSecrets(t *testing.T) {
 }
 
 func TestConfigFailsFastOnEachRequiredSecret(t *testing.T) {
-	required := []string{
-		"HANGAR_DB_URL",
-		"HANGAR_MASTER_KEY",
-		"HANGAR_SESSION_SECRET",
-		"HANGAR_SSO_CLIENT_ID",
-		"HANGAR_SSO_CLIENT_SECRET",
-	}
-	for _, missing := range required {
+	for _, missing := range requiredSecretEnv {
 		t.Run(missing, func(t *testing.T) {
 			env := fullValidEnv()
 			delete(env, missing)
