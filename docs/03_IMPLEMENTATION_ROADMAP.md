@@ -2030,7 +2030,7 @@ build that already worked, which is the thing a gate is supposed to be evidence 
 | Sub-phase | Owns | Closes | Gate it unblocks |
 | :-- | :-- | :-- | :-- |
 | **20.1** | Specification reconciliation, the metric surface, the reachability guard | B36 + the two measured spec corrections | prerequisite for 1, 2, 3, 7 |
-| **20.2** | ESI gateway correctness wiring | B23, B28, B29, B31 | Gate 1 |
+| **20.2** | ESI gateway correctness wiring | B23, B28, B29, B31, ~~B37~~, ~~B38~~ | Gate 1 |
 | **20.3** | Identity, RBAC and revocation wiring | B26, B27, B32, B35 | Gate 2 |
 | **20.4** | Alert generation wiring | B25 | Gate 3 |
 | **20.5** | Data completeness and remaining surfaces | B22, B24, B30, B33, B34 | Gate 4 |
@@ -2043,6 +2043,14 @@ whether Gates 1–3 can produce evidence at all, and because the reachability gu
 what stops the next sub-phase reintroducing the defect it is closing. 20.2 → 20.4 in gate order,
 each landing its own metrics with its own wiring. 20.5 sweeps the remaining surfaces. 20.6 and
 20.7 are independent of all of the above and could run in parallel with them. 20.8 last, always.
+
+**B37 and B38 landed early, out of order, and the reason is worth recording.** Registering the
+real EVE SSO application against a live installation — rather than waiting for 20.2 to schedule
+it — surfaced both within minutes: the authorization URL carried `scope=` (B37), and deriving the
+scope set from the sync set exposed two paths that had been pluralised into non-existence (B38).
+Neither was findable from the test suite, and B38 was findable only *because* B37's fix made the
+derivation observable. That is the fourth consecutive phase in which running the system found
+what running the tests could not.
 
 **One rule adopted across all eight, and it is the lesson of the audit.** A metric is declared
 only in the sub-phase that makes it *move*. A metric that exists and reads zero is
