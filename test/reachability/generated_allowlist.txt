@@ -1,0 +1,111 @@
+# Generated store queries with no production caller.
+#
+# WHY THIS FILE EXISTS SEPARATELY. Phase 20.1's reachability guard runs
+# x/tools/cmd/deadcode, which by design does NOT report dead functions in
+# GENERATED files. internal/store/gen is generated, so the entire store
+# layer was a blind spot — and that is exactly where B42 hid: nothing in
+# production ever called UpsertSyncSubscription, so no entity was ever
+# subscribed to any route and the whole ESI sync engine had nothing to do.
+#
+# Same contract as allowlist.txt: a new uncalled query fails the guard, and
+# so does an entry here that has gained a caller. This file should SHRINK.
+
+# B42 — the sync engine has no subscription creator; NOTHING is ever scheduled
+ListRecentSyncRuns
+SetSyncNoCacheOptIn
+SetSyncSubscriptionEnabled
+SnoozeSyncSubscription
+UpsertSyncSubscription
+
+# B24 — §4.9 webhook endpoint configuration surface
+CreateWebhookEndpoint
+ListWebhookEndpointsForUser
+RevokeWebhookEndpoint
+
+# B26 — RBAC mutation and resolution surface
+GetRole
+GetUserByMainCharacterID
+ListEffectivePermissions
+ListPermissions
+SetUserActive
+
+# B29 — Governor 2's error budget is never incremented or reset
+IncrementErrorBudget
+ResetErrorBudgetWindow
+
+# B25 — alert routing, channels and the unknown-type boards
+CountAlertTypesByDomain
+CreateAlertRoutingRule
+GetAlertType
+ListAlertChannels
+ListAlertEventsForCoalesceKeySince
+ListAlertTypes
+ListRecentAlertEvents
+ListUnparseableCharacterNotifications
+
+# B30 — route handlers that are never dispatched, and their readers
+DeleteCharacterFittingsNotIn
+GetCalendarEventDetail
+GetPlanetColonyDetail
+GetStarbaseDetail
+ListCorporationProjectContributions
+
+# B35 — TeamSpeak identity linking
+GetTeamspeakChallenge
+
+# Platform and entitlement configuration has no surface
+CreatePlatform
+CreatePlatformGroup
+GetPlatform
+ListEntitlementRulesForGroup
+ListEntitlementRulesForSource
+SetEntitlementRuleEnabled
+UpsertProvisioningState
+
+# Open-vocabulary boards (Gate 6 surfaces these; no reader is wired)
+AcknowledgeOpenVocabularyValue
+CountUnacknowledgedOpenVocabulary
+GetEsiScope
+ListUnacknowledgedOpenVocabulary
+
+# HOUSEKEEPING THAT NEVER RUNS — rows accumulate forever
+CountEsiCacheEntries
+DeleteExpiredEsiCacheEntries
+DeleteExpiredSessions
+DeleteStaleReplicas
+DeregisterReplica
+
+# Domain readers awaiting the endpoint or screen that uses them
+CreateCharacterNote
+CreateSquadApplication
+GetAsset
+GetContract
+GetKillmail
+GetLatestSdeImport
+GetMoonReport
+GetShareLink
+GetSquad
+GetWalletBalance
+ListAssetsByRootLocation
+ListInvalidCharacterTokens
+ListKillmailAttackers
+ListKillmailItems
+ListMailRecipients
+RecordApiTokenAccess
+
+# Writers whose only producer is a sync handler that is never dispatched
+# (B30), or whose live path uses hand-written SQL instead of the generated
+# query. UpsertReplicaHeartbeat is the latter: internal/telemetry/replica.go
+# issues its own statement because it must first probe to_regclass, so the
+# generated twin has never been used.
+UpsertAlliance
+UpsertCharacterFitting
+UpsertCharacterFittingItem
+UpsertCharacterIntelEdge
+UpsertInsurancePrice
+UpsertKillmail
+UpsertKillmailAttacker
+UpsertKillmailItem
+UpsertLocation
+UpsertNotificationContact
+UpsertReplicaHeartbeat

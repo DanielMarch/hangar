@@ -132,6 +132,32 @@ type ESIConfig struct {
 	// otherwise the installation oscillates in and out of pause.
 	ErrorLimitPauseAt  int
 	ErrorLimitResumeAt int
+
+	// StartupCatalogueIngest controls whether `serve` runs the route
+	// catalogue ingest in the background at startup. Default true, which is
+	// §2's "single-process default": a one-box installation must not need a
+	// second command before anything works (defect B20).
+	//
+	// ── WHY IT MUST BE POSSIBLE TO TURN OFF (defect B41) ─────────────────
+	// catalogue.Boot is the ONLY writer of app.setting's `esi.d_max`, and
+	// it rewrites it on every startup from whatever the live spec — or the
+	// embedded snapshot on fallback — reports. That is right for a real
+	// installation and wrong for any environment that has deliberately
+	// seeded a catalogue and a D_max ceiling, because the ingest silently
+	// overwrites the seed moments after the process starts.
+	//
+	// The Playwright suite is exactly that environment: web/e2e/global-setup
+	// seeds `esi.d_max` and a five-route catalogue so the pin-advance
+	// preview has a deterministic diff, and the startup ingest then replaces
+	// the ceiling. Worse, it is a RACE — whether the seed survives depends on
+	// how quickly ESI answers, so the suite passes on a machine that cannot
+	// reach ESI and fails on one that can.
+	//
+	// This is also a real operator setting, not only a test hook: an
+	// installation that manages its catalogue on a schedule through
+	// `hangar admin ingest-catalogue`, or one running air-gapped, should not
+	// have every replica restart reach for ESI.
+	StartupCatalogueIngest bool
 }
 
 // SyncConfig governs Phase 6's planner: leader-elected claim loop cadence,
@@ -347,6 +373,7 @@ func applyDefaults(v *viper.Viper) {
 	v.SetDefault("esi_error_limit_window", "60s")
 	v.SetDefault("esi_error_limit_max", 100)
 	v.SetDefault("esi_error_limit_pause_at", 20)
+	v.SetDefault("esi_startup_catalogue_ingest", true)
 	v.SetDefault("esi_error_limit_resume_at", 60)
 
 	v.SetDefault("sync_planner_interval", "5s")
@@ -497,12 +524,13 @@ func Load(v *viper.Viper) (*Config, error) {
 			Scopes: splitScopeList(v.GetString("sso_scopes")),
 		},
 		ESI: ESIConfig{
-			RequestTimeout:     v.GetDuration("esi_request_timeout"),
-			TTLFloor:           v.GetDuration("esi_ttl_floor"),
-			ErrorLimitWindow:   v.GetDuration("esi_error_limit_window"),
-			ErrorLimitMax:      v.GetInt("esi_error_limit_max"),
-			ErrorLimitPauseAt:  v.GetInt("esi_error_limit_pause_at"),
-			ErrorLimitResumeAt: v.GetInt("esi_error_limit_resume_at"),
+			RequestTimeout:         v.GetDuration("esi_request_timeout"),
+			TTLFloor:               v.GetDuration("esi_ttl_floor"),
+			ErrorLimitWindow:       v.GetDuration("esi_error_limit_window"),
+			ErrorLimitMax:          v.GetInt("esi_error_limit_max"),
+			ErrorLimitPauseAt:      v.GetInt("esi_error_limit_pause_at"),
+			ErrorLimitResumeAt:     v.GetInt("esi_error_limit_resume_at"),
+			StartupCatalogueIngest: v.GetBool("esi_startup_catalogue_ingest"),
 		},
 		Sync: SyncConfig{
 			PlannerInterval: v.GetDuration("sync_planner_interval"),

@@ -104,18 +104,31 @@ func runServe(ctx context.Context) error {
 	// serving cached data — catalogue.Boot already falls back to the
 	// embedded snapshot before giving up), and idempotent, so every replica
 	// doing this on every restart is safe. It never advances the pin.
-	go func() {
-		ingestCtx, cancel := context.WithTimeout(hbCtx, ingestTimeout)
-		defer cancel()
-		if _, err := ingestCatalogue(ingestCtx, pool, logger); err != nil {
-			if hbCtx.Err() == nil {
-				logger.ErrorContext(ingestCtx,
-					"hangar: esi catalogue ingest failed at startup — the route catalogue may be empty or stale; "+
-						"run 'hangar admin ingest-catalogue' once ESI is reachable",
-					"error", err)
+	//
+	// PHASE 20.1 (defect B41): opt-out-able. catalogue.Boot is the only
+	// writer of app.setting's `esi.d_max` and rewrites it on every startup,
+	// so any environment that has deliberately seeded a catalogue and a
+	// D_max ceiling has that seed silently replaced moments after boot —
+	// and whether it survives depends on how fast ESI answers, which makes
+	// it a race rather than a consistent failure. See ESIConfig's comment.
+	if cfg.ESI.StartupCatalogueIngest {
+		go func() {
+			ingestCtx, cancel := context.WithTimeout(hbCtx, ingestTimeout)
+			defer cancel()
+			if _, err := ingestCatalogue(ingestCtx, pool, logger); err != nil {
+				if hbCtx.Err() == nil {
+					logger.ErrorContext(ingestCtx,
+						"hangar: esi catalogue ingest failed at startup — the route catalogue may be empty or stale; "+
+							"run 'hangar admin ingest-catalogue' once ESI is reachable",
+						"error", err)
+				}
 			}
-		}
-	}()
+		}()
+	} else {
+		logger.Info("hangar: startup catalogue ingest disabled " +
+			"(HANGAR_ESI_STARTUP_CATALOGUE_INGEST=false) — app.esi_route and esi.d_max are " +
+			"whatever is already in the database; run 'hangar admin ingest-catalogue' to refresh them")
+	}
 
 	// Phase 20.1 (B36). On its OWN listener, not on the mux below: the mux
 	// is bound to the published port, and /metrics is unauthenticated.

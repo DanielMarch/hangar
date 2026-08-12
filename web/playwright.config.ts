@@ -59,6 +59,18 @@ export default defineConfig({
     env: {
       HANGAR_HTTP_ADDR: `127.0.0.1:${PORT}`,
       HANGAR_PUBLIC_URL: baseURL,
+      // DEFECT B41. global-setup seeds `esi.d_max` and a five-route
+      // catalogue so the pin-advance preview has a deterministic diff.
+      // `serve` runs catalogue.Boot in the background at startup, and that
+      // is the ONLY writer of esi.d_max — so it replaces the seeded ceiling
+      // moments after the server comes up, and the pin-advance specs fail
+      // comparing the seeded date against the snapshot's.
+      //
+      // It was a RACE, not a consistent failure, which is why it survived
+      // the Phase 19 close-out: the seed wins on a machine that cannot
+      // reach ESI and loses on one that can. Turning the ingest off makes
+      // the suite deterministic on both.
+      HANGAR_ESI_STARTUP_CATALOGUE_INGEST: "false",
     },
   },
 });
