@@ -77,6 +77,23 @@ Grouped as the portal's tree presents them:
 `esi-planets.manage_planets.v1` looks like a write scope and is not: it is CCP's name for the
 scope that **reads** planetary interaction, and `/characters/{id}/planets` declares it on `GET`.
 
+> ### ⚠ `esi-wallet.read_corporation_wallets.v1` — plural, not singular
+>
+> The developer portal offers **`esi-wallet.read_corporation_wallet.v1`** (singular) as well.
+> That scope is **not declared by the current ESI spec** — checked against
+> `esi.evetech.net/meta/openapi.json`, which declares only the plural — and ticking it instead
+> of the plural is the single most likely way to get this registration wrong. The two sit
+> adjacent in the portal's list and differ by one character.
+>
+> The consequence is out of all proportion to the typo: the *whole* authorization is refused with
+> `invalid_scope`, after the user has entered their password and 2FA code, and the error names
+> only that one scope. This exact mistake cost a debugging session during Phase 20.2.
+>
+> Verify with:
+> ```bash
+> curl -s https://esi.evetech.net/meta/openapi.json | grep -o 'esi-wallet[^"]*'
+> ```
+
 `publicData` is not required. HANGAR's public routes (corporation history, alliance names) are
 unauthenticated, and the scope grants nothing the sync set uses.
 
