@@ -95,7 +95,7 @@ func buildSSOFlow(ctx context.Context, cfg *config.Config, s *store.Store, keyri
 		// consumer — see db/queries/user.sql's CompleteSessionLogin note.
 		SessionTTL: cfg.Crypto.SessionTTL,
 		// Phase 20.2, defect B37.
-		LoginScopes: loginScopeResolver(s, logger),
+		LoginScopes: loginScopeResolver(s, cfg.SSO.Scopes, logger),
 	}, nil
 }
 
@@ -112,7 +112,7 @@ func buildSSOFlow(ctx context.Context, cfg *config.Config, s *store.Store, keyri
 // Which source answered is logged at every login, because "why is HANGAR
 // asking for a different scope set than yesterday" is a question an
 // operator will eventually ask, and the answer is always one of these two.
-func loginScopeResolver(s *store.Store, logger *slog.Logger) func(context.Context) ([]string, error) {
+func loginScopeResolver(s *store.Store, configured []string, logger *slog.Logger) func(context.Context) ([]string, error) {
 	syncSet := worker.SyncSet()
 	paths := make([]string, 0, len(syncSet))
 	for path := range syncSet {
@@ -121,6 +121,18 @@ func loginScopeResolver(s *store.Store, logger *slog.Logger) func(context.Contex
 	sort.Strings(paths)
 
 	return func(ctx context.Context) ([]string, error) {
+		// HANGAR_SSO_SCOPES wins outright when set. The derived set is what
+		// HANGAR NEEDS; the developer-portal registration is what EVE SSO
+		// will GRANT, and HANGAR cannot read the latter. When they
+		// disagree, SSO rejects the entire authorization with
+		// `invalid_scope` — naming one scope, and only after the user has
+		// entered their password and 2FA code. Without an override the
+		// operator's only recourse is to edit Go source, so this exists.
+		if len(configured) > 0 {
+			logger.DebugContext(ctx, "sso: login scope set resolved",
+				"source", "HANGAR_SSO_SCOPES", "scopes", len(configured))
+			return configured, nil
+		}
 		fromCatalogue, err := s.ListScopesForRoutePaths(ctx, paths)
 		if err != nil {
 			return nil, fmt.Errorf("querying catalogue scopes: %w", err)

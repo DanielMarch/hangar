@@ -80,6 +80,36 @@ scope that **reads** planetary interaction, and `/characters/{id}/planets` decla
 `publicData` is not required. HANGAR's public routes (corporation history, alliance names) are
 unauthenticated, and the scope grants nothing the sync set uses.
 
+### If SSO answers `invalid_scope`
+
+```json
+{"error":"invalid_scope","error_description":"The requested 'esi-…' scope is not valid."}
+```
+
+This means the **application registration** does not have that scope enabled. It does not mean
+the scope name is wrong — verify against the spec's own canonical list before assuming otherwise:
+
+```bash
+curl -s https://esi.evetech.net/meta/openapi.json \
+  | python -c "import json,sys; print(*sorted(json.load(sys.stdin)['components']['securitySchemes']['OAuth2']['flows']['authorizationCode']['scopes']), sep='\n')"
+```
+
+Two things make this error worse than it looks, and both are worth knowing before you debug it:
+
+1. **It is raised after authentication**, not before. The user types their password and their 2FA
+   code, and only then is the authorization refused. Nothing is wrong with the credentials.
+2. **It names one scope at a time.** Reconciling a registration by trial and error therefore costs
+   a full login round trip per missing scope. Enable all of them in one edit instead.
+
+If the reported scope is the **last one alphabetically** in the request, suspect that the
+application has *no* scopes enabled rather than one missing — SSO reports the last scope it
+validated, so an empty registration looks identical to a single bad scope at the end of the list.
+
+`HANGAR_SSO_SCOPES` is the escape hatch for an application deliberately registered with a
+narrower set: it replaces the derived set verbatim. Routes whose scopes are then absent fail
+individually at sync time, which is visible on the sync board — far better than a login surface
+that cannot be used at all. Leave it unset in the normal case.
+
 ### Scopes are stored verbatim, so over-granting is visible
 
 `internal/scopes` treats a scope as an opaque string and `app.esi_scope` is a `text` primary key

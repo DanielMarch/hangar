@@ -264,6 +264,30 @@ type SSOConfig struct {
 	JWKSURL      string
 	Issuers      []string
 	Audience     string
+
+	// Scopes OVERRIDES the scope set the login flow requests. Empty (the
+	// default) means "derive from the route catalogue", which is the
+	// correct behaviour and the one that keeps tracking the spec.
+	//
+	// ── WHY AN ESCAPE HATCH EXISTS AT ALL ────────────────────────────────
+	// The derived set is what HANGAR *needs*. What EVE SSO will *grant* is
+	// whatever the operator enabled on the application in the developer
+	// portal, and HANGAR has no way to read that list. When the two
+	// disagree, SSO rejects the whole authorization with `invalid_scope`
+	// naming ONE offending scope — after the user has already typed their
+	// password and their 2FA code. Login is then impossible, and the
+	// operator's only recourse without this setting is to edit Go source.
+	//
+	// Worse, the error names one scope at a time, so reconciling a
+	// registration by trial and error costs a full login round trip per
+	// missing scope.
+	//
+	// So: an operator running a deliberately narrower registration sets
+	// this to exactly what they enabled, and HANGAR asks for that. The
+	// routes whose scopes are absent will fail individually at sync time —
+	// which is a visible, per-route failure on the sync board, and vastly
+	// better than a login surface that cannot be used at all.
+	Scopes []string
 }
 
 // New returns a *viper.Viper wired for HANGAR's env var contract
@@ -363,6 +387,27 @@ func applyDefaults(v *viper.Viper) {
 	v.SetDefault("smtp_tls", "starttls")
 }
 
+// splitScopeList parses HANGAR_SSO_SCOPES, accepting commas, spaces or
+// both. The OAuth request carries scopes space-separated, so an operator
+// copying the set out of a browser URL has spaces; every other list-valued
+// HANGAR setting is comma-separated, so an operator following house style
+// has commas. Both work.
+func splitScopeList(s string) []string {
+	fields := strings.FieldsFunc(s, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
+	})
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func splitCSV(s string) []string {
 	if strings.TrimSpace(s) == "" {
 		return nil
@@ -444,6 +489,12 @@ func Load(v *viper.Viper) (*Config, error) {
 			JWKSURL:      v.GetString("sso_jwks_url"),
 			Issuers:      splitCSV(v.GetString("sso_issuers")),
 			Audience:     v.GetString("sso_audience"),
+			// Accepts either separator: the scope set appears
+			// space-separated in the OAuth request itself, so an operator
+			// copying it out of a browser URL naturally has spaces, while
+			// every other list-valued HANGAR setting is comma-separated.
+			// Rejecting one of those would be a papercut with no upside.
+			Scopes: splitScopeList(v.GetString("sso_scopes")),
 		},
 		ESI: ESIConfig{
 			RequestTimeout:     v.GetDuration("esi_request_timeout"),
