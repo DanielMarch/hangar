@@ -84,6 +84,27 @@ The third is genuinely a later phase's, and is left open deliberately:
   `app.esi_ledger_bucket` and `app.esi_ledger_entry` directly rather than waiting for it, so no
   Phase 18 criterion depends on the metric existing.
 
+### The B20 pattern, and two more instances of it **[found in the Phase 19 close-out audit]**
+
+B20 was not a one-off. A subsystem can be fully built, fully tested and never called, because the
+phase that builds a component and the phase that wires it up are usually the same phase — and when
+the wiring is one line, it is the line that gets forgotten. Nothing fails: the package's own tests
+construct what they need, so the suite is green and the feature is inert.
+
+Auditing for the pattern directly — *does any non-test file outside this package construct this
+type?* — turned up three instances. One was Phase 19's own and is fixed; two are open and are
+recorded here rather than reconciled silently.
+
+| # | Defect | Status | Sections |
+| :--- | :--- | :--- | :--- |
+| **B22** | **`internal/sde`'s import pipeline has no caller.** `Build`, `Verify`, `Swap`, `AbortBuild`, `FetchManifest` and `DownloadZip` — the whole Phase 9 SDE ingest — are imported by exactly one file, `internal/sde/swap_integration_test.go`. There is no `hangar admin sde ...` command, no job and no `serve` path, and the CLI's full command list is `admin {bootstrap-token, ingest-catalogue, verify-identifier-types}`, `migrate {up,down}`, `openapi`, `schedule`, `serve`, `work`, `healthcheck`. The `sde.*` tables created by migration 00036 can therefore only ever be empty on a real installation. §12 requires the `sde` schema to stay joinable from `app` because military campaigns join definitions from it; nothing joins to rows that cannot be loaded. | **OPEN — Phase 9's, surfaced in Phase 19.** Needs an operator command and a decision about whether `serve` seeds it in the background the way it does the route catalogue. Note the interaction with Gate 5: a "blank environment → running installation in 3 commands" that leaves the SDE empty is a different claim from one that does not. | §5.1, §12, §7 Phase 9 |
+| **B23** | **ESI language resolution is never invoked.** `internal/i18n.ResolveESILanguage` maps the 9 UI locales onto ESI's `Accept-Language` values (capability 58, and the `af`/`ro`/`en` and `zh-CN`→`zh` edge cases both have passing tests). Its only importer outside the package is `internal/esi/cache/key_test.go`. `esi.Client.Language` — documented in place as "the resolved ESI Accept-Language value (internal/i18n)" — is never assigned by any non-test code, so it is the empty string on every real request and `esi_cache`'s key records an empty `ResolvedLanguage`. The locale machinery is correct and unreachable. | **OPEN — Phase 3's, surfaced in Phase 19.** The fix is to resolve the acting user's locale where the client is constructed; the risk is that it changes the cache key, so a deployment doing it mid-flight re-fetches. Gate 4 counts capability 58 as delivered, which it is not end to end. | §4.6, §7 Phase 3 |
+
+Both are recorded as defects rather than fixed in Phase 19: each belongs to a phase that can test
+its wiring against real data (an SDE import against a real manifest; a language-resolved request
+against a real cache), and a one-line wiring added blind is how this class of defect is created,
+not how it is closed.
+
 ### Findings carried forward from v3.0's own revision record
 
 The A-, P- and R-series resolutions from v2.0 → v3.0 remain in force and are unchanged by this
