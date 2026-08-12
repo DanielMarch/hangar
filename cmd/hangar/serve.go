@@ -77,6 +77,19 @@ func runServe(ctx context.Context) error {
 	}
 	defer stopPlanner()
 
+	// §2 "Single-process default", same reasoning as the planner: the
+	// stock docker-compose runs ONE hangar service, `serve`, so anything
+	// that only runs under `work` does not run on a default installation
+	// at all. §4.9's outbox is written by internal/rbac's mutations
+	// whether or not anything drains it, so without this the outbox grows
+	// forever and no subscriber is ever called — write-only, and silently
+	// so. See cmd/hangar/webhooks.go for how this was missed.
+	webhooks, err := buildWebhookDispatcher(cfg, pool, logger)
+	if err != nil {
+		return err
+	}
+	go runWebhookDispatcher(hbCtx, webhooks, cfg.Alerting.DispatchInterval, logger)
+
 	// §2 "Single-process default", same reasoning as the planner above: a
 	// one-box installation must not have to run a second command before
 	// anything works. Without this, app.esi_route stays empty — and since

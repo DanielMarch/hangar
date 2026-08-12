@@ -275,10 +275,18 @@ fuller than the shim can produce.
 * **Exact money.** Strings, `NUMERIC(30,2)`, no float anywhere.
 * **Freshness you can act on.** `_sync` tells you whether data is stale or unavailable.
 * **Scoped credentials.** A token that can only do what the integration needs.
-* **Signed webhooks.** Stop polling. `/api/v1` webhook endpoints deliver HMAC-SHA256-signed events
-  with at-least-once delivery and a stable delivery id for de-duplication — see
+* **Signed webhooks.** Stop polling. Webhook endpoints deliver HMAC-SHA256-signed events with
+  at-least-once delivery and a stable delivery id for de-duplication — see
   `deploy/verify-webhook-signature.sh`, which validates a live payload and documents the four ways
   receivers get verification wrong.
+
+  > **Not yet reachable through the product.** There is no endpoint-management API or admin screen
+  > yet: `app.webhook_endpoint` rows can only be created by direct SQL, and the HMAC secret is
+  > envelope-encrypted with the AAD bound to the endpoint's own uuid, so creating one by hand means
+  > sealing the secret with the same scheme `internal/crypto.SealWebhookSecret` uses. The pipeline
+  > underneath — transactional outbox, fan-out, signed delivery, retry, endpoint breaker — is built,
+  > tested and running on every `serve` and `work` process. What is missing is the surface to
+  > configure it, which belongs to the phase that can also test the configuration flow.
 * **Cursor pagination** that does not drift or degrade.
 * **An OpenAPI document** (`docs/openapi.json`) with declared security schemes, so you can generate
   a client.

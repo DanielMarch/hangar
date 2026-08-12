@@ -173,11 +173,22 @@ func runWork(ctx context.Context) error {
 	}
 	dispatcher := buildAlertDispatcher(cfg, pool, logger)
 
+	// Phase 19: §4.9's webhook pump, alongside the alert pump and for the
+	// same reasons — a short idempotent sweep of a table, not worth a River
+	// job row per tick. Without this the outbox is write-only: rbac's
+	// mutations write app.outbox_event faithfully and nothing ever fans
+	// them out. See cmd/hangar/webhooks.go.
+	webhooks, err := buildWebhookDispatcher(cfg, pool, logger)
+	if err != nil {
+		return err
+	}
+
 	hb := telemetry.NewReplicaHeartbeat(pool, telemetry.RoleWork, version, logger)
 
 	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go runAlertDispatcher(sigCtx, dispatcher, cfg.Alerting.DispatchInterval, logger)
+	go runWebhookDispatcher(sigCtx, webhooks, cfg.Alerting.DispatchInterval, logger)
 	hb.Run(sigCtx)
 	return nil
 }
