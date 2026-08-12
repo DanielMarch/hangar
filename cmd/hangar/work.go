@@ -178,10 +178,7 @@ func runWork(ctx context.Context) error {
 	// job row per tick. Without this the outbox is write-only: rbac's
 	// mutations write app.outbox_event faithfully and nothing ever fans
 	// them out. See cmd/hangar/webhooks.go.
-	webhooks, err := buildWebhookDispatcher(cfg, pool, logger)
-	if err != nil {
-		return err
-	}
+	webhooks := buildWebhookDispatcher(pool, keyring, logger)
 
 	hb := telemetry.NewReplicaHeartbeat(pool, telemetry.RoleWork, version, logger)
 

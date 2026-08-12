@@ -84,11 +84,14 @@ func runServe(ctx context.Context) error {
 	// whether or not anything drains it, so without this the outbox grows
 	// forever and no subscriber is ever called — write-only, and silently
 	// so. See cmd/hangar/webhooks.go for how this was missed.
-	webhooks, err := buildWebhookDispatcher(cfg, pool, logger)
+	// One keyring per process: the SSO flow below needs the same key
+	// material, and building it twice would mean a bad HANGAR_MASTER_KEY
+	// reported twice with two different messages.
+	keyring, err := crypto.NewKeyring(cfg.Crypto)
 	if err != nil {
 		return err
 	}
-	go runWebhookDispatcher(hbCtx, webhooks, cfg.Alerting.DispatchInterval, logger)
+	go runWebhookDispatcher(hbCtx, buildWebhookDispatcher(pool, keyring, logger), cfg.Alerting.DispatchInterval, logger)
 
 	// §2 "Single-process default", same reasoning as the planner above: a
 	// one-box installation must not have to run a second command before
@@ -140,10 +143,6 @@ func runServe(ctx context.Context) error {
 	// SPA login screen cannot build against.
 	s := store.New(pool)
 
-	keyring, err := crypto.NewKeyring(cfg.Crypto)
-	if err != nil {
-		return err
-	}
 	flow, err := buildSSOFlow(ctx, cfg, s, keyring)
 	if err != nil {
 		return err

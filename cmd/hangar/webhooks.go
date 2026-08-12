@@ -8,7 +8,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/hangar-project/hangar/internal/config"
 	"github.com/hangar-project/hangar/internal/crypto"
 	"github.com/hangar-project/hangar/internal/events"
 )
@@ -34,24 +33,19 @@ import (
 // rather than fixed silently, because the pattern is worth recognising: if
 // a package's only callers are in _test.go files, it does not run.
 
-// buildWebhookDispatcher assembles §4.9's dispatcher from configuration.
+// buildWebhookDispatcher assembles §4.9's dispatcher.
 //
-// The keyring is required and not optional: every delivery is signed, and
-// an endpoint's HMAC secret is envelope-encrypted at rest, so a dispatcher
-// without key material could not sign anything. That is why this returns an
-// error where buildAlertDispatcher cannot — an alert channel with no
-// credentials is a valid unconfigured installation, but a webhook
-// dispatcher with no keyring is a broken one.
-func buildWebhookDispatcher(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*events.Dispatcher, error) {
-	keyring, err := crypto.NewKeyring(cfg.Crypto)
-	if err != nil {
-		return nil, err
-	}
+// The keyring is a PARAMETER rather than something built here: every
+// delivery is signed and an endpoint's HMAC secret is envelope-encrypted at
+// rest, so key material is mandatory — but both callers already hold a
+// keyring for other reasons, and constructing a second one would report a
+// bad HANGAR_MASTER_KEY twice with two different messages.
+func buildWebhookDispatcher(pool *pgxpool.Pool, keyring *crypto.Keyring, logger *slog.Logger) *events.Dispatcher {
 	return &events.Dispatcher{
 		Pool:    pool,
 		Keyring: keyring,
 		Log:     logger.With("component", "events.dispatcher"),
-	}, nil
+	}
 }
 
 // DefaultWebhookDispatchInterval is how often the pump sweeps.
