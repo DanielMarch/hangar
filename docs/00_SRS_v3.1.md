@@ -105,6 +105,44 @@ its wiring against real data (an SDE import against a real manifest; a language-
 against a real cache), and a one-line wiring added blind is how this class of defect is created,
 not how it is closed.
 
+### The audit run exhaustively **[Phase 20]**
+
+Phase 19 found B22 and B23 by asking the question of the subsystems it happened to be touching.
+Phase 20 asked it of **every** package, mechanically, because the defect class is defined by being
+invisible to inspection — the symbol is present in the source, it is simply present in a comment.
+
+Two passes: `go list -deps ./cmd/hangar` for packages absent from the binary entirely, and
+`golang.org/x/tools/cmd/deadcode` for functions unreachable from `main`. 124 functions are
+unreachable at `7a74e5d`. Every finding below was then confirmed by hand — the signature is a
+symbol whose only non-test occurrences are prose.
+
+The full audit, its method and its reproduction command are in
+[`docs/PRODUCTION_CALLER_AUDIT.md`](PRODUCTION_CALLER_AUDIT.md). The summary is that the pattern
+is systemic rather than a handful of instances, and that **Gate 4 cannot be signed off**: it
+counts 58 capabilities as delivered and at least eight of them are unreachable from `main`.
+
+| # | Defect | Blocks |
+| :--- | :--- | :--- |
+| **B24** | §4.9 has no configuration surface — `crypto.SealWebhookSecret`/`NewWebhookSecret` have no caller, so an endpoint can only be created by hand-sealing a secret in SQL. | Gate 5 |
+| **B25** | **The alert pipeline delivers but never generates.** `alerting.Emitter.{IngestNotification,Emit}`, the whole dedupe surface, coalescing, `render.Render` and `alerting/catalogue`'s threshold set are all unreachable. `alerting.Dispatcher` — the outbox pump — *is* wired. So a running installation drains an outbox nothing writes to. | Gate 3 entirely |
+| **B26** | **The RBAC mutation surface has no caller.** `CreateRole`, `AssignUserRole`, `RevokeUserRole`, `AddRoleGrant`, `AddSquadRole`, `AddSquadMember`, `Resolve` — none reachable, and no role-management route is registered. This also falsifies `serve.go`'s own comment that "§4.9's outbox is written by internal/rbac's mutations". | Gate 2 (2 trigger rows), §4.9 |
+| **B27** | **Token-lifecycle invalidation never runs.** `sso.NewLifecycle` and both `Invalidate*` methods, plus `scopes.NeedsReauthorization`/`MergeScopes`, are unreachable. | Gate 2 (3 trigger rows) |
+| **B28** | **The entity circuit breaker never runs.** `breaker.EntityBreaker` in full. | Gate 1 §1.3 |
+| **B29** | **ESI rate-limit header reconciliation never runs.** `ratelimit.ClassifyResponse`, `ParseRemaining`, `ParseRateLimitLimit` are unreachable; `Client.Do` calls only `ClassifyCost`. | Gate 1.3, 1.4 and four §1.3 rows |
+| **B30** | **Six ESI route handlers are never dispatched** (calendar detail and attendees, market history and prices, planet colony detail, corporation project contributors) — 13 functions with their parsers. | Gate 4.2 |
+| **B31** | `internal/esi/pagination` is a dead duplicate of `sync/worker`'s own page-walker, and the two disagree: the dead one fans out at the specified concurrency 4, the live one is serial; the live one's torn-set check is stricter than the dead one's. §5.9's *cursor* mechanism has no live implementation at all. | §5.9 fidelity |
+| **B32** | Entitlement-rule write endpoints (`v1.CreateEntitlementRule`/`DeleteEntitlementRule`) exist and are tested but are never mounted by `RegisterAll`. | Gate 2 trigger row, Gate 4.3 |
+| **B33** | `$filter` validation (`filters.New`/`Validate`) has no caller. | Gate 4 |
+| **B34** | The Redis L2 tier is never constructed, so `docker-compose.yml`'s `cache` profile is inert. | Gate 5.5 |
+| **B35** | The TeamSpeak challenge flow (`IssueChallenge`/`RedeemChallenge`) has no caller, so TeamSpeak linking cannot complete. | Gate 4.3 |
+| **B36** | **The metric surface does not exist** — `telemetry.NewRegistry` has no caller, no `/metrics` endpoint is served, and all ten metrics named in the gate document's instrumentation table occur only in comments. | Gates 1, 2, 3 evidence |
+
+**B36 is also a specification contradiction and is recorded as one.** SRS §0 above assigns the
+metric surface to Phase 20. `04_RELEASE_GATES.md`'s preamble assigns it to Phases 4, 11 and 14 and
+states that "a gate whose metrics are added in Phase 20 cannot be measured retroactively". Both
+cannot hold. Per Principle 15 the disagreement is raised rather than resolved by adopting whichever
+reading is convenient, and it must be settled before Gates 1–3 can produce meaningful evidence.
+
 ### Findings carried forward from v3.0's own revision record
 
 The A-, P- and R-series resolutions from v2.0 → v3.0 remain in force and are unchanged by this
