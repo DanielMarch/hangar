@@ -170,6 +170,35 @@ func grantBootstrapRBAC(ctx context.Context, s *store.Store, userID uuid.UUID) e
 	return nil
 }
 
+// ── PHASE 19 NOTE: THIS PATH DOES NOT EMIT AN OUTBOX EVENT ────────────────
+//
+// Every other permission-changing mutation goes through internal/rbac's
+// wrappers, which since Phase 19 write an app.outbox_event row in the same
+// transaction (SRS §4.9). The two calls above are the raw sqlc methods
+// instead, so a bootstrap grant is invisible to §4.9's webhook subscribers.
+//
+// Found by running the built image rather than by reading the code: minting
+// a token against a fresh database left app.outbox_event empty, and only
+// then did a real API call produce the expected row.
+//
+// Left as-is deliberately, and recorded rather than "fixed":
+//
+//   - A fresh installation has no webhook endpoints. This command exists
+//     specifically to be the FIRST credential, before any human has
+//     completed SSO and therefore before anyone could have configured a
+//     subscriber. There is by construction nobody to notify.
+//   - Routing it through rbac.AddRoleGrant/AssignUserRole would also change
+//     its transaction shape — those wrappers open their own transaction and
+//     re-materialise, where this command deliberately controls both — for
+//     an event with no possible recipient.
+//
+// What would make this wrong is a LATER bootstrap on an installation that
+// already has subscribers: the `if len(grants) == 0` guard above means the
+// grant is only written once, but AssignUserRole is not guarded, so a
+// second bootstrap silently adds an admin nobody is told about. That is a
+// real gap and it belongs to whichever phase adds webhook endpoint
+// management, which is where the first subscriber can exist.
+
 // bootstrapRoleName is the seeded role (db/seed/roles.sql) the bootstrap
 // user is placed in.
 const bootstrapRoleName = "admin"
