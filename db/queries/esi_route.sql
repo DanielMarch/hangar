@@ -71,6 +71,34 @@ ON CONFLICT DO NOTHING;
 -- name: ListEsiRouteScopes :many
 SELECT scope FROM app.esi_route_scope WHERE route_id = $1 ORDER BY scope;
 
+-- name: ListScopesForRoutePaths :many
+-- The login scope set (defect B37): every scope declared by any route
+-- HANGAR actually syncs. Driving this from the catalogue rather than a Go
+-- constant is the same commitment as everywhere else — the spec is the
+-- schedule. A scope newly attached upstream to a route already in the sync
+-- set is requested at the next login after the next ingest, with no code
+-- change, which is the property Gate 6 exists to prove for the catalogue
+-- and which a hand-maintained list would quietly lose.
+--
+-- METHOD = 'GET' IS LOad-BEARING, NOT TIDINESS. ESI declares write scopes
+-- on the SAME upstream_path as the reads: /characters/{id}/contacts carries
+-- esi-characters.read_contacts.v1 on GET and .write_contacts.v1 on
+-- POST/PUT/DELETE, and /characters/{id}/mail carries send_mail on POST.
+-- HANGAR issues no non-GET ESI call anywhere, so dropping this predicate
+-- would make every user grant three write permissions the software cannot
+-- exercise. Measured: 48 scopes without it, 45 with.
+--
+-- Retired routes are excluded: a route that has vanished from the spec
+-- keeps its row (never deleted) but must not keep asking users for a scope
+-- nothing can call.
+SELECT DISTINCT rs.scope
+  FROM app.esi_route_scope rs
+  JOIN app.esi_route r USING (route_id)
+ WHERE r.method = 'GET'
+   AND r.retired_at IS NULL
+   AND r.upstream_path = ANY(sqlc.arg(paths)::text[])
+ ORDER BY rs.scope;
+
 -- name: AddEsiRouteRole :exec
 INSERT INTO app.esi_route_role (route_id, role)
 VALUES ($1, $2)

@@ -776,6 +776,26 @@ type Querier interface {
 	// (/admin/esi/catalogue/blocked). Phase 6's claim query is expected to
 	// join sync_subscription against this, not against ListEsiRoutes.
 	ListSchedulableEsiRoutes(ctx context.Context) ([]AppEsiRoute, error)
+	// The login scope set (defect B37): every scope declared by any route
+	// HANGAR actually syncs. Driving this from the catalogue rather than a Go
+	// constant is the same commitment as everywhere else — the spec is the
+	// schedule. A scope newly attached upstream to a route already in the sync
+	// set is requested at the next login after the next ingest, with no code
+	// change, which is the property Gate 6 exists to prove for the catalogue
+	// and which a hand-maintained list would quietly lose.
+	//
+	// METHOD = 'GET' IS LOad-BEARING, NOT TIDINESS. ESI declares write scopes
+	// on the SAME upstream_path as the reads: /characters/{id}/contacts carries
+	// esi-characters.read_contacts.v1 on GET and .write_contacts.v1 on
+	// POST/PUT/DELETE, and /characters/{id}/mail carries send_mail on POST.
+	// HANGAR issues no non-GET ESI call anywhere, so dropping this predicate
+	// would make every user grant three write permissions the software cannot
+	// exercise. Measured: 48 scopes without it, 45 with.
+	//
+	// Retired routes are excluded: a route that has vanished from the spec
+	// keeps its row (never deleted) but must not keep asking users for a scope
+	// nothing can call.
+	ListScopesForRoutePaths(ctx context.Context, paths []string) ([]string, error)
 	// PHASE 15.1 — resolves type ids to names for the EFT fitting export
 	// (`GET /api/v1/characters/{id}/fittings/{fitting_id}/eft`). Phase 15
 	// rendered `[<type_id>]` placeholders because no type-name lookup query

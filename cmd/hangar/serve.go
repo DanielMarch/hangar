@@ -150,7 +150,7 @@ func runServe(ctx context.Context) error {
 	// SPA login screen cannot build against.
 	s := store.New(pool)
 
-	flow, err := buildSSOFlow(ctx, cfg, s, keyring)
+	flow, err := buildSSOFlow(ctx, cfg, s, keyring, logger)
 	if err != nil {
 		return err
 	}

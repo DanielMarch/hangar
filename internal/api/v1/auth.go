@@ -164,7 +164,15 @@ func reauthorizeHandler(deps api.Deps) func(context.Context, *SubIDEmptyIn) (*Re
 			return nil, api.Forbidden("character is not linked to the caller's account")
 		}
 
-		pending, err := deps.SSO.BeginLogin(ctx, []string{}, nil, nil)
+		// Defect B37: this passed []string{}, so the reauthorize URL asked
+		// EVE for no scopes and came back with no refresh token — making
+		// "reauthorize" a no-op dressed as a fix for the very problem it
+		// is offered to solve.
+		scopeList, err := deps.SSO.RequestedScopes(ctx)
+		if err != nil {
+			return nil, api.Internal("resolving login scopes", err)
+		}
+		pending, err := deps.SSO.BeginLogin(ctx, scopeList, nil, nil)
 		if err != nil {
 			return nil, api.Internal("beginning reauthorization", err)
 		}
@@ -352,7 +360,14 @@ func RegisterAuthRedirects(mux *http.ServeMux, s *store.Store, flow *sso.Flow) {
 		}
 		ip := r.RemoteAddr
 		ua := r.UserAgent()
-		pending, err := flow.BeginLogin(r.Context(), []string{}, &ip, &ua)
+		// Defect B37 — see reauthorizeHandler. An empty scope set here is
+		// what made every stored token unusable for ESI.
+		scopeList, scopeErr := flow.RequestedScopes(r.Context())
+		if scopeErr != nil {
+			http.Error(w, "login unavailable: "+scopeErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		pending, err := flow.BeginLogin(r.Context(), scopeList, &ip, &ua)
 		if err != nil {
 			http.Error(w, "failed to begin login", http.StatusInternalServerError)
 			return

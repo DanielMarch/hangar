@@ -16,14 +16,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"sort"
 
 	"github.com/google/uuid"
 
 	"github.com/hangar-project/hangar/internal/config"
 	"github.com/hangar-project/hangar/internal/crypto"
+	"github.com/hangar-project/hangar/internal/esi/catalogue"
+	"github.com/hangar-project/hangar/internal/scopes"
 	"github.com/hangar-project/hangar/internal/sso"
 	"github.com/hangar-project/hangar/internal/sso/jwks"
 	"github.com/hangar-project/hangar/internal/store"
+	"github.com/hangar-project/hangar/internal/sync/worker"
 )
 
 // jwksSettingStore adapts *store.Store to internal/sso/jwks.SettingStore.
@@ -65,7 +70,7 @@ func (a jwksSettingStore) UpsertSetting(ctx context.Context, key string, value j
 // No jwks.Clock implementation is passed: jwks.NewCache already defaults
 // a nil clock to its own unexported systemClock (cache.go), so supplying
 // one here would add a type for no behavioural difference.
-func buildSSOFlow(ctx context.Context, cfg *config.Config, s *store.Store, keyring *crypto.Keyring) (*sso.Flow, error) {
+func buildSSOFlow(ctx context.Context, cfg *config.Config, s *store.Store, keyring *crypto.Keyring, logger *slog.Logger) (*sso.Flow, error) {
 	cache := jwks.NewCache(cfg.SSO.JWKSURL, jwksSettingStore{store: s}, nil, nil)
 
 	loadErr := cache.Load(ctx)
@@ -89,7 +94,64 @@ func buildSSOFlow(ctx context.Context, cfg *config.Config, s *store.Store, keyri
 		// Phase 15.1: config.CryptoConfig.SessionTTL finally has a
 		// consumer — see db/queries/user.sql's CompleteSessionLogin note.
 		SessionTTL: cfg.Crypto.SessionTTL,
+		// Phase 20.2, defect B37.
+		LoginScopes: loginScopeResolver(s, logger),
 	}, nil
+}
+
+// loginScopeResolver answers "which scopes should this login request?" from
+// the route catalogue, falling back to the embedded spec snapshot.
+//
+// The fallback is not belt-and-braces. `serve` ingests the catalogue in the
+// BACKGROUND at startup (see serve.go), so on a fresh installation there is
+// a window — and on an installation that has never reached ESI, an
+// indefinite one — in which app.esi_route is empty. Resolving to the empty
+// set there would reproduce B37 precisely on the deployment least able to
+// notice: first boot, first login, no refresh token, no error.
+//
+// Which source answered is logged at every login, because "why is HANGAR
+// asking for a different scope set than yesterday" is a question an
+// operator will eventually ask, and the answer is always one of these two.
+func loginScopeResolver(s *store.Store, logger *slog.Logger) func(context.Context) ([]string, error) {
+	syncSet := worker.SyncSet()
+	paths := make([]string, 0, len(syncSet))
+	for path := range syncSet {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+
+	return func(ctx context.Context) ([]string, error) {
+		fromCatalogue, err := s.ListScopesForRoutePaths(ctx, paths)
+		if err != nil {
+			return nil, fmt.Errorf("querying catalogue scopes: %w", err)
+		}
+		if len(fromCatalogue) > 0 {
+			logger.DebugContext(ctx, "sso: login scope set resolved",
+				"source", "catalogue", "scopes", len(fromCatalogue))
+			return fromCatalogue, nil
+		}
+
+		specBytes, _, err := catalogue.LoadEmbeddedSnapshot()
+		if err != nil {
+			return nil, fmt.Errorf("catalogue is empty and the embedded snapshot is unreadable: %w", err)
+		}
+		fromSnapshot, missing, err := scopes.FromSpec(specBytes, paths)
+		if err != nil {
+			return nil, err
+		}
+		if len(missing) > 0 {
+			// Defect B38's detector. A sync-set path absent from the spec
+			// contributes no scopes and would otherwise be invisible.
+			logger.WarnContext(ctx,
+				"sso: sync-set paths are absent from the spec — they can never return data "+
+					"and contribute no scopes (Principle 5: upstream_path is verbatim, never derived)",
+				"paths", missing)
+		}
+		logger.InfoContext(ctx, "sso: login scope set resolved from the EMBEDDED snapshot — "+
+			"the route catalogue is empty; run 'hangar admin ingest-catalogue' once ESI is reachable",
+			"source", "embedded-snapshot", "scopes", len(fromSnapshot))
+		return fromSnapshot, nil
+	}
 }
 
 // ssoOAuthConfig is the one place the config -> sso.OAuthConfig mapping

@@ -360,9 +360,11 @@ const (
 	// Phase 9 additions: contract items/bids and project contributions are
 	// per-contract/per-project detail fanouts, same shape as the Phase 8.1
 	// routes above.
-	contractItemsPath        = "/corporations/{corporation_id}/contracts/{contract_id}/items"
-	contractBidsPath         = "/corporations/{corporation_id}/contracts/{contract_id}/bids"
-	projectContributionsPath = "/corporations/{corporation_id}/projects/{project_id}/contributions"
+	contractItemsPath = "/corporations/{corporation_id}/contracts/{contract_id}/items"
+	contractBidsPath  = "/corporations/{corporation_id}/contracts/{contract_id}/bids"
+	// DEFECT B38 (Phase 20.2): was ".../contributions". ESI's path is
+	// ".../contributors" — see character.go's note on the same defect.
+	projectContributionsPath = "/corporations/{corporation_id}/projects/{project_id}/contributors"
 )
 
 func strPtr(s string) *string { return &s }

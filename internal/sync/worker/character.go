@@ -200,12 +200,19 @@ var characterDispatch = map[string]characterHandler{
 	"/characters/{character_id}/contracts": wrap(handlers.ParseContracts, func(ctx context.Context, s *store.Store, characterID int64, dto []handlers.ContractDTO) (handlers.SyncResult, error) {
 		return handlers.SyncContracts(ctx, s, "character", characterID, dto)
 	}),
-	"/characters/{character_id}/mail":            wrap(handlers.ParseMailHeaders, handlers.SyncMailHeaders),
-	"/characters/{character_id}/mail/labels":     wrap(handlers.ParseMailLabels, handlers.SyncMailLabels),
-	"/characters/{character_id}/mail/lists":      wrap(handlers.ParseMailLists, handlers.SyncMailLists),
-	"/characters/{character_id}/planets":         wrap(handlers.ParsePlanetColonies, handlers.SyncPlanetColonies),
-	"/characters/{character_id}/calendar/events": wrap(handlers.ParseCalendarEvents, handlers.SyncCalendarEvents),
-	"/characters/{character_id}/notifications":   wrap(handlers.ParseCharacterNotifications, handlers.SyncCharacterNotifications),
+	"/characters/{character_id}/mail":        wrap(handlers.ParseMailHeaders, handlers.SyncMailHeaders),
+	"/characters/{character_id}/mail/labels": wrap(handlers.ParseMailLabels, handlers.SyncMailLabels),
+	"/characters/{character_id}/mail/lists":  wrap(handlers.ParseMailLists, handlers.SyncMailLists),
+	"/characters/{character_id}/planets":     wrap(handlers.ParsePlanetColonies, handlers.SyncPlanetColonies),
+	// DEFECT B38 (Phase 20.2). This read "/characters/{character_id}/calendar
+	// /events" — a plural inferred from the resource name. ESI's path is
+	// "/characters/{character_id}/calendar", and Principle 5 is explicit
+	// that upstream_path is stored VERBATIM, never derived or pluralised.
+	// The route could therefore never match a catalogue row, never be
+	// scheduled, and never return data; it was invisible because the
+	// handlers behind it are B30's and were never dispatched either.
+	"/characters/{character_id}/calendar":      wrap(handlers.ParseCalendarEvents, handlers.SyncCalendarEvents),
+	"/characters/{character_id}/notifications": wrap(handlers.ParseCharacterNotifications, handlers.SyncCharacterNotifications),
 }
 
 // dataLevel404Routes marks the routes where the roadmap's edge case

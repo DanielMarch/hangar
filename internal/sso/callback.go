@@ -72,6 +72,40 @@ type Flow struct {
 	// engine to call yet, so the default is a no-op; lifecycle.go wires
 	// the real invalidation regardless of whether this hook is set.
 	OnOwnerHashChanged func(ctx context.Context, characterID int64)
+
+	// LoginScopes resolves the scope set every login and reauthorization
+	// requests (defect B37). Resolved per call rather than once at
+	// construction, because `serve` ingests the route catalogue in the
+	// BACKGROUND at startup: a value captured at boot would be whatever
+	// the catalogue held before the ingest finished, which on a fresh
+	// installation is nothing — reproducing B37 exactly where it hurts
+	// most. cmd/hangar wires the catalogue-backed resolver.
+	//
+	// Nil means "request no scopes", which is the pre-B37 behaviour and
+	// is correct only for a test that does not care. RequestedScopes
+	// treats nil as an explicit empty set rather than an error, because a
+	// unit test constructing a bare Flow must not have to know about
+	// catalogues.
+	LoginScopes func(ctx context.Context) ([]string, error)
+}
+
+// RequestedScopes resolves the scope set to put in the authorization URL.
+//
+// A resolver FAILURE is deliberately fatal to the login rather than
+// falling back to the empty set. Degrading to `scope=` would hand the user
+// a successful-looking login that silently yields no refresh token — which
+// is defect B37 verbatim, and the reason it survived undetected is that it
+// looks exactly like success. Failing the login says what is wrong while
+// someone is still looking at it.
+func (f *Flow) RequestedScopes(ctx context.Context) ([]string, error) {
+	if f.LoginScopes == nil {
+		return nil, nil
+	}
+	scopeList, err := f.LoginScopes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("sso: resolving login scopes: %w", err)
+	}
+	return scopeList, nil
 }
 
 // PendingLogin is what BeginLogin hands back for the caller to persist as
