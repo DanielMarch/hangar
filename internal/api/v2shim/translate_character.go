@@ -19,14 +19,6 @@ const LegacyTimeFormat = "2006-01-02 15:04:05"
 // legacyTime renders a timestamp the way legacy did.
 func legacyTime(t time.Time) string { return t.UTC().Format(LegacyTimeFormat) }
 
-// legacyTimeOrNull is legacyTime for a nullable column.
-func legacyTimeOrNull(t *time.Time) any {
-	if t == nil {
-		return nil
-	}
-	return legacyTime(*t)
-}
-
 // characterCorporationHistory — legacy's CorporationHistoryResource, which
 // is `parent::toArray()` with `character_id` removed.
 //

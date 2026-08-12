@@ -23,13 +23,6 @@ func (e *shimError) Error() string {
 
 func (e *shimError) Unwrap() error { return e.Err }
 
-// notFound reproduces what Laravel's `findOrFail` produced on this
-// surface: a 404 whose body is Laravel's own exception message. A
-// migrating client's error handling was written against that string.
-func notFound() error {
-	return &shimError{Status: http.StatusNotFound, Message: "No query results for model"}
-}
-
 func internalError(what string, err error) error {
 	return &shimError{Status: http.StatusInternalServerError, Message: "Server Error", Err: fmt.Errorf("%s: %w", what, err)}
 }
