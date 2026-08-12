@@ -11,6 +11,7 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
 	"github.com/hangar-project/hangar/internal/api/middleware"
+	"github.com/hangar-project/hangar/internal/api/v2shim"
 	"github.com/hangar-project/hangar/internal/sso"
 	"github.com/hangar-project/hangar/internal/store"
 )
@@ -67,7 +68,16 @@ func Handler(mux *http.ServeMux, s *store.Store) http.Handler {
 	// cookie first would silently upgrade a scoped integration to the
 	// owner's full authority whenever a browser cookie happened to ride
 	// along.
-	return middleware.ResolveAPIToken(s)(middleware.ResolveSession(s)(mux))
+	//
+	// PHASE 19: v2shim.LegacyTokenAlias runs BEFORE ResolveAPIToken and
+	// only on /api/v2 paths. It rewrites legacy's `X-Token` header into the
+	// Bearer form so a migrating client changes a config value rather than
+	// its source — and, critically, it is a rewrite rather than a second
+	// authenticator, so there is still exactly ONE credential path with one
+	// hash lookup, one revocation check and one permission cap to audit.
+	return v2shim.LegacyTokenAlias(
+		middleware.ResolveAPIToken(s)(
+			middleware.ResolveSession(s)(mux)))
 }
 
 // RequirePermission adapts middleware.RequirePermission's net/http

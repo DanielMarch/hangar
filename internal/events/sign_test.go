@@ -85,7 +85,7 @@ func TestVerifyRejectsReplayInBothDirections(t *testing.T) {
 
 	// Just inside the window, both ways, still valid.
 	require.NoError(t, events.Verify(fixedSecret, fixedBody, header, fixedTime.Add(events.DefaultReplayWindow-time.Second), events.DefaultReplayWindow))
-	require.NoError(t, events.Verify(fixedSecret, fixedBody, header, fixedTime.Add(-(events.DefaultReplayWindow - time.Second)), events.DefaultReplayWindow))
+	require.NoError(t, events.Verify(fixedSecret, fixedBody, header, fixedTime.Add(-(events.DefaultReplayWindow-time.Second)), events.DefaultReplayWindow))
 }
 
 // TestVerifyRejectsTimestampSubstitution proves the binding directly: take

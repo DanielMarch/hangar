@@ -14,6 +14,7 @@ import (
 
 	"github.com/hangar-project/hangar/internal/api"
 	v1 "github.com/hangar-project/hangar/internal/api/v1"
+	"github.com/hangar-project/hangar/internal/api/v2shim"
 	"github.com/hangar-project/hangar/internal/crypto"
 	"github.com/hangar-project/hangar/internal/store"
 	"github.com/hangar-project/hangar/internal/sync/planner"
@@ -140,6 +141,12 @@ func runServe(ctx context.Context) error {
 	hapi := api.NewAPI(mux, deps)
 	v1.RegisterAll(hapi, deps)
 	v1.RegisterAuthRedirects(mux, s, flow)
+
+	// Phase 19: the read-only /api/v2 sunset shim (SRS §10). Mounted on the
+	// same mux, behind the same api.Handler middleware chain, so it shares
+	// one credential path and one authorisation check with /api/v1 rather
+	// than growing a second one.
+	v2shim.Register(mux, v2shim.Deps{Store: s})
 	if err := registerMumbleAuthRoute(ctx, mux, s, cfg); err != nil {
 		return err
 	}
