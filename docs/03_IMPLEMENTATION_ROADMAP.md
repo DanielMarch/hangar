@@ -2006,6 +2006,87 @@ docs/RELEASE_NOTES.md, docs/BASELINE.md (refreshed)
 
 ---
 
+## Phase 20 is split into 20.1 – 20.8 **[decided at the Phase 20 open]**
+
+**Trigger.** Phase 20's first action was the production-caller audit its own brief demanded before
+Gate 4 could be signed off (*"does any non-test file outside this package construct this type?"*,
+asked of every subsystem rather than the handful Phase 19 happened to touch). Run mechanically —
+`go list -deps ./cmd/hangar` for unreachable packages, `x/tools/cmd/deadcode` for unreachable
+functions — it returned **124 functions unreachable from `main`** and thirteen new defects,
+B24–B36, recorded in SRS §0 and in [`PRODUCTION_CALLER_AUDIT.md`](PRODUCTION_CALLER_AUDIT.md).
+
+That finding makes single-phase execution impossible, for a reason that is structural rather than
+one of effort. **Release-gate rule 0.4 says a gate that requires a code change to pass is a failed
+gate, not a fixed one.** Gates 1, 2 and 3 each measure a subsystem that is currently unreachable
+from `main`. Wiring those subsystems up and then running their gates in the same phase produces
+exactly the tautology rule 0.4 exists to forbid — the same defect as re-recording the Gate 7
+corpus to fit the shim, one level up.
+
+**The split is the resolution.** Each wiring defect is closed in a sub-phase that owns it, ships
+its own exit criteria and its own tests, and is verified against real data. Only Phase 20.8 runs
+the gates, several sub-phases downstream of every change it measures. A gate then reports on a
+build that already worked, which is the thing a gate is supposed to be evidence of.
+
+| Sub-phase | Owns | Closes | Gate it unblocks |
+| :-- | :-- | :-- | :-- |
+| **20.1** | Specification reconciliation, the metric surface, the reachability guard | B36 + the two measured spec corrections | prerequisite for 1, 2, 3, 7 |
+| **20.2** | ESI gateway correctness wiring | B23, B28, B29, B31 | Gate 1 |
+| **20.3** | Identity, RBAC and revocation wiring | B26, B27, B32, B35 | Gate 2 |
+| **20.4** | Alert generation wiring | B25 | Gate 3 |
+| **20.5** | Data completeness and remaining surfaces | B22, B24, B30, B33, B34 | Gate 4 |
+| **20.6** | `/api/v2` shim route coverage | Gate 7's coverage requirement | Gate 7 |
+| **20.7** | Deployment surface — Helm, dashboards, install scripts | — | Gate 5 |
+| **20.8** | Gate execution against a release candidate, and the v1.0 release | — | all seven |
+
+**Ordering rationale.** 20.1 first because B36 is a specification contradiction that decides
+whether Gates 1–3 can produce evidence at all, and because the reachability guard it installs is
+what stops the next sub-phase reintroducing the defect it is closing. 20.2 → 20.4 in gate order,
+each landing its own metrics with its own wiring. 20.5 sweeps the remaining surfaces. 20.6 and
+20.7 are independent of all of the above and could run in parallel with them. 20.8 last, always.
+
+**One rule adopted across all eight, and it is the lesson of the audit.** A metric is declared
+only in the sub-phase that makes it *move*. A metric that exists and reads zero is
+indistinguishable from a healthy system — `alert_delivery_total == 0` reads as "a quiet
+installation", not as "the emitter has no caller" — so declaring the full metric set up front
+would hide the very defects the remaining sub-phases exist to close.
+
+---
+
+### Phase 20.1 — Specification reconciliation, the metric surface & the reachability guard
+
+**Objective.** Settle the contradictions, build the shared measurement surface, and make this
+class of defect fail the build.
+
+**Depends on.** Phase 19 and the Phase 20 audit.
+
+**Scope.**
+
+* **B36 resolved.** SRS §0 assigns the metric surface to Phase 20; `04_RELEASE_GATES.md` assigns
+  it to Phases 4/11/14 and forbids retroactive instrumentation. The rule's *intent* is that
+  instrumentation must not be authored in the same breath as the gate that reads it — the same
+  principle as Gate 6's synthetic spec and Gate 7's recorded corpus. §0 of the gate document is
+  amended to say so explicitly: instrumentation must land in a phase that **precedes** the
+  gate-running phase and ships with its own exit criteria and tests. Phases 4/11/14 remain the
+  *preferred* owners; 20.2–20.4 become the actual ones, and 20.8 runs the gates.
+* **The metric surface.** `telemetry.NewRegistry` gets a caller, `/metrics` is served by `serve`
+  and `work`, and the metrics whose subsystems are **live today** are declared and moved. The
+  rest are declared by 20.2–20.4 alongside their wiring, per the rule above.
+* **The two measured specification corrections.** SRS §10 and Gate 7.4 both claim the shim
+  "reintroduces" IEEE-754 imprecision; measured against legacy's own database it does not, because
+  `character_wallet_journals.amount` is a MySQL `DOUBLE` and the loss is already at rest. And SRS
+  Appendix C marks only `RoleController`/`RoleLookupController` as breaking, where
+  `UserController` and `SquadController` are equally un-shimmable — Gate 7.9 cannot pass until
+  Appendix C says so.
+* **The reachability guard.** `make check-reachability`, wired into `ci`, failing when a package
+  or an exported subsystem entry point loses its production caller. Allowlisted exceptions are
+  explicit, justified in-file, and are the record of what is knowingly inert.
+
+**Exit criteria.** `make ci-strict` passes with zero skips; `/metrics` serves a non-empty scrape
+from a running binary; the guard fails when a production caller is deliberately removed and
+passes when it is restored; the audit's defect register and the gate document no longer disagree.
+
+---
+
 ## Cross-phase edge-case register
 
 Consolidated so the implementing agent can scan for the ones relevant to the current phase.

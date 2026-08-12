@@ -66,11 +66,17 @@ func runWork(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	gateway, err := buildGateway(cfg, pool, s, logger)
+	gateway, governor1, err := buildGateway(cfg, pool, s, logger)
 	if err != nil {
 		return err
 	}
 	refresher := buildRefresher(cfg, pool, keyring)
+
+	// Phase 20.1 (B36). `work` is the process that actually calls ESI, so
+	// it is the one whose esi_ledger_mode reading answers Gate 1.8. It has
+	// no other HTTP listener, which is why the metrics endpoint is its own.
+	stopMetrics := startMetricsListener(ctx, cfg.MetricsAddr, buildMetricsRegistry(s, governor1, logger), logger)
+	defer stopMetrics()
 
 	syncPolicy := sync.PolicyConfig{TTLFloor: cfg.ESI.TTLFloor, BackoffCap: cfg.Sync.BackoffCap}
 

@@ -117,6 +117,13 @@ func runServe(ctx context.Context) error {
 		}
 	}()
 
+	// Phase 20.1 (B36). On its OWN listener, not on the mux below: the mux
+	// is bound to the published port, and /metrics is unauthenticated.
+	// `serve` builds no ESI gateway (only `work` does), so it contributes
+	// the replica and divergence gauges and no ledger mode.
+	stopMetrics := startMetricsListener(hbCtx, cfg.MetricsAddr, buildMetricsRegistry(store.New(pool), nil, logger), logger)
+	defer stopMetrics()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

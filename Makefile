@@ -198,7 +198,7 @@ e2e: ## (Phase 18) Playwright: the pin-advance and rule-editor confirmation flow
 
 # ── invariant gates (see docs/04_RELEASE_GATES.md) ────────────────────────────
 # Each guards on the phase artefact that makes it meaningful.
-.PHONY: check-money check-identifiers check-alert-sources check-locales check-css check-no-ice check-static-binary
+.PHONY: check-money check-identifiers check-alert-sources check-locales check-css check-no-ice check-static-binary check-reachability
 
 check-money:         ## Principle 9 (Phase 1b) — reflection proof of zero float64 on money paths
 	@if [ -d internal/domain ] && [ -n "$$(ls -A internal/domain 2>/dev/null)" ]; then \
@@ -236,9 +236,23 @@ check-no-ice:        ## §4.3/§9.2 — no ZeroC Ice or cgo dependency may enter
 check-static-binary: ## §9.2 (Phase 0) — TestStaticBinaryHasNoDynamicLinks: linux/amd64, linux/arm64, windows/amd64
 	go test -tags=staticbinary -run TestStaticBinaryHasNoDynamicLinks -timeout=5m ./test/staticbinary/...
 
+# PHASE 20.1. The guard for defect class B20 — a subsystem built, tested,
+# and never called. Eighteen phases of that went undetected because the
+# suite is green by construction: the package's own tests construct what
+# they need, so nothing anywhere fails. `make ci` could not have caught it,
+# and now does.
+#
+# Unguarded, this target is the single highest-value check in the file. It
+# is NOT skippable on a missing input the way the others are — its inputs
+# are the source tree and the committed allowlist, both of which always
+# exist — so it has no $(call skip) branch. If it cannot run, that is a
+# failure.
+check-reachability:  ## B20 class (Phase 20.1) — every subsystem has a production caller, or is a declared exception
+	go test -tags=reachability -timeout=10m ./test/reachability/...
+
 # ── composite ────────────────────────────────────────────────────────────────
 .PHONY: ci ci-strict
-ci: verify-generated lint test web-ci e2e check-money check-identifiers check-alert-sources check-locales check-css check-no-ice check-static-binary ## Phase 0 exit criterion; strengthens automatically as phases land
+ci: verify-generated lint test web-ci e2e check-money check-identifiers check-alert-sources check-locales check-css check-no-ice check-static-binary check-reachability ## Phase 0 exit criterion; strengthens automatically as phases land
 
 ci-strict: ## Same, but a skipped check is a failure. CI uses this from Phase 15 and on every release tag.
 	$(MAKE) ci STRICT=1

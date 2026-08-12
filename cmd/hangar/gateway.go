@@ -29,10 +29,16 @@ const l1CacheMaxCostBytes = 128 * 1024 * 1024 // 128MiB
 // buildGateway assembles Phase 7's internal/esi.Client from Phases 2-4's
 // pieces — see internal/esi/client.go's package doc for why this assembly
 // didn't exist before Phase 7 needed it.
-func buildGateway(cfg *config.Config, pool *pgxpool.Pool, s *store.Store, logger *slog.Logger) (*esi.Client, error) {
+//
+// PHASE 20.1: also returns the Governor 1 instance. `esi.Client` holds it
+// only as the `ratelimit.Ledger` interface, and the esi_ledger_mode metric
+// needs the concrete type's Mode(). Returning it is better than a type
+// assertion at the call site: the assertion would compile, then silently
+// stop producing the metric the day the ledger is constructed differently.
+func buildGateway(cfg *config.Config, pool *pgxpool.Pool, s *store.Store, logger *slog.Logger) (*esi.Client, *ratelimit.Governor1, error) {
 	l1, err := cache.NewL1(l1CacheMaxCostBytes)
 	if err != nil {
-		return nil, fmt.Errorf("gateway: building L1 cache: %w", err)
+		return nil, nil, fmt.Errorf("gateway: building L1 cache: %w", err)
 	}
 	cacheStore := &cache.Store{L1: l1, L2: cache.NewPostgresL2(s.PostgresCacheL2(), logger)}
 
@@ -59,7 +65,7 @@ func buildGateway(cfg *config.Config, pool *pgxpool.Pool, s *store.Store, logger
 			logger.ErrorContext(ctx, "hangar: "+name, "attrs", attrs)
 		})
 	if err := governor2.Init(context.Background()); err != nil {
-		return nil, fmt.Errorf("gateway: initialising error budget: %w", err)
+		return nil, nil, fmt.Errorf("gateway: initialising error budget: %w", err)
 	}
 
 	return &esi.Client{
@@ -71,7 +77,7 @@ func buildGateway(cfg *config.Config, pool *pgxpool.Pool, s *store.Store, logger
 		ErrorBudget:  governor2,
 		TTLFloor:     cfg.ESI.TTLFloor,
 		Tenant:       "hangar",
-	}, nil
+	}, governor1, nil
 }
 
 // buildRefresher assembles the internal/sso.Refresher Phase 7's gateway

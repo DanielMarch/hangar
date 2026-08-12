@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/hangar-project/hangar/internal/store"
 	"github.com/hangar-project/hangar/internal/sync/planner"
 	"github.com/hangar-project/hangar/internal/telemetry"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -49,6 +50,12 @@ func runSchedule(ctx context.Context) error {
 
 	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Phase 20.1 (B36). `schedule` builds no ESI gateway, so it reports the
+	// replica and divergence gauges but no ledger mode — a nil ModeSource
+	// yields fewer series rather than a wrong one.
+	stopMetrics := startMetricsListener(sigCtx, cfg.MetricsAddr, buildMetricsRegistry(store.New(pool), nil, logger), logger)
+	defer stopMetrics()
 
 	stopPlanner, err := startPlanner(sigCtx, cfg.DB.URL.Reveal(), pool, planner.Config{
 		ClaimInterval:  cfg.Sync.PlannerInterval,

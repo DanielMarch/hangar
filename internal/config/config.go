@@ -14,10 +14,21 @@ import (
 // credential-bearing field uses Secret (see secret.go) so it cannot leak
 // through fmt, encoding/json, or log/slog by accident.
 type Config struct {
-	Env            string
-	LogLevel       string
-	LogFormat      string
-	HTTPAddr       string
+	Env       string
+	LogLevel  string
+	LogFormat string
+	HTTPAddr  string
+	// MetricsAddr is the Prometheus scrape listener, served by every
+	// process role (serve, work, schedule) on its OWN port rather than on
+	// HTTPAddr.
+	//
+	// Separate on purpose. HTTPAddr is the published port in
+	// docker-compose.yml, so mounting an unauthenticated /metrics on it
+	// would expose the installation's operational counters to whatever the
+	// operator has pointed at 8080 — and `work` has no HTTP listener at
+	// all, so it could not export the Gate 1 ledger-mode metric any other
+	// way. Empty disables the listener entirely.
+	MetricsAddr    string
 	PublicURL      string
 	TrustedProxies []string
 
@@ -279,6 +290,10 @@ func applyDefaults(v *viper.Viper) {
 	v.SetDefault("log_level", "info")
 	v.SetDefault("log_format", "json")
 	v.SetDefault("http_addr", "0.0.0.0:8080")
+	// 9090 is Prometheus's own conventional port and is NOT published by
+	// docker-compose.yml — a scraper on the compose network reaches it,
+	// the internet does not. Set HANGAR_METRICS_ADDR="" to disable.
+	v.SetDefault("metrics_addr", "0.0.0.0:9090")
 	v.SetDefault("public_url", "http://localhost:8080")
 	v.SetDefault("trusted_proxies", "")
 
@@ -394,6 +409,7 @@ func Load(v *viper.Viper) (*Config, error) {
 		LogLevel:       v.GetString("log_level"),
 		LogFormat:      v.GetString("log_format"),
 		HTTPAddr:       v.GetString("http_addr"),
+		MetricsAddr:    v.GetString("metrics_addr"),
 		PublicURL:      v.GetString("public_url"),
 		TrustedProxies: splitCSV(v.GetString("trusted_proxies")),
 

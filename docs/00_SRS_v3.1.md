@@ -137,11 +137,35 @@ counts 58 capabilities as delivered and at least eight of them are unreachable f
 | **B35** | The TeamSpeak challenge flow (`IssueChallenge`/`RedeemChallenge`) has no caller, so TeamSpeak linking cannot complete. | Gate 4.3 |
 | **B36** | **The metric surface does not exist** — `telemetry.NewRegistry` has no caller, no `/metrics` endpoint is served, and all ten metrics named in the gate document's instrumentation table occur only in comments. | Gates 1, 2, 3 evidence |
 
-**B36 is also a specification contradiction and is recorded as one.** SRS §0 above assigns the
-metric surface to Phase 20. `04_RELEASE_GATES.md`'s preamble assigns it to Phases 4, 11 and 14 and
-states that "a gate whose metrics are added in Phase 20 cannot be measured retroactively". Both
-cannot hold. Per Principle 15 the disagreement is raised rather than resolved by adopting whichever
-reading is convenient, and it must be settled before Gates 1–3 can produce meaningful evidence.
+**B36 was also a specification contradiction.** SRS §0 above assigned the metric surface to Phase
+20. `04_RELEASE_GATES.md`'s preamble assigned it to Phases 4, 11 and 14 and stated that "a gate
+whose metrics are added in Phase 20 cannot be measured retroactively". Both could not hold.
+
+**Resolved in Phase 20.1** by naming the property the rule was reaching for rather than a phase
+number. The rule exists so that instrumentation is not authored in the same breath as the gate
+that reads it — the same principle as Gate 6's synthetic spec and Gate 7's recorded corpus. It is
+now `04_RELEASE_GATES.md` §0 rule 6: instrumentation must land in a phase that **precedes** the
+gate-running phase and ship with its own exit criteria and tests. A companion rule 7 was added
+from the lesson of B25: *a metric is declared only by the change that makes it move*, because a
+metric reading zero is indistinguishable from a healthy system, so declaring the set up front
+would have hidden the very defects that remain open.
+
+### Phase 20 is executed as 20.1 – 20.8
+
+The audit makes single-phase execution impossible, structurally rather than by volume. Gates 1, 2
+and 3 each measure a subsystem that is unreachable from `main`; wiring those up and running their
+gates in one phase produces exactly the tautology rule 0.4 forbids. Each wiring defect is
+therefore closed by a sub-phase that owns it and tests it, and only 20.8 runs the gates — several
+sub-phases downstream of everything it measures. The split, and which defect each sub-phase
+closes, is in [`03_IMPLEMENTATION_ROADMAP.md`](03_IMPLEMENTATION_ROADMAP.md).
+
+**The guard, so this class cannot reopen.** `make check-reachability` (Phase 20.1) runs the audit
+on every `make ci`, comparing reachability from `main` against
+`test/reachability/allowlist.txt` — an annotated register in which every knowingly-inert symbol
+carries its defect id and the sub-phase that closes it. It fails on a symbol that becomes
+unreachable **and** on an allowlist entry that becomes reachable; the second half is what forces
+the register to shrink as 20.2–20.6 land, rather than decaying into a list nobody has re-read.
+`make ci` could not have caught B20. It can now.
 
 ### Findings carried forward from v3.0's own revision record
 
@@ -1239,10 +1263,17 @@ base controller). HANGAR's One API principle replaces this with `/api/v1`.
   Removal requires a release-note announcement at least one minor version in advance.
 * **Mapping.** Appendix C records the route-level legacy → HANGAR mapping and flags routes with no
   direct equivalent.
-* **Known lossy property.** Legacy emitted money as JSON numbers; HANGAR emits strings
-  (Principle 9). Byte compatibility therefore requires the shim to convert back to a number,
-  reintroducing IEEE-754 imprecision for large ISK values. This is unavoidable, is a deliberate
-  property of the shim, and must be documented in the migration guide with a worked example.
+* **Known lossy property — corrected in Phase 20.1 against a measurement.** Legacy emitted money
+  as JSON numbers; HANGAR emits strings (Principle 9), so byte compatibility requires the shim to
+  convert back to a number. This clause previously said that conversion *reintroduces* IEEE-754
+  imprecision for large ISK values. Measured while recording the Gate 7 corpus against legacy's
+  own database, it does not: `character_wallet_journals.amount` is a MySQL **`DOUBLE`**, so
+  `9007199254740993.01` ISK is already `9007199254741000` **at rest**, before serialisation. The
+  loss is legacy's, and predates HANGAR. The shim therefore *reproduces* legacy's precision
+  rather than degrading anything — a distinction that decides where an integrator looks when the
+  numbers disagree. It remains a deliberate property of the shim and must be documented in the
+  migration guide with a worked example; `/api/v1` is exact, and the imprecision ends with the
+  migration.
 * **Verification.** Gate 7.
 
 ---
@@ -1336,12 +1367,28 @@ bypassing the endpoint registry; a health check against a route CCP has deleted.
 | `CharacterController` | `/api/v1/characters/*` | Direct; `_sync` envelope added, stripped by the shim |
 | `CorporationController` | `/api/v1/corporations/*` | Direct; `_sync` envelope added, stripped by the shim |
 | `KillmailsController` | `/api/v1/characters/{id}/killmails`, `/corporations/{id}/killmails` | Split by owner |
-| `RoleController` | `/api/v1/admin/*` (RBAC) | Reshaped — grant model differs; **breaking, no shim** |
-| `RoleLookupController` | `/api/v1/admin/users/{id}` | Folded into user administration; **breaking, no shim** |
-| `SquadController` | `/api/v1/squads/*` | Expanded (members, moderators, roles) |
-| `UserController` | `/api/v1/admin/users`, `/api/v1/me` | Split by scope of access |
+| `RoleController` | `/api/v1/admin/*` (RBAC) | Reshaped — grant model differs; **breaking, no shim** (`410`) |
+| `RoleLookupController` | `/api/v1/admin/users/{id}` | Folded into user administration; **breaking, no shim** (`410`) |
+| `SquadController` | `/api/v1/squads/*` | Expanded (members, moderators, roles). **Breaking in its identity fields, no shim** (`501`) — see below |
+| `UserController` | `/api/v1/admin/users`, `/api/v1/me` | Split by scope of access. **Breaking in its identity fields, no shim** (`501`) — see below |
 | `ApiController` (base) | n/a | Framework-level; no equivalent |
 
 Shim coverage is read-only. Reshaped routes are documented as breaking with no shim, since the
 underlying grant model is not translatable; they return a documented breaking-change response with
 a migration pointer rather than a partial shim.
+
+**Correction applied in Phase 20.1.** This table previously marked only `RoleController` and
+`RoleLookupController` as breaking, describing `SquadController` as merely "expanded" and
+`UserController` as merely "split". Measured against both schemas, those two are equally
+un-shimmable: legacy's `users.id` and `squads.id` are MySQL auto-increment `bigint`s where
+HANGAR's `app.user.user_id` and `app.squad.squad_id` are `uuid`s (02_DATABASE_SCHEMA.md §4.1,
+§4.5). `"id":1` and `"id":"019ff31f-…"` are not a formatting difference; they are different
+identifier spaces, and no translation invents the integer a legacy client stored.
+
+They answer **`501`, not `410`**, and the distinction is deliberate: the roles break is
+conceptual and permanent, whereas this one is an identifier-space mismatch that a future release
+could address by exposing a stable legacy-id mapping. Saying "Gone" would overstate it.
+
+Gate 7.9 requires this appendix to be complete before it can pass, so the correction is a gate
+prerequisite rather than an editorial note. The full reasoning is in
+[`APPENDIX_C_MIGRATION.md`](APPENDIX_C_MIGRATION.md) §5.2.

@@ -1,8 +1,8 @@
 # 04 — Verification & Testing Matrix (Release Gates 1–7)
 
 **Derived from:** [`00_SRS_v3.1.md`](00_SRS_v3.1.md) §7 Phase 20
-**Executed in:** Phase 20, but each gate's *instrumentation* lands in the phase that builds the
-subsystem. A gate whose metrics are added in Phase 20 cannot be measured retroactively.
+**Executed in:** Phase 20.8. Each gate's *instrumentation* must land in a phase that **precedes**
+the gate-running phase and ships with its own exit criteria and tests — see rule 6.
 
 ---
 
@@ -17,18 +17,43 @@ subsystem. A gate whose metrics are added in Phase 20 cannot be measured retroac
    most sharply to Gate 6, whose entire premise is zero code changes.
 5. **Gates are re-run on every minor release.** Gates 4 and 7 are re-run on every patch release
    that touches an endpoint.
+6. **Instrumentation precedes the gate that reads it.** A gate's metrics, harnesses and fixtures
+   must land in a phase *earlier* than the one that runs the gate, and must ship with their own
+   exit criteria and their own tests. Authoring instrumentation in the same phase that runs the
+   gate is the same defect as authoring Gate 6's synthetic spec in response to a failure, or
+   re-recording Gate 7's corpus to fit the shim: the measurement stops being independent of the
+   thing measured.
+7. **A metric is declared only by the change that makes it move.** A metric that exists and reads
+   zero is indistinguishable from a healthy system — `alert_delivery_total == 0` reads as "a quiet
+   installation", not as "the emitter has no caller". Declaring a metric ahead of its
+   implementation therefore *hides* the gap it was supposed to expose. This rule is written in
+   the blood of defect B25 (see `PRODUCTION_CALLER_AUDIT.md`), where a fully wired alert
+   dispatcher drained an outbox that nothing wrote to.
 
 ### Instrumentation ownership
 
-| Gate | Metric / artefact | Added in phase |
-| :-- | :-- | :-- |
-| 1 | `esi_ledger_divergence`, `esi_ledger_mode`, `esi_replica_live_count`, `esi_429_total{has_headers}`, `esi_420_total`, `esi_error_limit_remaining` | 4 |
-| 2 | `app.provisioning_audit.event_at` / `platform_call_completed_at`, `provisioning_revocation_latency_seconds` | 11 |
-| 3 | `alert_delivery_total{channel,outcome}`, `alert_dead_letter_depth`, dedupe hash log | 14 |
-| 4 | `docs/BASELINE.md` measured counts, capability→endpoint→phase traceability table | 0, 15 |
-| 5 | container image published; compose file with no `build:` key | 0 |
-| 6 | `test/drift/gate6_synthetic_spec.json` **authored and committed in Phase 2**; catalogue ingest report | 2 |
-| 7 | `testdata/legacy-api-v2/**` recorded corpus | 19 |
+**Amended in Phase 20.1 (defect B36).** This table originally assigned Gates 1–3's metrics to
+Phases 4, 11 and 14, and the header above forbade adding them in Phase 20. Neither happened: the
+Phase 20 audit found that `telemetry.NewRegistry` had no caller, no `/metrics` endpoint was
+served, and every metric named below existed only inside doc comments. SRS §0 meanwhile assigned
+the metric surface to Phase 20 outright, so the two documents contradicted each other.
+
+Resolved per Principle 15 by naming the *property* rather than a phase number: instrumentation
+lands before the gate that reads it (rule 6), and is declared by the change that moves it (rule
+7). Phases 4/11/14 remain where this work *should* have landed; the "actual" column records where
+it did. A future subsystem's metrics belong in that subsystem's own phase — the split below is
+remediation, not a precedent.
+
+| Gate | Metric / artefact | Intended phase | Actual |
+| :-- | :-- | :-- | :-- |
+| 1 | `esi_ledger_divergence`, `esi_ledger_mode`, `esi_replica_live_count`, `esi_429_total{has_headers}`, `esi_420_total`, `esi_error_limit_remaining` | 4 | **20.2**, with the B28/B29 wiring that makes them move |
+| 2 | `app.provisioning_audit.event_at` / `platform_call_completed_at`, `provisioning_revocation_latency_seconds` | 11 | **20.3**, with the B26/B27 wiring |
+| 3 | `alert_delivery_total{channel,outcome}`, `alert_dead_letter_depth`, dedupe hash log | 14 | **20.4**, with the B25 wiring |
+| 4 | `docs/BASELINE.md` measured counts, capability→endpoint→phase traceability table | 0, 15 | 0, 15 (+ **20.5**) |
+| 5 | container image published; compose file with no `build:` key | 0 | 0 (+ **20.7** for Helm and dashboards) |
+| 6 | `test/drift/gate6_synthetic_spec.json` **authored and committed in Phase 2**; catalogue ingest report | 2 | 2 — verified present and unmodified |
+| 7 | `testdata/legacy-api-v2/**` recorded corpus | 19 | 19 — verified present; coverage extended in **20.6** |
+| — | the shared registry and `/metrics` endpoint every gate above scrapes | — | **20.1** |
 
 ---
 
@@ -388,21 +413,32 @@ this gate.
 | 7.3 | Every shim response carries an RFC 8594 `Sunset` header set to the announced removal date |
 | 7.4 | The `_sync` envelope is **stripped** — legacy consumers never see it |
 | 7.5 | Laravel-style pagination (`current_page`, `last_page`, `per_page`, `total`) is synthesised correctly from keyset results; the `total` strategy is documented |
-| 7.6 | Money fields are emitted as JSON **numbers** as legacy did, and the resulting imprecision is documented as a known, deliberate property of the shim |
-| 7.7 | `RoleController` and `RoleLookupController` return a documented breaking-change response with a migration pointer — **not** a broken or partial shim |
+| 7.6 | Money fields are emitted as JSON **numbers** as legacy did, and legacy's own at-rest imprecision (§7.4) is documented with a worked example |
+| 7.7 | `RoleController` and `RoleLookupController` return a documented breaking-change response (`410`) with a migration pointer — **not** a broken or partial shim |
 | 7.8 | Write routes return a clear "not shimmed" response, not a 404 |
-| 7.9 | Appendix C mapping (`docs/APPENDIX_C_MIGRATION.md`) is complete: every legacy controller has an entry, and routes with no equivalent are flagged |
+| 7.9 | Appendix C mapping is complete **in both places it is written** — `docs/APPENDIX_C_MIGRATION.md` and SRS Appendix C — with every legacy controller carrying an entry and routes with no equivalent flagged. This includes `UserController` and `SquadController` being marked un-shimmable (`501`) on their identity fields, corrected in Phase 20.1; a correction present in the migration guide but absent from the SRS still fails this condition, because the SRS is the document Gate 4 traces capabilities against |
 
-### 7.4 The money-precision caveat
+### 7.4 The money-precision caveat — **corrected in Phase 20.1 against a measurement**
 
 HANGAR stores money as `NUMERIC(30,2)` and emits JSON strings (Principle 9). Legacy emitted JSON
-numbers. The shim must convert back to a number to be byte-compatible, which reintroduces IEEE-754
-imprecision for large ISK values.
+numbers. The shim converts back to a number to be byte-compatible.
 
-This is unavoidable — byte compatibility with a lossy format is lossy — and it must be stated
-explicitly in the migration guide with a worked example showing a value that round-trips
-imprecisely. Do not "fix" it by emitting strings from the shim: that breaks Gate 7 and every
-existing consumer.
+**What this paragraph used to say, and why it was wrong.** It said the conversion "reintroduces
+IEEE-754 imprecision for large ISK values", and SRS §10 said the same. Measured against legacy's
+own database while recording the Gate 7 corpus, it does not. `character_wallet_journals.amount`
+is a MySQL **`DOUBLE`**, not a decimal: `9007199254740993.01` ISK is already `9007199254741000`
+*at rest*, before anything is serialised. The ~7 ISK is legacy's own loss, and it happens whether
+or not HANGAR exists.
+
+So the shim **reproduces** legacy's precision rather than degrading anything. That distinction is
+not pedantry — it decides where an integrator looks when the numbers disagree. Told the shim
+introduces error, they will diff the shim; told the value was never exact, they will read the
+column type and stop.
+
+What remains true: the shim must emit numbers, the migration guide must carry a worked example
+(`testdata/legacy-api-v2/` pins one), and emitting strings from the shim would break Gate 7 and
+every existing consumer. HANGAR's own `/api/v1` is exact; the imprecision is a property of the
+legacy surface being reproduced, and it ends when the migration does.
 
 ### 7.5 Sunset policy verification
 

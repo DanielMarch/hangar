@@ -1,0 +1,179 @@
+# Known-unreachable symbols — the reachability allowlist.
+#
+# CONTRACT. test/reachability fails if a symbol is unreachable from cmd/hangar
+# and NOT listed here, and ALSO fails if a symbol listed here has become
+# reachable. The second half matters as much as the first: an allowlist that
+# only ever grows is how B20 stayed open for eighteen phases.
+#
+# Every entry carries the defect it belongs to and the sub-phase that closes
+# it. This file should SHRINK as 20.2-20.6 land. It is the honest register of
+# what is built, tested and inert.
+#
+# Regenerate the raw list with:
+#   go tool deadcode -test=false -f='{{range .Funcs}}{{printf "%s.%s\n" $.Path .Name}}{{end}}' ./cmd/hangar
+
+# == OPEN DEFECTS =========================================================
+
+# B24 (closed by Phase 20.5) — webhook HMAC sealing — the missing §4.9 configuration surface
+internal/crypto.SealWebhookSecret
+
+# B24 (closed by Phase 20.5) — webhook HMAC secret generation — the missing §4.9 configuration surface
+internal/crypto.NewWebhookSecret
+
+# B25 (closed by Phase 20.4) — alert catalogue: threshold set and per-domain counts, read only by tests
+internal/alerting/catalogue.CountByDomain
+internal/alerting/catalogue.Names
+internal/alerting/catalogue.SeededTotal
+internal/alerting/catalogue.SkyhookNames
+internal/alerting/catalogue.ThresholdSourceRoutes
+internal/alerting/catalogue.Thresholds
+internal/alerting/catalogue.ValidateThresholds
+
+# B25 (closed by Phase 20.4) — alert generation: Emitter, dedupe fingerprints, coalescing, dead-letter count
+internal/alerting.CoalesceKey.Due
+internal/alerting.CoalesceKey.String
+internal/alerting.DeadLetterCount
+internal/alerting.Emitter.Emit
+internal/alerting.Emitter.IngestNotification
+internal/alerting.Emitter.now
+internal/alerting.Emitter.window
+internal/alerting.Fingerprint.Hash
+internal/alerting.NewCoalesceKey
+internal/alerting.NotificationFingerprint
+internal/alerting.Routing.IsEmpty
+internal/alerting.SemanticFields
+internal/alerting.ThresholdFingerprint
+internal/alerting.canonicalScalar
+internal/alerting.escapePipe
+internal/alerting.nullableString
+internal/alerting.writeLengthPrefixed
+
+# B25 (closed by Phase 20.4) — alert message renderer, including the generic fallback Gate 3.2 requires
+internal/alerting/render.HasTemplate
+internal/alerting/render.Render
+
+# B26 (closed by Phase 20.3) — RBAC mutation surface and permission resolution; no role-management route is registered
+internal/rbac.AddRoleGrant
+internal/rbac.AddSquadMember
+internal/rbac.AddSquadRole
+internal/rbac.AssignUserRole
+internal/rbac.CreateRole
+internal/rbac.DeleteRole
+internal/rbac.RemoveRoleGrant
+internal/rbac.RemoveSquadMember
+internal/rbac.RemoveSquadRole
+internal/rbac.Resolve
+internal/rbac.ResolveLive
+internal/rbac.RevokeUserRole
+internal/rbac.UserAffectedBySquadMember
+internal/rbac.UsersAffectedBySquadRole
+
+# B27 (closed by Phase 20.3) — scope-set comparison behind Gate 2's 'scope set reduced' trigger
+internal/scopes.MergeScopes
+internal/scopes.NeedsReauthorization
+internal/scopes.NewSet
+internal/scopes.Set.Has
+internal/scopes.Set.HasAll
+internal/scopes.Set.Missing
+
+# B27 (closed by Phase 20.3) — token lifecycle: Gate 2's invalid_grant and owner-hash-change triggers
+internal/sso.Lifecycle.InvalidateForInvalidGrant
+internal/sso.Lifecycle.InvalidateForOwnerHashChange
+internal/sso.NewLifecycle
+
+# B28 (closed by Phase 20.2) — entity circuit breaker: Gate 1 §1.3's 5-consecutive-403 condition
+internal/esi/breaker.EntityBreaker.Allow
+internal/esi/breaker.EntityBreaker.RecordFailure
+internal/esi/breaker.EntityBreaker.RecordSuccess
+internal/esi/breaker.EntityBreaker.State
+internal/esi/breaker.EntityBreaker.circuitFor
+internal/esi/breaker.NewEntityBreaker
+internal/esi/breaker.entityKey
+
+# B29 (closed by Phase 20.2) — X-Ratelimit-Limit parsing, never invoked on a real response
+internal/esi/ratelimit.ParseRateLimitLimit
+
+# B29 (closed by Phase 20.2) — X-Ratelimit-Remaining parsing, never invoked on a real response
+internal/esi/ratelimit.ParseRemaining
+
+# B29 (closed by Phase 20.2) — rate-limit header reconciliation; Client.Do calls only ClassifyCost
+internal/esi/ratelimit.ClassifyResponse
+
+# B30 (closed by Phase 20.5) — ESI route handler implemented but never dispatched by any worker
+internal/sync/handlers.ParseAssetNames
+internal/sync/handlers.ParseCalendarAttendees
+internal/sync/handlers.ParseCalendarEventDetail
+internal/sync/handlers.ParseCorporationProjectContributors
+internal/sync/handlers.ParseMarketHistory
+internal/sync/handlers.ParseMarketPrices
+internal/sync/handlers.ParsePlanetColonyDetail
+internal/sync/handlers.SyncCalendarAttendees
+internal/sync/handlers.SyncCalendarEventDetail
+internal/sync/handlers.SyncCorporationProjectContributors
+internal/sync/handlers.SyncMarketHistory
+internal/sync/handlers.SyncMarketPrices
+internal/sync/handlers.SyncPlanetColonyDetail
+
+# B32 (closed by Phase 20.3) — entitlement-rule write endpoint, never mounted by RegisterAll
+internal/api/v1.CreateEntitlementRule
+internal/api/v1.DeleteEntitlementRule
+
+# B33 (closed by Phase 20.5) — $filter grammar validation
+internal/api/filters.New
+internal/api/filters.Validate
+internal/api/filters.coerce
+internal/api/filters.containsSQLMeta
+
+# B34 (closed by Phase 20.5) — optional Redis L2 tier — compose ships a `cache` profile nothing uses
+internal/esi/cache.NewRedisL2
+internal/esi/cache.redisL2.Get
+internal/esi/cache.redisL2.Set
+
+# B35 (closed by Phase 20.3) — TeamSpeak identity-linking challenge
+internal/provisioning/drivers/teamspeak.IssueChallenge
+internal/provisioning/drivers/teamspeak.NewChallengeToken
+internal/provisioning/drivers/teamspeak.RedeemChallenge
+
+# GATE7 (closed by Phase 20.6) — shim helper awaiting the routes that use it (only 4 of 33 read routes are served)
+internal/api/v2shim.BreakingControllers
+internal/api/v2shim.Float
+internal/api/v2shim.FloatValue
+internal/api/v2shim.ItemEnvelope
+internal/api/v2shim.Money
+internal/api/v2shim.MoneyOrNull
+internal/api/v2shim.MoneyOrZero
+internal/api/v2shim.PendingControllers
+internal/api/v2shim.UnshimmableControllers
+internal/api/v2shim.numericString
+
+# == NOT DEFECTS ==========================================================
+# Unused helpers, test doubles, and API published for callers outside this
+# binary. Each is a deliberate keep, not a gap.
+
+internal/api/middleware.TokenIDFromContext  # accessor kept beside the context key it reads; no caller needs it yet
+internal/domain.BuildAssetTree  # asset-tree walk exercised by internal/domain's own tests; no endpoint assembles a tree yet
+internal/domain.CorporationProject.Validate  # as ValidateAsset
+internal/domain.IsMoneyFieldName  # reflection helper used ONLY by TestNoFloatOnMoneyPaths (make check-money); test-only by design
+internal/domain.ValidateAsset  # domain validation exercised by unit tests; the sync path validates at the store boundary
+internal/domain.containsID  # helper of BuildAssetTree
+internal/domain.splitFieldWords  # helper of IsMoneyFieldName
+internal/esi/cache.NormalizeEnvelope  # cache-envelope normaliser covered by unit tests; L1/L2 store pre-normalised values
+internal/esi/catalogue.SchedulingMode  # open-vocabulary accessor; the scheduling query reads the column directly
+internal/esi/ratelimit.Governor1.forceModeCheck  # test hook for deterministic mode transitions
+internal/events.DeadLetterBoard  # dead-letter query awaiting its admin endpoint
+internal/events.EventID  # helper of the Recorder double
+internal/events.KnownTypes  # closed event-type vocabulary, asserted by tests
+internal/events.ParseSignatureHeader  # as Verify — consumer-side, not called by the sender
+internal/events.PendingCount  # outbox depth query awaiting the alert_dead_letter_depth metric (20.4)
+internal/events.Recorder.Len  # test-facing accessor on the in-memory Recorder double
+internal/events.Verify  # signature verification published for CONSUMERS of HANGAR webhooks; deploy/verify-webhook-signature.sh is the shipped equivalent
+internal/provisioning/drivers/teamspeak.Unescape  # TS3 wire decoder, symmetric with Escape; the WebQuery driver parses JSON, so only Escape is on the live path
+internal/sso.NoopRevocationNotifier.NotifyRevocation  # null-object test double
+internal/sync.StubElector.Elect  # test double
+internal/sync/normalize.ETag  # as RowsAffected
+internal/sync/normalize.LastModified  # as RowsAffected
+internal/sync/normalize.RowsAffected  # normalisation accessors covered by unit tests; handlers read the struct fields
+internal/sync/worker.ReconcileRateLimitMax  # ledger reconciliation helper; folded into the B29 work in 20.2
+internal/sync/worker.SyncSet  # route-set accessor used by the Gate 4 parity harness (20.5), not by the worker
+internal/telemetry.Hostname  # os.Hostname wrapper; the heartbeat inlines its own
+internal/telemetry.Tracer  # otel.Tracer passthrough kept beside InitTracerProvider
