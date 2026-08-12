@@ -13,52 +13,24 @@ import (
 	"github.com/google/uuid"
 )
 
-const claimPendingWebhookDeliveries = `-- name: ClaimPendingWebhookDeliveries :many
-SELECT delivery_id, endpoint_id, event_id, attempt, response_status, next_retry_at, delivered_at, error, created_at FROM app.webhook_delivery
- WHERE delivered_at IS NULL AND (next_retry_at IS NULL OR next_retry_at <= now())
- ORDER BY created_at
- LIMIT $1
-`
-
-func (q *Queries) ClaimPendingWebhookDeliveries(ctx context.Context, claimSize int32) ([]AppWebhookDelivery, error) {
-	rows, err := q.db.Query(ctx, claimPendingWebhookDeliveries, claimSize)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []AppWebhookDelivery
-	for rows.Next() {
-		var i AppWebhookDelivery
-		if err := rows.Scan(
-			&i.DeliveryID,
-			&i.EndpointID,
-			&i.EventID,
-			&i.Attempt,
-			&i.ResponseStatus,
-			&i.NextRetryAt,
-			&i.DeliveredAt,
-			&i.Error,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const claimUndispatchedOutboxEvents = `-- name: ClaimUndispatchedOutboxEvents :many
 SELECT event_id, aggregate, aggregate_id, event_type, payload, occurred_at, dispatched_at FROM app.outbox_event
  WHERE dispatched_at IS NULL
  ORDER BY event_id
  LIMIT $1
+   FOR UPDATE SKIP LOCKED
 `
 
 // Index-only scan in causal order: event_id is uuidv7()-keyed, and the
 // partial index is on (event_id) WHERE dispatched_at IS NULL.
+//
+// PHASE 19: FOR UPDATE SKIP LOCKED, and the caller must hold a
+// transaction. Without the lock two replicas' dispatchers both read the
+// same undispatched rows and both fan them out, so every third-party
+// endpoint gets each event twice — and the receiver has no way to tell
+// that from a genuine retry. SKIP LOCKED (rather than plain FOR UPDATE) so
+// the second dispatcher takes the NEXT batch instead of blocking on the
+// first: the outbox must drain faster with more replicas, not the same.
 func (q *Queries) ClaimUndispatchedOutboxEvents(ctx context.Context, claimSize int32) ([]AppOutboxEvent, error) {
 	rows, err := q.db.Query(ctx, claimUndispatchedOutboxEvents, claimSize)
 	if err != nil {
@@ -87,11 +59,36 @@ func (q *Queries) ClaimUndispatchedOutboxEvents(ctx context.Context, claimSize i
 	return items, nil
 }
 
+const clearWebhookEndpointFailures = `-- name: ClearWebhookEndpointFailures :exec
+UPDATE app.webhook_endpoint
+   SET consecutive_failures = 0
+ WHERE endpoint_id = $1 AND consecutive_failures <> 0
+`
+
+func (q *Queries) ClearWebhookEndpointFailures(ctx context.Context, endpointID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, clearWebhookEndpointFailures, endpointID)
+	return err
+}
+
+const countUndispatchedOutboxEvents = `-- name: CountUndispatchedOutboxEvents :one
+SELECT count(*) FROM app.outbox_event WHERE dispatched_at IS NULL
+`
+
+// Deliberately NOT ClaimUndispatchedOutboxEvents with a huge limit: that
+// query takes row locks and skips the ones another dispatcher holds, so it
+// would under-report exactly when the backlog matters most.
+func (q *Queries) CountUndispatchedOutboxEvents(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countUndispatchedOutboxEvents)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createWebhookEndpoint = `-- name: CreateWebhookEndpoint :one
 
 INSERT INTO app.webhook_endpoint (owner_user_id, url, hmac_key_version, hmac_wrapped_dek, hmac_nonce, hmac_ciphertext, event_filter)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING endpoint_id, owner_user_id, url, hmac_key_version, hmac_wrapped_dek, hmac_nonce, hmac_ciphertext, event_filter, enabled, created_at
+RETURNING endpoint_id, owner_user_id, url, hmac_key_version, hmac_wrapped_dek, hmac_nonce, hmac_ciphertext, event_filter, enabled, created_at, disabled_at, disabled_reason, consecutive_failures
 `
 
 type CreateWebhookEndpointParams struct {
@@ -128,14 +125,31 @@ func (q *Queries) CreateWebhookEndpoint(ctx context.Context, arg CreateWebhookEn
 		&i.EventFilter,
 		&i.Enabled,
 		&i.CreatedAt,
+		&i.DisabledAt,
+		&i.DisabledReason,
+		&i.ConsecutiveFailures,
 	)
 	return i, err
+}
+
+const disableWebhookEndpoint = `-- name: DisableWebhookEndpoint :exec
+UPDATE app.webhook_endpoint
+   SET enabled = false, disabled_at = now(), disabled_reason = $2
+ WHERE endpoint_id = $1 AND enabled
+`
+
+// The auto-disable. disabled_at/disabled_reason distinguish this from the
+// owner switching the endpoint off (RevokeWebhookEndpoint), which is the
+// whole point of having them.
+func (q *Queries) DisableWebhookEndpoint(ctx context.Context, endpointID uuid.UUID, disabledReason *string) error {
+	_, err := q.db.Exec(ctx, disableWebhookEndpoint, endpointID, disabledReason)
+	return err
 }
 
 const enqueueWebhookDelivery = `-- name: EnqueueWebhookDelivery :one
 INSERT INTO app.webhook_delivery (endpoint_id, event_id)
 VALUES ($1, $2)
-RETURNING delivery_id, endpoint_id, event_id, attempt, response_status, next_retry_at, delivered_at, error, created_at
+RETURNING delivery_id, endpoint_id, event_id, attempt, response_status, next_retry_at, delivered_at, error, created_at, failed_at
 `
 
 func (q *Queries) EnqueueWebhookDelivery(ctx context.Context, endpointID uuid.UUID, eventID uuid.UUID) (AppWebhookDelivery, error) {
@@ -151,6 +165,74 @@ func (q *Queries) EnqueueWebhookDelivery(ctx context.Context, endpointID uuid.UU
 		&i.DeliveredAt,
 		&i.Error,
 		&i.CreatedAt,
+		&i.FailedAt,
+	)
+	return i, err
+}
+
+const failOutstandingDeliveriesForEndpoint = `-- name: FailOutstandingDeliveriesForEndpoint :exec
+UPDATE app.webhook_delivery
+   SET failed_at = now(), next_retry_at = NULL, error = $2
+ WHERE endpoint_id = $1 AND delivered_at IS NULL AND failed_at IS NULL
+`
+
+// Dead-letters everything still owed to an endpoint that has just been
+// auto-disabled.
+//
+// Leaving them merely 'pending' would look tidier and be wrong twice over.
+// LeasePendingWebhookDeliveries joins on e.enabled, so a disabled
+// endpoint's queue is unclaimable — the rows would sit forever, invisible
+// to both the pump and the dead-letter board, which is precisely the
+// "neither delivered nor dead-lettered" state the whole design exists to
+// rule out. And the roadmap's requirement is not "stop trying", it is "must
+// not retain jobs forever". An operator who re-enables the endpoint should
+// get NEW events, not a month of backlog replayed at a receiver that has
+// no idea what to do with it.
+func (q *Queries) FailOutstandingDeliveriesForEndpoint(ctx context.Context, endpointID uuid.UUID, error *string) error {
+	_, err := q.db.Exec(ctx, failOutstandingDeliveriesForEndpoint, endpointID, error)
+	return err
+}
+
+const getOutboxEvent = `-- name: GetOutboxEvent :one
+SELECT event_id, aggregate, aggregate_id, event_type, payload, occurred_at, dispatched_at FROM app.outbox_event WHERE event_id = $1
+`
+
+func (q *Queries) GetOutboxEvent(ctx context.Context, eventID uuid.UUID) (AppOutboxEvent, error) {
+	row := q.db.QueryRow(ctx, getOutboxEvent, eventID)
+	var i AppOutboxEvent
+	err := row.Scan(
+		&i.EventID,
+		&i.Aggregate,
+		&i.AggregateID,
+		&i.EventType,
+		&i.Payload,
+		&i.OccurredAt,
+		&i.DispatchedAt,
+	)
+	return i, err
+}
+
+const getWebhookEndpoint = `-- name: GetWebhookEndpoint :one
+SELECT endpoint_id, owner_user_id, url, hmac_key_version, hmac_wrapped_dek, hmac_nonce, hmac_ciphertext, event_filter, enabled, created_at, disabled_at, disabled_reason, consecutive_failures FROM app.webhook_endpoint WHERE endpoint_id = $1
+`
+
+func (q *Queries) GetWebhookEndpoint(ctx context.Context, endpointID uuid.UUID) (AppWebhookEndpoint, error) {
+	row := q.db.QueryRow(ctx, getWebhookEndpoint, endpointID)
+	var i AppWebhookEndpoint
+	err := row.Scan(
+		&i.EndpointID,
+		&i.OwnerUserID,
+		&i.Url,
+		&i.HmacKeyVersion,
+		&i.HmacWrappedDek,
+		&i.HmacNonce,
+		&i.HmacCiphertext,
+		&i.EventFilter,
+		&i.Enabled,
+		&i.CreatedAt,
+		&i.DisabledAt,
+		&i.DisabledReason,
+		&i.ConsecutiveFailures,
 	)
 	return i, err
 }
@@ -190,8 +272,176 @@ func (q *Queries) InsertOutboxEvent(ctx context.Context, arg InsertOutboxEventPa
 	return i, err
 }
 
+const leasePendingWebhookDeliveries = `-- name: LeasePendingWebhookDeliveries :many
+UPDATE app.webhook_delivery AS d
+   SET next_retry_at = now() + $1::interval
+  FROM (
+       SELECT c.delivery_id
+         FROM app.webhook_delivery c
+         JOIN app.webhook_endpoint e USING (endpoint_id)
+        WHERE c.delivered_at IS NULL
+          AND c.failed_at IS NULL
+          AND e.enabled
+          AND (c.next_retry_at IS NULL OR c.next_retry_at <= now())
+        ORDER BY c.created_at
+        LIMIT $2
+          FOR UPDATE OF c SKIP LOCKED
+       ) AS claimed
+ WHERE d.delivery_id = claimed.delivery_id
+RETURNING d.delivery_id, d.endpoint_id, d.event_id, d.attempt, d.response_status, d.next_retry_at, d.delivered_at, d.error, d.created_at, d.failed_at
+`
+
+// Claim-by-lease, not claim-by-read.
+//
+// The dispatcher makes an HTTP call between claiming a delivery and
+// settling it, and it must not hold a transaction open across that call.
+// So the claim MOVES next_retry_at forward by a lease before releasing the
+// transaction: a crash between claim and send leaves the row untouched
+// except for the lease, and it becomes claimable again when the lease
+// expires. Nothing is lost (the roadmap's "must not lose an event when the
+// dispatcher crashes between claim and send") and nothing is double-sent
+// inside the lease window. The guarantee is at-least-once, which is what a
+// signed webhook contract promises.
+//
+// The join to app.webhook_endpoint is not decoration: a delivery for an
+// endpoint that has since been disabled must stop consuming attempts.
+func (q *Queries) LeasePendingWebhookDeliveries(ctx context.Context, lease time.Duration, claimSize int32) ([]AppWebhookDelivery, error) {
+	rows, err := q.db.Query(ctx, leasePendingWebhookDeliveries, lease, claimSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppWebhookDelivery
+	for rows.Next() {
+		var i AppWebhookDelivery
+		if err := rows.Scan(
+			&i.DeliveryID,
+			&i.EndpointID,
+			&i.EventID,
+			&i.Attempt,
+			&i.ResponseStatus,
+			&i.NextRetryAt,
+			&i.DeliveredAt,
+			&i.Error,
+			&i.CreatedAt,
+			&i.FailedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDeadLetterWebhookDeliveries = `-- name: ListDeadLetterWebhookDeliveries :many
+SELECT d.delivery_id, d.endpoint_id, d.event_id, d.attempt, d.response_status, d.next_retry_at, d.delivered_at, d.error, d.created_at, d.failed_at, e.url, e.owner_user_id
+  FROM app.webhook_delivery d
+  JOIN app.webhook_endpoint e USING (endpoint_id)
+ WHERE d.failed_at IS NOT NULL
+ ORDER BY d.failed_at DESC
+ LIMIT $1
+`
+
+type ListDeadLetterWebhookDeliveriesRow struct {
+	DeliveryID     uuid.UUID
+	EndpointID     uuid.UUID
+	EventID        uuid.UUID
+	Attempt        int32
+	ResponseStatus *int16
+	NextRetryAt    *time.Time
+	DeliveredAt    *time.Time
+	Error          *string
+	CreatedAt      time.Time
+	FailedAt       *time.Time
+	Url            string
+	OwnerUserID    uuid.UUID
+}
+
+// The admin-visible counterpart to alerting's dead-letter board: deliveries
+// that will never be retried, newest first.
+func (q *Queries) ListDeadLetterWebhookDeliveries(ctx context.Context, pageSize int32) ([]ListDeadLetterWebhookDeliveriesRow, error) {
+	rows, err := q.db.Query(ctx, listDeadLetterWebhookDeliveries, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDeadLetterWebhookDeliveriesRow
+	for rows.Next() {
+		var i ListDeadLetterWebhookDeliveriesRow
+		if err := rows.Scan(
+			&i.DeliveryID,
+			&i.EndpointID,
+			&i.EventID,
+			&i.Attempt,
+			&i.ResponseStatus,
+			&i.NextRetryAt,
+			&i.DeliveredAt,
+			&i.Error,
+			&i.CreatedAt,
+			&i.FailedAt,
+			&i.Url,
+			&i.OwnerUserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEndpointsForEvent = `-- name: ListEndpointsForEvent :many
+SELECT endpoint_id, owner_user_id, url, hmac_key_version, hmac_wrapped_dek, hmac_nonce, hmac_ciphertext, event_filter, enabled, created_at, disabled_at, disabled_reason, consecutive_failures FROM app.webhook_endpoint
+ WHERE enabled
+   AND (cardinality(event_filter) = 0 OR $1::text = ANY (event_filter))
+ ORDER BY endpoint_id
+`
+
+// The fan-out lookup: every enabled endpoint that has not filtered this
+// event type out. An EMPTY event_filter means "everything" — the array
+// containment test would be false for an empty left operand, so the empty
+// case is spelled out rather than left to the operator.
+func (q *Queries) ListEndpointsForEvent(ctx context.Context, eventType string) ([]AppWebhookEndpoint, error) {
+	rows, err := q.db.Query(ctx, listEndpointsForEvent, eventType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppWebhookEndpoint
+	for rows.Next() {
+		var i AppWebhookEndpoint
+		if err := rows.Scan(
+			&i.EndpointID,
+			&i.OwnerUserID,
+			&i.Url,
+			&i.HmacKeyVersion,
+			&i.HmacWrappedDek,
+			&i.HmacNonce,
+			&i.HmacCiphertext,
+			&i.EventFilter,
+			&i.Enabled,
+			&i.CreatedAt,
+			&i.DisabledAt,
+			&i.DisabledReason,
+			&i.ConsecutiveFailures,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWebhookEndpointsForUser = `-- name: ListWebhookEndpointsForUser :many
-SELECT endpoint_id, owner_user_id, url, hmac_key_version, hmac_wrapped_dek, hmac_nonce, hmac_ciphertext, event_filter, enabled, created_at FROM app.webhook_endpoint WHERE owner_user_id = $1 AND enabled ORDER BY created_at
+SELECT endpoint_id, owner_user_id, url, hmac_key_version, hmac_wrapped_dek, hmac_nonce, hmac_ciphertext, event_filter, enabled, created_at, disabled_at, disabled_reason, consecutive_failures FROM app.webhook_endpoint WHERE owner_user_id = $1 AND enabled ORDER BY created_at
 `
 
 func (q *Queries) ListWebhookEndpointsForUser(ctx context.Context, ownerUserID uuid.UUID) ([]AppWebhookEndpoint, error) {
@@ -214,6 +464,9 @@ func (q *Queries) ListWebhookEndpointsForUser(ctx context.Context, ownerUserID u
 			&i.EventFilter,
 			&i.Enabled,
 			&i.CreatedAt,
+			&i.DisabledAt,
+			&i.DisabledReason,
+			&i.ConsecutiveFailures,
 		); err != nil {
 			return nil, err
 		}
@@ -231,6 +484,21 @@ UPDATE app.outbox_event SET dispatched_at = now() WHERE event_id = $1
 
 func (q *Queries) MarkOutboxEventDispatched(ctx context.Context, eventID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, markOutboxEventDispatched, eventID)
+	return err
+}
+
+const markWebhookDeliveryFailed = `-- name: MarkWebhookDeliveryFailed :exec
+UPDATE app.webhook_delivery
+   SET attempt = attempt + 1, response_status = $2, next_retry_at = NULL,
+       failed_at = now(), error = $3
+ WHERE delivery_id = $1
+`
+
+// Dead-letter. next_retry_at is cleared deliberately: leaving it set would
+// be harmless but misleading, and leaving it NULL WITHOUT failed_at would
+// make the row instantly re-claimable forever (see migration 00041).
+func (q *Queries) MarkWebhookDeliveryFailed(ctx context.Context, deliveryID uuid.UUID, responseStatus *int16, error *string) error {
+	_, err := q.db.Exec(ctx, markWebhookDeliveryFailed, deliveryID, responseStatus, error)
 	return err
 }
 
@@ -259,13 +527,31 @@ func (q *Queries) MarkWebhookDeliveryRetry(ctx context.Context, arg MarkWebhookD
 
 const markWebhookDeliverySent = `-- name: MarkWebhookDeliverySent :exec
 UPDATE app.webhook_delivery
-   SET delivered_at = now(), response_status = $2, attempt = attempt + 1
+   SET delivered_at = now(), response_status = $2, attempt = attempt + 1,
+       next_retry_at = NULL, error = NULL
  WHERE delivery_id = $1
 `
 
 func (q *Queries) MarkWebhookDeliverySent(ctx context.Context, deliveryID uuid.UUID, responseStatus *int16) error {
 	_, err := q.db.Exec(ctx, markWebhookDeliverySent, deliveryID, responseStatus)
 	return err
+}
+
+const recordWebhookEndpointFailure = `-- name: RecordWebhookEndpointFailure :one
+UPDATE app.webhook_endpoint
+   SET consecutive_failures = consecutive_failures + 1
+ WHERE endpoint_id = $1
+RETURNING consecutive_failures
+`
+
+// Bumps the endpoint-level breaker and returns the new count, so the
+// dispatcher decides to disable from the value the database actually
+// committed rather than from one it read a moment earlier.
+func (q *Queries) RecordWebhookEndpointFailure(ctx context.Context, endpointID uuid.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, recordWebhookEndpointFailure, endpointID)
+	var consecutive_failures int32
+	err := row.Scan(&consecutive_failures)
+	return consecutive_failures, err
 }
 
 const revokeWebhookEndpoint = `-- name: RevokeWebhookEndpoint :exec

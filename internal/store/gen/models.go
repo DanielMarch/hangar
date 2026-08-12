@@ -1505,6 +1505,8 @@ type AppWebhookDelivery struct {
 	DeliveredAt    *time.Time
 	Error          *string
 	CreatedAt      time.Time
+	// Dead-lettered: attempts exhausted, permanently not delivered. The third state — distinct from delivered_at (succeeded) and next_retry_at (still owed an attempt). Phase 19.
+	FailedAt *time.Time
 }
 
 type AppWebhookEndpoint struct {
@@ -1518,6 +1520,11 @@ type AppWebhookEndpoint struct {
 	EventFilter    []string
 	Enabled        bool
 	CreatedAt      time.Time
+	// When HANGAR itself disabled the endpoint (attempt cap reached). NULL when the owner disabled it, or when it is enabled. Phase 19.
+	DisabledAt     *time.Time
+	DisabledReason *string
+	// Reset to 0 by any successful delivery. The endpoint-level circuit breaker: per-delivery attempt caps alone never disable a permanently-dead endpoint, they just dead-letter each job individually. Phase 19.
+	ConsecutiveFailures int32
 }
 
 type SdeAncestry struct {

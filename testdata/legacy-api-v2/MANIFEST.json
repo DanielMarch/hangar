@@ -1,0 +1,276 @@
+[
+    {
+        "name": "alliance.contacts",
+        "path": "/api/v2/alliance/contacts/99000001",
+        "query": [],
+        "status": 200,
+        "bytes": 459,
+        "sha256": "c794f6adb89a1afe57728dfee6347398de606cdb01ae8f4e8f36459085e2c82d"
+    },
+    {
+        "name": "character.assets",
+        "path": "/api/v2/character/assets/90000001",
+        "query": [],
+        "status": 200,
+        "bytes": 961,
+        "sha256": "cc6a0f99f7b5bafdc0baa55b1154945bd2e55149187e6ef06abcb2364376f7f2"
+    },
+    {
+        "name": "character.contacts",
+        "path": "/api/v2/character/contacts/90000001",
+        "query": [],
+        "status": 200,
+        "bytes": 586,
+        "sha256": "69c4c4e9f0fc4fb4e5ef184253631512afd9731f79600ec36f6697061a811ae8"
+    },
+    {
+        "name": "character.contracts",
+        "path": "/api/v2/character/contracts/90000001",
+        "query": [],
+        "status": 200,
+        "bytes": 1360,
+        "sha256": "344dbe6e5344e120f2ca95a7e757e2891661f84d32cbdd1a551d9f9c323b2555"
+    },
+    {
+        "name": "character.corporation-history",
+        "path": "/api/v2/character/corporation-history/90000001",
+        "query": [],
+        "status": 200,
+        "bytes": 570,
+        "sha256": "d1539ce37c5161bad79236d24204c9766bf1252debe1e9c6bb56d314b88da4b7"
+    },
+    {
+        "name": "character.industry",
+        "path": "/api/v2/character/industry/90000001",
+        "query": [],
+        "status": 200,
+        "bytes": 895,
+        "sha256": "204d4bf3fc6bb208b5f0a765394e7d4b7b9a77cb7c037bf7eccbf8ce012a85b2"
+    },
+    {
+        "name": "character.jump-clones",
+        "path": "/api/v2/character/jump-clones/90000001",
+        "query": [],
+        "status": 200,
+        "bytes": 455,
+        "sha256": "9212099bbbdb341dd5da1dd8d93b637e1d22d3c2fd37ccad97d57d55a9af7c60"
+    },
+    {
+        "name": "character.mail",
+        "path": "/api/v2/character/mail/90000001",
+        "query": [],
+        "status": 200,
+        "bytes": 595,
+        "sha256": "0264952856f4274c2ba8d8a73610ff449bfd201c69c604939248624397d4f750"
+    },
+    {
+        "name": "character.market-orders",
+        "path": "/api/v2/character/market-orders/90000001",
+        "query": [],
+        "status": 200,
+        "bytes": 669,
+        "sha256": "d52dcabe9002c56082026e206040e4edc41ead78c1e4e7285d73c505f17d2142"
+    },
+    {
+        "name": "character.notifications",
+        "path": "/api/v2/character/notifications/90000001",
+        "query": [],
+        "status": 200,
+        "bytes": 587,
+        "sha256": "82bc9d498f4b9587ee58d21f19aa0708526161bb998b0f41973a0b9cb0305fec"
+    },
+    {
+        "name": "character.sheet",
+        "path": "/api/v2/character/sheet/90000001",
+        "query": [],
+        "status": 200,
+        "bytes": 535,
+        "sha256": "0497fdd22a4afebcf9fb0a844a95d154d62ae94dfa68e23b4533d93b3b7f74d8"
+    },
+    {
+        "name": "character.skills",
+        "path": "/api/v2/character/skills/90000001",
+        "query": [],
+        "status": 200,
+        "bytes": 431,
+        "sha256": "f1d159c9b04399e4145f32cdcc62b82059403658ae8d2b3997c714a92e52e0ba"
+    },
+    {
+        "name": "character.skill-queue",
+        "path": "/api/v2/character/skill-queue/90000001",
+        "query": [],
+        "status": 200,
+        "bytes": 563,
+        "sha256": "97c5c4e10ae9ebc1fe5c5c844b3a2ef84c860955d9e9a6c2cdd3b7e8251350cd"
+    },
+    {
+        "name": "character.wallet-journal",
+        "path": "/api/v2/character/wallet-journal/90000001",
+        "query": [],
+        "status": 200,
+        "bytes": 6451,
+        "sha256": "ceb6c27f3fa42657b2901effde43896f880ff22b11f09cd0c3686887d03e1db4"
+    },
+    {
+        "name": "character.wallet-journal.page2",
+        "path": "/api/v2/character/wallet-journal/90000001",
+        "query": {
+            "page": 2
+        },
+        "status": 200,
+        "bytes": 2447,
+        "sha256": "369c1f1a70cf67854932627e9857d0e5987d697604e1d4c566ebfcd9a740d028"
+    },
+    {
+        "name": "character.wallet-transactions",
+        "path": "/api/v2/character/wallet-transactions/90000001",
+        "query": [],
+        "status": 200,
+        "bytes": 666,
+        "sha256": "51fc72b350254141670e37393b36d1dfddf2e84c70699e7006a78317be3f2f3b"
+    },
+    {
+        "name": "character.assets.empty",
+        "path": "/api/v2/character/assets/90000099",
+        "query": [],
+        "status": 200,
+        "bytes": 347,
+        "sha256": "b2174f78716eb11877fc39108b18ae299c44e25c4f37501693c133a7bb48daca"
+    },
+    {
+        "name": "corporation.assets",
+        "path": "/api/v2/corporation/assets/98000001",
+        "query": [],
+        "status": 200,
+        "bytes": 652,
+        "sha256": "9d51e4737e87b74cca9933aad0ded6643560de7fd8dae2ac4cdd4daa8130450f"
+    },
+    {
+        "name": "corporation.contacts",
+        "path": "/api/v2/corporation/contacts/98000001",
+        "query": [],
+        "status": 200,
+        "bytes": 470,
+        "sha256": "cbc10c3dd8fa25a5995749b8a4e7e7560904f8b77e3203156098131e1e71bfcd"
+    },
+    {
+        "name": "corporation.contracts",
+        "path": "/api/v2/corporation/contracts/98000001",
+        "query": [],
+        "status": 200,
+        "bytes": 1366,
+        "sha256": "7810d1ed51e3ac17ff30aca26d74c51b2ba4a4923ff15ec01ff8dffaa8ad6082"
+    },
+    {
+        "name": "corporation.industry",
+        "path": "/api/v2/corporation/industry/98000001",
+        "query": [],
+        "status": 200,
+        "bytes": 897,
+        "sha256": "3fefece798d380976cd316049379734d075dd48074ddfc83bd71cfd8438b6f7b"
+    },
+    {
+        "name": "corporation.market-orders",
+        "path": "/api/v2/corporation/market-orders/98000001",
+        "query": [],
+        "status": 200,
+        "bytes": 690,
+        "sha256": "2534720cab79c1c8d1613204e1afab66fc60f8a5e18e2fd3241dc21df95e4adf"
+    },
+    {
+        "name": "corporation.member-tracking",
+        "path": "/api/v2/corporation/member-tracking/98000001",
+        "query": [],
+        "status": 200,
+        "bytes": 553,
+        "sha256": "cec709fed1cab8bc0058dca0c05e948691a6fde434c0461e4504ca9dfaf74960"
+    },
+    {
+        "name": "corporation.sheet",
+        "path": "/api/v2/corporation/sheet/98000001",
+        "query": [],
+        "status": 200,
+        "bytes": 628,
+        "sha256": "1c649d0930609aa1e41d73c227e94631acb4764d4f5226fcdc50f87086d69dee"
+    },
+    {
+        "name": "corporation.structures",
+        "path": "/api/v2/corporation/structures/98000001",
+        "query": [],
+        "status": 200,
+        "bytes": 751,
+        "sha256": "73b729669413e040c1b505eb5e6df95598b361a3050f0394421e46af51509aea"
+    },
+    {
+        "name": "corporation.wallet-journal",
+        "path": "/api/v2/corporation/wallet-journal/98000001",
+        "query": [],
+        "status": 200,
+        "bytes": 773,
+        "sha256": "5aa5a21a579918a78d1b6daf5c8b25c5b76ab1cee318af22e74d4e86d641453b"
+    },
+    {
+        "name": "corporation.wallet-transactions",
+        "path": "/api/v2/corporation/wallet-transactions/98000001",
+        "query": [],
+        "status": 200,
+        "bytes": 671,
+        "sha256": "e67d9ef9d530fb02aecc9658dd633fe5e6a2ccb9bf01acd6dac2261b8236eb7a"
+    },
+    {
+        "name": "killmails.detail",
+        "path": "/api/v2/killmails/15001",
+        "query": [],
+        "status": 200,
+        "bytes": 500,
+        "sha256": "72c775e5f87ee1d5b95f84dc26307107184c486a47f3779412dfd1486628d3c0"
+    },
+    {
+        "name": "killmails.character",
+        "path": "/api/v2/character/killmails/90000001",
+        "query": [],
+        "status": 200,
+        "bytes": 903,
+        "sha256": "71c75975550ee9fa8f1f8bffe6660b250995477b91b55d00ca4af97f3bc6c0cb"
+    },
+    {
+        "name": "killmails.corporation",
+        "path": "/api/v2/corporation/killmails/98000001",
+        "query": [],
+        "status": 200,
+        "bytes": 408,
+        "sha256": "88f41e1f7d2dedcd2a3b4fc4d6dbf99f7a743e3a232d63cccda18f9d59e25474"
+    },
+    {
+        "name": "squads.index",
+        "path": "/api/v2/squads",
+        "query": [],
+        "status": 200,
+        "bytes": 17138,
+        "sha256": "25c798a5c55a86533c5b09502af04cc9f9244c4dee7ba19921a9ceb7318247ac"
+    },
+    {
+        "name": "squads.show",
+        "path": "/api/v2/squads/1",
+        "query": [],
+        "status": 200,
+        "bytes": 8918,
+        "sha256": "76deafaa581ced9d05c0a273389f475c0e81ec8d41f9b1c2c6f2c21798323514"
+    },
+    {
+        "name": "users.index",
+        "path": "/api/v2/users",
+        "query": [],
+        "status": 200,
+        "bytes": 612,
+        "sha256": "f5ec62cecdf3d008e0a921b598491ff14c96a048137f6ad82e408bedbb1844eb"
+    },
+    {
+        "name": "users.show",
+        "path": "/api/v2/users/1",
+        "query": [],
+        "status": 200,
+        "bytes": 190,
+        "sha256": "4732006f80b9bb97fcd617fd6618fcbc51b84a09d3dfcdfe6f6246be73ec8171"
+    }
+]

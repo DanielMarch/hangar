@@ -122,10 +122,18 @@ type Querier interface {
 	// catalogue, so only `ss` is locked.
 	ClaimDueSubscriptions(ctx context.Context, claimSize int32) ([]AppSyncSubscription, error)
 	ClaimPendingAlertDeliveries(ctx context.Context, claimSize int32) ([]AppAlertDelivery, error)
-	ClaimPendingWebhookDeliveries(ctx context.Context, claimSize int32) ([]AppWebhookDelivery, error)
 	// Index-only scan in causal order: event_id is uuidv7()-keyed, and the
 	// partial index is on (event_id) WHERE dispatched_at IS NULL.
+	//
+	// PHASE 19: FOR UPDATE SKIP LOCKED, and the caller must hold a
+	// transaction. Without the lock two replicas' dispatchers both read the
+	// same undispatched rows and both fan them out, so every third-party
+	// endpoint gets each event twice — and the receiver has no way to tell
+	// that from a genuine retry. SKIP LOCKED (rather than plain FOR UPDATE) so
+	// the second dispatcher takes the NEXT batch instead of blocking on the
+	// first: the outbox must drain faster with more replicas, not the same.
 	ClaimUndispatchedOutboxEvents(ctx context.Context, claimSize int32) ([]AppOutboxEvent, error)
+	ClearWebhookEndpointFailures(ctx context.Context, endpointID uuid.UUID) error
 	CompleteProvisioningAudit(ctx context.Context, auditID uuid.UUID, outcome *string, error *string) error
 	CompleteSdeImport(ctx context.Context, arg CompleteSdeImportParams) error
 	// Attaches the resolved user to a pre-auth session and clears
@@ -157,6 +165,10 @@ type Querier interface {
 	// '-30 seconds', added to now().
 	CountLiveReplicas(ctx context.Context, liveThreshold time.Duration) (int64, error)
 	CountUnacknowledgedOpenVocabulary(ctx context.Context, vocabulary string) (int64, error)
+	// Deliberately NOT ClaimUndispatchedOutboxEvents with a huge limit: that
+	// query takes row locks and skips the ones another dispatcher holds, so it
+	// would under-report exactly when the backlog matters most.
+	CountUndispatchedOutboxEvents(ctx context.Context) (int64, error)
 	CreateAlertChannel(ctx context.Context, kind string, name string, config json.RawMessage) (AppAlertChannel, error)
 	CreateAlertRoutingRule(ctx context.Context, arg CreateAlertRoutingRuleParams) (AppAlertRoutingRule, error)
 	// ---- third-party API tokens ----
@@ -281,6 +293,10 @@ type Querier interface {
 	DeleteStaleReplicas(ctx context.Context, liveThreshold time.Duration) error
 	DeleteStandingsNotIn(ctx context.Context, ownerKind string, ownerID int64, keepFromIds []int64) error
 	DeregisterReplica(ctx context.Context, replicaID uuid.UUID) error
+	// The auto-disable. disabled_at/disabled_reason distinguish this from the
+	// owner switching the endpoint off (RevokeWebhookEndpoint), which is the
+	// whole point of having them.
+	DisableWebhookEndpoint(ctx context.Context, endpointID uuid.UUID, disabledReason *string) error
 	ElectActingCharacter(ctx context.Context, subscriptionID uuid.UUID, actingCharacterID *int64) error
 	// PHASE 14: gained a third parameter. next_attempt_at is the moment the
 	// delivery becomes claimable, and for a coalesced event that is the close
@@ -328,6 +344,19 @@ type Querier interface {
 	// proxy for "response time" of a request that never answered), and turned
 	// into a normal settled entry — never deleted for free.
 	ExpireLedgerReservations(ctx context.Context, rateLimitGroup string, userKey string) ([]AppEsiLedgerEntry, error)
+	// Dead-letters everything still owed to an endpoint that has just been
+	// auto-disabled.
+	//
+	// Leaving them merely 'pending' would look tidier and be wrong twice over.
+	// LeasePendingWebhookDeliveries joins on e.enabled, so a disabled
+	// endpoint's queue is unclaimable — the rows would sit forever, invisible
+	// to both the pump and the dead-letter board, which is precisely the
+	// "neither delivered nor dead-lettered" state the whole design exists to
+	// rule out. And the roadmap's requirement is not "stop trying", it is "must
+	// not retain jobs forever". An operator who re-enables the endpoint should
+	// get NEW events, not a month of backlog replayed at a receiver that has
+	// no idea what to do with it.
+	FailOutstandingDeliveriesForEndpoint(ctx context.Context, endpointID uuid.UUID, error *string) error
 	FinishSyncRun(ctx context.Context, arg FinishSyncRunParams) error
 	// clustered -> solo: read the shared table into memory before the fast path
 	// engages.
@@ -420,6 +449,7 @@ type Querier interface {
 	// their eventual release time isn't knowable in advance, so §5.5's retryAt
 	// formula is defined over settled/synthetic entries only.
 	GetOldestLiveLedgerEntry(ctx context.Context, rateLimitGroup string, userKey string) (time.Time, error)
+	GetOutboxEvent(ctx context.Context, eventID uuid.UUID) (AppOutboxEvent, error)
 	GetPlanetColonyDetail(ctx context.Context, characterID int64, planetID int64) (AppPlanetColonyDetail, error)
 	GetPlatform(ctx context.Context, platformID uuid.UUID) (AppPlatform, error)
 	GetPlatformGroup(ctx context.Context, groupID uuid.UUID) (AppPlatformGroup, error)
@@ -451,6 +481,7 @@ type Querier interface {
 	GetUser(ctx context.Context, userID uuid.UUID) (AppUser, error)
 	GetUserByMainCharacterID(ctx context.Context, mainCharacterID *int64) (AppUser, error)
 	GetWalletBalance(ctx context.Context, ownerKind string, ownerID int64, division int16) (AppWalletBalance, error)
+	GetWebhookEndpoint(ctx context.Context, endpointID uuid.UUID) (AppWebhookEndpoint, error)
 	// Strict Mode's per-user probe (02_DATABASE_SCHEMA.md §4.1): true if any of
 	// this user's characters holds an invalid token. The partial index on
 	// app.character_token(valid) WHERE NOT valid is what keeps this a
@@ -479,6 +510,21 @@ type Querier interface {
 	// app.teamspeak_challenge — Phase 13's single-use TS3 linking token
 	// (01_ARCHITECTURE.md §9.4, db/migrations/00039).
 	IssueTeamspeakChallenge(ctx context.Context, token string, userID uuid.UUID, expiresAt time.Time) (AppTeamspeakChallenge, error)
+	// Claim-by-lease, not claim-by-read.
+	//
+	// The dispatcher makes an HTTP call between claiming a delivery and
+	// settling it, and it must not hold a transaction open across that call.
+	// So the claim MOVES next_retry_at forward by a lease before releasing the
+	// transaction: a crash between claim and send leaves the row untouched
+	// except for the lease, and it becomes claimable again when the lease
+	// expires. Nothing is lost (the roadmap's "must not lose an event when the
+	// dispatcher crashes between claim and send") and nothing is double-sent
+	// inside the lease window. The guarantee is at-least-once, which is what a
+	// signed webhook contract promises.
+	//
+	// The join to app.webhook_endpoint is not decoration: a delivery for an
+	// endpoint that has since been disabled must stop consuming attempts.
+	LeasePendingWebhookDeliveries(ctx context.Context, lease time.Duration, claimSize int32) ([]AppWebhookDelivery, error)
 	// Advances next_due_at for just-claimed rows so the NEXT 5s tick doesn't
 	// reclaim them before the in-flight attempt (a Phase 7+ worker) records its
 	// real outcome via RecordSyncSuccess/RecordSync304/RecordSync403. Run in
@@ -581,7 +627,15 @@ type Querier interface {
 	// outcome, not a loss"). Joined to the event and channel so the board can
 	// name what failed and where without an N+1 read per row.
 	ListDeadLetterAlertDeliveries(ctx context.Context, pageSize int32) ([]ListDeadLetterAlertDeliveriesRow, error)
+	// The admin-visible counterpart to alerting's dead-letter board: deliveries
+	// that will never be retried, newest first.
+	ListDeadLetterWebhookDeliveries(ctx context.Context, pageSize int32) ([]ListDeadLetterWebhookDeliveriesRow, error)
 	ListEffectivePermissions(ctx context.Context, userID uuid.UUID) ([]string, error)
+	// The fan-out lookup: every enabled endpoint that has not filtered this
+	// event type out. An EMPTY event_filter means "everything" — the array
+	// containment test would be false for an empty left operand, so the empty
+	// case is spelled out rather than left to the operator.
+	ListEndpointsForEvent(ctx context.Context, eventType string) ([]AppWebhookEndpoint, error)
 	ListEntitlementRulesForGroup(ctx context.Context, groupID uuid.UUID) ([]AppEntitlementRule, error)
 	// Every enabled rule that targets one of platform_id's groups — what
 	// evaluate.go is run against for a single platform's reconcile/preview/
@@ -791,6 +845,10 @@ type Querier interface {
 	MarkAlertDeliveryFailed(ctx context.Context, arg MarkAlertDeliveryFailedParams) error
 	MarkAlertDeliverySent(ctx context.Context, deliveryID uuid.UUID) error
 	MarkOutboxEventDispatched(ctx context.Context, eventID uuid.UUID) error
+	// Dead-letter. next_retry_at is cleared deliberately: leaving it set would
+	// be harmless but misleading, and leaving it NULL WITHOUT failed_at would
+	// make the row instantly re-claimable forever (see migration 00041).
+	MarkWebhookDeliveryFailed(ctx context.Context, deliveryID uuid.UUID, responseStatus *int16, error *string) error
 	MarkWebhookDeliveryRetry(ctx context.Context, arg MarkWebhookDeliveryRetryParams) error
 	MarkWebhookDeliverySent(ctx context.Context, deliveryID uuid.UUID, responseStatus *int16) error
 	// ---- sync_acting_character_history (Phase 8, 01_ARCHITECTURE.md §6.3) ----
@@ -827,6 +885,10 @@ type Querier interface {
 	RecordSync403(ctx context.Context, subscriptionID uuid.UUID) error
 	RecordSyncSuccess(ctx context.Context, arg RecordSyncSuccessParams) error
 	RecordUnknownNotificationType(ctx context.Context, type_ string, samplePayload json.RawMessage) error
+	// Bumps the endpoint-level breaker and returns the new count, so the
+	// dispatcher decides to disable from the value the database actually
+	// committed rather than from one it read a moment earlier.
+	RecordWebhookEndpointFailure(ctx context.Context, endpointID uuid.UUID) (int32, error)
 	// The single-use guarantee: this UPDATE only ever affects a row that is
 	// still unconsumed and unexpired, so a second redemption attempt with the
 	// same token — concurrent or sequential — always affects zero rows.
