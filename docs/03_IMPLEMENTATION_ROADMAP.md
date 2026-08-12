@@ -1949,6 +1949,7 @@ shim** — the grant model is not translatable and pretending otherwise is worse
 | `TestShimEmitsDeprecationAndSunset` | both headers on every shim response |
 | `TestShimStripsSyncEnvelope` | no `_sync` key in any shim response |
 | `TestReshapedRoutesReturn410WithMigrationPointer` | `RoleController`/`RoleLookupController` paths return a documented breaking-change response |
+| `TestShimAuthenticatesLikeV1AndCannotExceedTokenScope` | **(Phase 19's own addition)** an unauthenticatable shim is a shim nobody can migrate to — and one that authenticates *differently* is worse than one that cannot authenticate at all. The shim resolves the same `app.api_token` credential `/api/v1` does (accepting it in legacy's `X-Token` header as a transport alias, `/api/v2` only), and a token whose own `permissions` array omits the permission gets a 403 even when its owner holds it. A shim route must never be a way around Phase 18's B21 cap. |
 
 **Prompt seed.**
 > Implement HANGAR Phase 19. Build the transactional outbox — data mutation and outbox insert in

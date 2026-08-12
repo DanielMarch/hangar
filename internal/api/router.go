@@ -46,8 +46,75 @@ func NewAPI(mux *http.ServeMux, deps Deps) huma.API {
 	config.DocsPath = "/api/v1/docs"
 	config.Info.Description = "HANGAR's single API surface (SRS Principle 6) — the SPA and every third-party integration share it; there is no private endpoint."
 
+	declareSecuritySchemes(config.OpenAPI)
+
 	api := humago.New(mux, config)
 	return api
+}
+
+// Names of the declared security schemes, referenced from the document's
+// top-level `security` requirement.
+const (
+	SecuritySchemeBearer = "apiToken"
+	SecuritySchemeCookie = "session"
+)
+
+// declareSecuritySchemes fills in `components.securitySchemes` and the
+// document-wide `security` requirement.
+//
+// PHASE 19. Until now docs/openapi.json declared NO security schemes at all
+// — not for the session cookie, not for the bearer token — which was
+// survivable while the only consumer was HANGAR's own SPA (Phase 16
+// generates web/src/api/schema.d.ts from this document, and types do not
+// care about auth). It stopped being survivable the moment §12's
+// third-party surface became real: a generated client built from a spec
+// with no security scheme sends no credential, and the integrator's first
+// experience of HANGAR is a 401 the document gave them no way to predict.
+//
+// BOTH schemes are declared because both are real and they are not
+// interchangeable — the cookie is the SPA's, the bearer token is an
+// integration's, and only the latter carries a permission scope that caps
+// it. The top-level requirement lists them as ALTERNATIVES (two entries in
+// the array, not two keys in one entry), which is OpenAPI's spelling for
+// "either of these", and matches middleware.ResolveAPIToken /
+// ResolveSession: a request presenting both gets the token's — the lesser —
+// authority.
+func declareSecuritySchemes(spec *huma.OpenAPI) {
+	if spec.Components == nil {
+		spec.Components = &huma.Components{}
+	}
+	if spec.Components.SecuritySchemes == nil {
+		spec.Components.SecuritySchemes = map[string]*huma.SecurityScheme{}
+	}
+
+	spec.Components.SecuritySchemes[SecuritySchemeBearer] = &huma.SecurityScheme{
+		Type:   "http",
+		Scheme: "bearer",
+		Description: "A third-party API token (SRS §12), presented as " +
+			"`Authorization: Bearer <token_id>.<secret>`. Mint one with " +
+			"`hangar admin bootstrap-token` or `POST /api/v1/admin/tokens`.\n\n" +
+			"The token's own `permissions` array is a CAP: a request is permitted only when the " +
+			"permission is in both the owner's roles and the token's scope, so a narrowly-scoped " +
+			"integration can never act with its owner's full authority.\n\n" +
+			"On the deprecated `/api/v2` shim only, the same credential may be presented in " +
+			"legacy SeAT's `X-Token` header instead.",
+	}
+	spec.Components.SecuritySchemes[SecuritySchemeCookie] = &huma.SecurityScheme{
+		Type: "apiKey",
+		In:   "cookie",
+		Name: "hangar_session",
+		Description: "The browser session cookie established by the EVE SSO login flow " +
+			"(`/auth/login`). Carries no scope of its own — it is the full authority of the " +
+			"user it identifies — so it is the SPA's credential, not an integration's.",
+	}
+
+	// Alternatives, not a conjunction. Individual operations still carry
+	// their own RBAC permission requirement; this only says which
+	// credentials the surface understands.
+	spec.Security = []map[string][]string{
+		{SecuritySchemeBearer: {}},
+		{SecuritySchemeCookie: {}},
+	}
 }
 
 // Version is the API's reported version. cmd/hangar overrides it at build
