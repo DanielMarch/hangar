@@ -178,6 +178,17 @@ web-ci:
 # real binary against a real, seeded, THROWAWAY Postgres — web/e2e/global-setup
 # .ts migrates and seeds it, and it will happily rewrite app.setting's
 # compatibility pin. Never point this at a database with data in it.
+#
+# PHASE 19 CLOSE-OUT TRAP, recorded so the next phase does not pay for it
+# again. playwright.config.ts listens on 8099 with `reuseExistingServer:
+# !CI`. If ANYTHING is already bound to 8099 — most likely a container you
+# started to verify the release image by hand — Playwright silently adopts
+# it instead of starting its own, and the whole suite runs against a server
+# pointed at a DIFFERENT database from the one global-setup just seeded.
+# Every spec then fails on an unauthenticated request, which reads exactly
+# like a broken session layer and is not one. Check with
+# `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8099/healthz`
+# before believing an e2e failure, or set HANGAR_E2E_PORT to something else.
 .PHONY: e2e
 e2e: ## (Phase 18) Playwright: the pin-advance and rule-editor confirmation flows
 	@if [ -d web/node_modules ] && [ -n "$${HANGAR_DB_URL:-}" ]; then \
