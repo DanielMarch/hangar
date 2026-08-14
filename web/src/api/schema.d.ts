@@ -191,6 +191,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/permissions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The closed RBAC permission vocabulary */
+    get: operations["admin-permissions"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/platforms": {
     parameters: {
       query?: never;
@@ -305,6 +322,75 @@ export interface paths {
     get: operations["admin-provisioning-exposures"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/roles": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Create an RBAC role */
+    post: operations["admin-create-role"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/roles/grants/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Remove one permission grant by grant id */
+    delete: operations["admin-remove-role-grant"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/roles/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** One RBAC role */
+    get: operations["admin-get-role"];
+    put?: never;
+    post?: never;
+    /** Delete a non-system RBAC role */
+    delete: operations["admin-delete-role"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/roles/{id}/grants": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Add one permission grant to a role */
+    post: operations["admin-add-role-grant"];
     delete?: never;
     options?: never;
     head?: never;
@@ -463,6 +549,41 @@ export interface paths {
     head?: never;
     /** Edit a user (main character, active/admin flags) */
     patch: operations["admin-update-user"];
+    trace?: never;
+  };
+  "/api/v1/admin/users/{id}/roles": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Roles held directly by one user */
+    get: operations["admin-user-roles"];
+    put?: never;
+    /** Grant a role to a user */
+    post: operations["admin-assign-user-role"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/users/{id}/roles/{role_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Revoke a role from a user */
+    delete: operations["admin-revoke-user-role"];
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   "/api/v1/alliances": {
@@ -2387,6 +2508,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/me/permissions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The caller's own effective permissions */
+    get: operations["list-my-permissions"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/me/share-links": {
     parameters: {
       query?: never;
@@ -2781,6 +2919,20 @@ export interface components {
       /** @description The scope string, verbatim and unparsed (Principle 14). */
       scope: string;
     };
+    AddGrantInBody: {
+      /**
+       * Format: uri
+       * @description A URL to the JSON Schema for this object.
+       * @example https://example.com/schemas/AddGrantInBody.json
+       */
+      readonly $schema?: string;
+      /**
+       * @description deny always wins over allow (internal/rbac's absolute deny precedence).
+       * @enum {string}
+       */
+      effect: "allow" | "deny";
+      permission: string;
+    };
     AdvancePinInBody: {
       /**
        * Format: uri
@@ -2790,6 +2942,16 @@ export interface components {
       readonly $schema?: string;
       /** @description YYYY-MM-DD */
       new_pin: string;
+    };
+    AssignRoleInBody: {
+      /**
+       * Format: uri
+       * @description A URL to the JSON Schema for this object.
+       * @example https://example.com/schemas/AssignRoleInBody.json
+       */
+      readonly $schema?: string;
+      /** Format: uuid */
+      role_id: string;
     };
     "CollectionMapStringInterface {}": {
       /**
@@ -2826,6 +2988,16 @@ export interface components {
       /** @description Shown once — HANGAR stores only its hash. */
       secret: string;
       token_id: string;
+    };
+    CreateRoleInBody: {
+      /**
+       * Format: uri
+       * @description A URL to the JSON Schema for this object.
+       * @example https://example.com/schemas/CreateRoleInBody.json
+       */
+      readonly $schema?: string;
+      description?: string;
+      name: string;
     };
     CreateShareLinkInBody: {
       /**
@@ -3506,6 +3678,35 @@ export interface operations {
       };
     };
   };
+  "admin-permissions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
   "admin-platforms": {
     parameters: {
       query?: never;
@@ -3744,6 +3945,166 @@ export interface operations {
       cookie?: never;
     };
     requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-create-role": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateRoleInBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ItemMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-remove-role-grant": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description HANGAR-assigned UUID. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-get-role": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description HANGAR-assigned UUID. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ItemMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-delete-role": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description HANGAR-assigned UUID. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-add-role-grant": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AddGrantInBody"];
+      };
+    };
     responses: {
       /** @description OK */
       200: {
@@ -4061,6 +4422,103 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["ItemMapStringInterface {}"];
         };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-user-roles": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description HANGAR-assigned UUID. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-assign-user-role": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description User id. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AssignRoleInBody"];
+      };
+    };
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-revoke-user-role": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description User id. */
+        id: string;
+        role_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Error */
       default: {
@@ -7732,6 +8190,35 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ReauthorizeOutBody"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "list-my-permissions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionMapStringInterface {}"];
         };
       };
       /** @description Error */

@@ -245,3 +245,98 @@ func TestServerHeadersAlwaysWin(t *testing.T) {
 		require.LessOrEqual(t, req.MaxTokens-used, req.MaxTokens, "available must never exceed max_tokens")
 	})
 }
+
+// TestReconcileIgnoresInFlightReservations — PHASE 20.2, found by running
+// the system rather than by reading it.
+//
+// Within a minute of B29's wiring going live against real ESI, the
+// development installation reported an `esi_ledger_divergence` of 10 on
+// `char-location` against Gate 1.3's tolerance of 1, on an installation
+// with no errors and nothing wrong with it. The cause: reconciliation
+// compared the server's X-Ratelimit-Remaining against local availability
+// INCLUDING in-flight reservations.
+//
+// A reservation is HANGAR's prediction of a request that has not finished,
+// so the server's reading cannot possibly have counted it. Including it
+// makes local look lower than the server, which drives the reconciler to
+// evict settled entries — forgiving consumption that really happened. The
+// reservation then settles at a cost lower than the reserved 5, local now
+// looks HIGHER than the server, and the next response injects a synthetic
+// entry to compensate. The two directions chase each other forever; the
+// live bucket had accumulated six synthetic entries worth 15.
+func TestReconcileIgnoresInFlightReservations(t *testing.T) {
+	ctx := context.Background()
+	clock := &fakeClock{now: time.Now()}
+	l := NewLedgerSolo(clock)
+
+	const maxTokens = 100
+	req := AcquireRequest{Group: "g", UserKey: "u", MaxTokens: maxTokens, Window: time.Minute, RequestTimeout: time.Minute}
+
+	// One settled 2XX: settled consumption is 2, so settled availability is 98.
+	settled, err := l.Acquire(ctx, req)
+	require.NoError(t, err)
+	require.NoError(t, l.Settle(ctx, settled, Cost2XX, clock.Now()))
+
+	// One request still in flight: it holds a worst-case reservation of 5,
+	// so ACQUIRE-side availability is 93 — but the server has answered
+	// nothing about it, and its own header still says 98.
+	inFlight, err := l.Acquire(ctx, req)
+	require.NoError(t, err)
+
+	require.NoError(t, l.Reconcile(ctx, "g", "u", maxTokens, 98))
+
+	// Nothing should have changed: the server agrees with settled
+	// consumption exactly. Before the fix, the reconciler saw 93 against 98
+	// and evicted the settled entry to close a gap that was not there.
+	sh := shardFor(l.shards, bucketKey("g", "u"))
+	sh.mu.Lock()
+	b := sh.buckets[bucketKey("g", "u")]
+	settledCost, entries, reservations := b.settledCost(), b.ledger.Len(), len(b.reserved)
+	sh.mu.Unlock()
+
+	require.Equal(t, 1, entries, "the settled entry must survive — the server never asked for it to be forgiven")
+	require.Equal(t, int(Cost2XX), settledCost, "settled consumption must be untouched")
+	require.Equal(t, 1, reservations, "the in-flight reservation must survive reconciliation")
+
+	// And the acquire path must STILL count the reservation — that is the
+	// whole point of predictive reservation, and this fix must not weaken it.
+	sh.mu.Lock()
+	acquireView := b.available()
+	sh.mu.Unlock()
+	require.Equal(t, maxTokens-int(Cost2XX)-int(CostReserved), acquireView,
+		"acquire availability must keep charging the in-flight reservation the worst case")
+
+	_ = inFlight
+}
+
+// TestReconcileStillConvergesOnRealDisagreement is the other half: with no
+// reservation in flight, "the server always wins" must still work in both
+// directions, or the fix above would have turned reconciliation off.
+func TestReconcileStillConvergesOnRealDisagreement(t *testing.T) {
+	ctx := context.Background()
+	clock := &fakeClock{now: time.Now()}
+	l := NewLedgerSolo(clock)
+
+	const maxTokens = 100
+	req := AcquireRequest{Group: "g", UserKey: "u", MaxTokens: maxTokens, Window: time.Minute, RequestTimeout: time.Minute}
+	res, err := l.Acquire(ctx, req)
+	require.NoError(t, err)
+	require.NoError(t, l.Settle(ctx, res, Cost2XX, clock.Now()))
+
+	settledAvailable := func() int {
+		sh := shardFor(l.shards, bucketKey("g", "u"))
+		sh.mu.Lock()
+		defer sh.mu.Unlock()
+		return sh.buckets[bucketKey("g", "u")].settledAvailable()
+	}
+	require.Equal(t, 98, settledAvailable())
+
+	// Server reports LOWER: converge downward within one request.
+	require.NoError(t, l.Reconcile(ctx, "g", "u", maxTokens, 90))
+	require.Equal(t, 90, settledAvailable(), "a synthetic entry must close the gap the server reported")
+
+	// Server reports HIGHER: converge upward, never above max_tokens.
+	require.NoError(t, l.Reconcile(ctx, "g", "u", maxTokens, 200))
+	require.LessOrEqual(t, settledAvailable(), maxTokens, "never above max_tokens (§5.5)")
+	require.Equal(t, maxTokens, settledAvailable())
+}

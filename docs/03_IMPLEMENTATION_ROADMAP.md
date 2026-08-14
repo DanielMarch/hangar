@@ -2030,8 +2030,8 @@ build that already worked, which is the thing a gate is supposed to be evidence 
 | Sub-phase | Owns | Closes | Gate it unblocks |
 | :-- | :-- | :-- | :-- |
 | **20.1** | Specification reconciliation, the metric surface, the reachability guard | B36 + the two measured spec corrections | prerequisite for 1, 2, 3, 7 |
-| **20.2** | ESI gateway correctness wiring | B23, B28, B29, B31, ~~B37~~, ~~B38~~ | Gate 1 |
-| **20.3** | Identity, RBAC and revocation wiring | B26, B27, B32, B35 | Gate 2 |
+| **20.2** | ESI gateway correctness wiring | ~~B23~~, ~~B28~~, ~~B29~~, ~~B31~~, ~~B37~~, ~~B38~~, ~~B39~~, ~~B40~~, B26 (surface half) | Gate 1 |
+| **20.3** | Identity, RBAC and revocation wiring | B27, B32, B35 (B26 closed early in 20.2 — see below) | Gate 2 |
 | **20.4** | Alert generation wiring | B25 | Gate 3 |
 | **20.5** | Data completeness and remaining surfaces | B22, B24, B30, B33, B34 | Gate 4 |
 | **20.6** | `/api/v2` shim route coverage | Gate 7's coverage requirement | Gate 7 |
@@ -2095,6 +2095,129 @@ passes when it is restored; the audit's defect register and the gate document no
 
 ---
 
+### Phase 20.2 — ESI gateway correctness wiring
+
+**Objective.** Make the gateway's tested-but-uncalled pieces run, against real traffic, and build
+Gate 1's harness without running Gate 1.
+
+**Depends on.** Phase 20.1 (the metric surface and the reachability guard) and Phase 20.1.1 (the
+sync engine actually polling, which is what made this phase verifiable rather than theoretical).
+
+**Closed.** B23, B28, B29, B31, B39, B40, and the surface half of B26.
+
+**The decisions, and the reasoning that is not recoverable from the diff.**
+
+* **B29 — one classification point.** `internal/esi.Client.Do` called `ClassifyCost` and nothing
+  else, so 5.5's reconciliation, its 429 snooze and its headerless-429 signal had no live
+  implementation at all. `Do` now calls `ClassifyResponse` once and every branch reads its
+  `Outcome`. `X-Ratelimit-Limit`'s ceiling wins over the catalogue's when the server sends one
+  (5.5: "reconciled from `X-Ratelimit-Limit`"), and the reconciler is fed
+  `Request.RateLimitRealMax` — the UNREDUCED ceiling — so `char-notification`'s five-token
+  call-site reserve can never desync the ledger from the truth it exists to import.
+* **B29 — two queries deleted rather than wired.** `IncrementErrorBudget` and
+  `ResetErrorBudgetWindow` were listed as uncalled. They are the superseded halves of
+  `RecordErrorAgainstBudget`, whose single atomic `UPDATE` exists specifically to remove the
+  read-then-branch-then-write race those two reintroduce. Giving them callers to satisfy an
+  allowlist would be the allowlist wagging the codebase. **Correction on the record:**
+  `app.esi_error_budget` reading `error_count = 0` was *not* evidence of a missing caller —
+  `Governor2.RecordError` has been reachable from `Client.Do` since Phase 7, and every one of the
+  installation's 1371 sync runs returned 200 or 304. Zero was the correct reading.
+* **A refusal is not a failure.** Governor 1 exhaustion, a Governor 2 pause, and either breaker
+  opening all used to reach River as failed jobs. 5.5 is explicit that the caller "snoozes the
+  subscription; it does not spin", so all four — plus a real 429, plus "no eligible acting
+  character" — now write `app.sync_subscription.snoozed_until` and a `sync_run` row naming the
+  reason. This is what finally gave `SnoozeSyncSubscription` a caller, six phases after the
+  column was added.
+* **B28 — the entity breaker sits BESIDE re-election, not instead of it.** They answer different
+  questions and therefore cannot disagree: the acting-character history answers *which* character
+  acts, the breaker answers *whether* to call at all. Five consecutive 403s on an (entity, route)
+  pair means five attempts, each of which re-elected afresh from a pool ordered by fewest recent
+  403s — so the viable candidates have already been walked, and continuing spends Governor 2's
+  installation-wide budget on a request that cannot succeed. One 2XX closes the circuit and clears
+  that character's history. The probe interval is 15 minutes against the route breaker's 60
+  seconds, because a 5XX clears when ESI recovers and five 403s clear when a human grants a
+  corporation role in-game.
+* **B28's observability half.** `CorporationWorker.Work` returned `nil` on
+  `ErrNoEligibleActingCharacter` and recorded *nothing*, leaving the subscription at
+  `last_status = NULL` forever — the same class of silence as the "/status is scheduled" lie
+  20.1.1 closed. It now writes one finished `sync_run` with
+  `outcome = "unavailable:no_eligible_acting_character"` and snoozes. It deliberately does not
+  touch `last_status`: that column holds an HTTP status, and no request was made.
+* **B31 — 5.9's two open questions, settled.** `internal/esi/pagination` is now the single
+  implementation and `internal/sync/worker` calls it.
+  **Concurrency: the spec wins, and the walker fans out at 4.** It is a cap rather than a quota,
+  and it cannot cause a breach — every page goes through `Client.Do`, so every page takes a
+  Governor 1 reservation, and a walk with no budget is refused and snoozed rather than admitted.
+  The serial walker was never safer, only slower.
+  **Torn-set detection: the stricter live reading wins, and 5.9 is tightened to match.** A page
+  that disagrees with page 1 about whether it carries `Last-Modified` at all is TORN. The lenient
+  reading treated the absence of the evidence the rule is built on as evidence of intactness; the
+  cost of the strict reading being wrong is one discarded fetch, and the cost of the lenient one
+  being wrong is missing rows nobody notices.
+* **B31 — the cursor mechanism has a consumer.** `GET /corporations/{id}/projects` returns
+  `{cursor, projects}`; 20.1.1 captured the cursor and did not follow it. The walk now runs from
+  the start-of-set sentinel, echoes each opaque cursor back verbatim, and reassembles ONE envelope
+  of the same shape so the route's handler needs no knowledge that four requests produced it. No
+  torn-set check is applied to a cursor walk: 5.9 states that rule under `page` only, and the
+  cursor parameters are documented as walking *forwards in time* over a set that may be growing.
+* **B31, in passing.** Phase 7's recorded "KNOWN GAP" — the character wallet journal and six other
+  character routes are page-paginated and `CharacterWorker` did not walk them, so only page 1 ever
+  synced — is closed by the same shared walker.
+* **B23 — the ESI language is installation-wide.** `HANGAR_LOCALE` (default `en`), validated at
+  boot against `internal/i18n`'s own table. Not per acting user: background sync is the
+  overwhelming majority of HANGAR's ESI traffic and has no acting user, and the resolved language
+  is part of the cache key (5.3), so a per-user value would fragment one shared cache up to
+  ninefold. **Upgrade note, and it is not cosmetic:** the resolved language was already in the
+  cache key and was previously empty, so this change alters every key. A deployment taking this
+  version re-fetches everything once — `app.esi_cache_entry`'s old rows are never read again and
+  age out on their own. Plan the upgrade for a quiet window on a large installation. The language
+  is also now SENT as `Accept-Language`, which it never was; keying on a language the request did
+  not ask for was the latent half of the same defect.
+* **B40 — the first administrator.** A freshly authenticated SSO user held ZERO permissions and no
+  route existed by which anyone could grant them one. The decision, from the three options on the
+  table: **first-login promotion**, gated on a property of the database rather than on row order —
+  `internal/rbac.BootstrapFirstAdmin` promotes the authenticating user to the seeded `admin` role
+  if and only if NOBODY currently holds an allowed `superuser` grant by either path, all inside one
+  transaction so two simultaneous first logins cannot both promote. An operator who has already
+  curated `admin`'s grants keeps their curation. `hangar admin bootstrap-token` is kept and
+  unchanged, but an installation whose only route to a usable browser session is a shell command
+  on the host cannot be verified in a browser, which is what was blocking this phase.
+* **B26's surface half, moved here.** The full role-management surface is registered
+  (`internal/api/v1/admin_roles.go`), `GET /api/v1/me/permissions` exists, and — a defect found on
+  the way — `PATCH /api/v1/admin/users/{id}` had declared `is_active` and `is_admin` since Phase 15
+  and silently dropped both. Separately, the squad membership and squad-role endpoints called the
+  RAW generated queries, bypassing `internal/rbac`'s wrappers: the rows were written and
+  `app.effective_permission` was never recomputed, so adding somebody to a role-granting squad
+  changed no permission they actually held. They go through the wrappers now, and the two
+  set-replacing handlers stopped discarding their errors.
+* **B39 — not reproducible, and fixed anyway.** The blank unauthenticated `GET /` did not
+  reproduce. What the investigation found is that `web/src/routes/__root.tsx` declared no
+  `errorComponent`, and TanStack Router renders NOTHING for an error with no handler up the tree —
+  so any throw on the unauthenticated path produces exactly the reported symptom, whatever threw.
+  A root `errorComponent` and `notFoundComponent` now exist. `web/src/main.tsx`'s global
+  `retry: 1` also became a retry predicate: a 4xx is definitionally not transient, and every 401
+  and 403 was being issued twice.
+
+**Gate 1's instrumentation, per release-gate rule 7.** `esi_429_total{has_headers}`,
+`esi_429_headerless_total{group}`, `esi_420_total` and `esi_error_limit_remaining` are declared
+here, with the wiring that moves them, and nowhere earlier. No label anywhere scales with
+character count.
+
+**Gate 1's harness, per release-gate rule 6.** `test/load` holds the recording proxy — a genuine
+floating window, not a refill bucket, because a refill proxy would certify the client behaviour
+5.5 prohibits — Governor 2's fixed 60-second installation-wide window, 1.3's injection schedule,
+the /metrics scraper and the seven 1.5 evidence artefacts. It runs as an integration test.
+**Gate 1 itself is not run in this phase**; 20.8 runs it against a release candidate at N=1 and
+N=3.
+
+**Exit criteria.** Both reachability guards pass with the closed entries removed; the harness's
+integration suite proves each 1.3 row against the real client; the installation polls real ESI
+with reconciliation moving `app.esi_ledger_bucket.server_remaining`; and a real character can log
+in through a browser and see their own data.
+
+
+---
+
 ## Cross-phase edge-case register
 
 Consolidated so the implementing agent can scan for the ones relevant to the current phase.
@@ -2121,7 +2244,7 @@ Consolidated so the implementing agent can scan for the ones relevant to the cur
 | 14 | `owner` hash change | invalidate all tokens; urgent revocation | 5, 11 |
 | 15 | Concurrent refresh rotation | advisory lock, re-read inside the lock | 5 |
 | 16 | Novel scope grammar | ingest and surface; no regex | 5 |
-| 17 | Torn page set (`Last-Modified` mismatch) | discard whole payload, retry | 3, 8 |
+| 17 | Torn page set (`Last-Modified` mismatch) | discard whole payload, retry — **and a page that disagrees about whether the validator is PRESENT is torn too (20.2)** | 3, 8, 20.2 |
 | 18 | `X-Pages` absent | treat as one page | 3 |
 | 19 | Data-level 404 (`/ship` while docked) | data, not a breaker failure | 7 |
 | 20 | `ref_type` unseen value | record in `open_vocabulary`, store the row | 8 |
@@ -2151,3 +2274,6 @@ Consolidated so the implementing agent can scan for the ones relevant to the cur
 | 44 | Pin advance without a preview **(B13)** | preview is a separate non-mutating endpoint; advance validates `D_max` server-side and records a real diff, never `{}` | 18 |
 | 45 | Pin preview showing no route changes | "nothing changes" is an answer, not an empty state — render it explicitly | 18 |
 | 46 | SPA deep link on hard navigation | unknown non-asset paths fall back to `index.html`; `/api`, `/auth`, `/healthz` still 404 honestly | 16, 17 |
+| 47 | Cursor-paginated route (`{cursor, items}`) | walk from the start-of-set sentinel, echo the opaque cursor verbatim, reassemble ONE envelope; **no torn-set check — 5.9 states that rule under `page` only** | 20.2 |
+| 48 | A gateway refusal (no budget, paused, either breaker) | snooze the subscription and record why; never a failed job, never a retry loop | 20.2 |
+| 49 | An installation with no administrator | the first authenticating user is promoted, gated on "nobody holds superuser", inside one transaction | 20.2 |

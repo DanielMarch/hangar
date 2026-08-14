@@ -2,13 +2,13 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/riverqueue/river"
 
 	"github.com/hangar-project/hangar/internal/esi"
@@ -269,11 +269,22 @@ func (w *CorporationWorker) Work(ctx context.Context, job *river.Job[planner.Syn
 	if err != nil {
 		// No eligible director — not a hard failure (a corp with no
 		// director token has no data, which must render as unavailable,
-		// not as an empty list per the roadmap edge case). Leave the
-		// subscription's schedule untouched by recording nothing; the next
-		// scheduled attempt tries again.
+		// not as an empty list per the roadmap edge case).
+		//
+		// ── PHASE 20.2: BUT SAY SO ───────────────────────────────────────
+		// This used to `return nil` and record NOTHING. The subscription
+		// then sat at last_status = NULL forever with no sync_run row and
+		// no explanation anywhere — the same class of silence as the
+		// "/status is scheduled" lie 20.1.1 closed, and indistinguishable
+		// on every admin surface from a route that has simply never come
+		// due. It also re-ran on every planner tick, electing and failing,
+		// for a condition that only clears when a human grants a
+		// corporation role in-game.
+		//
+		// Now: one sync_run row saying exactly why, and a snooze so the
+		// retry cadence matches how fast the cause can actually change.
 		if errors.Is(err, sync.ErrNoEligibleActingCharacter) {
-			return nil
+			return w.recordUnavailable(ctx, s, args.SubscriptionID, err)
 		}
 		return fmt.Errorf("worker: electing acting character for corporation %d route %s: %w", args.EntityID, sub.RouteID, err)
 	}
@@ -342,9 +353,45 @@ func (w *CorporationWorker) Work(ctx context.Context, job *river.Job[planner.Syn
 	return syncErr
 }
 
+// recordUnavailable writes one finished sync_run row explaining why this
+// attempt produced nothing, and snoozes the subscription for as long as the
+// cause plausibly persists.
+//
+// It deliberately does NOT touch last_status. That column holds an HTTP
+// status, and no request was made — writing a synthetic 403 there would be
+// a lie that an operator would reasonably act on by re-checking a token
+// that is perfectly fine. app.sync_run.outcome is an open vocabulary and is
+// the right place for a non-HTTP outcome.
+func (w *CorporationWorker) recordUnavailable(ctx context.Context, s *store.Store, subscriptionID uuid.UUID, cause error) error {
+	r, ok := classifyRefusal(cause, w.Policy.TTLFloor, time.Now())
+	if !ok {
+		return cause
+	}
+	run, err := s.StartSyncRun(ctx, subscriptionID)
+	if err != nil {
+		return fmt.Errorf("worker: starting sync run for %s: %w", subscriptionID, err)
+	}
+	outcome := r.reason
+	zero := int32(0)
+	if err := s.FinishSyncRun(ctx, gen.FinishSyncRunParams{
+		RunID: run.RunID, Status: nil, Outcome: &outcome,
+		Error: errString(cause), RowsAffected: &zero,
+	}); err != nil {
+		return fmt.Errorf("worker: finishing sync run for %s: %w", subscriptionID, err)
+	}
+	return snoozeRefusal(ctx, s, subscriptionID, r)
+}
+
 const (
 	walletJournalPath      = "/corporations/{corporation_id}/wallets/{division}/journal"
 	walletTransactionsPath = "/corporations/{corporation_id}/wallets/{division}/transactions"
+
+	// projectsPath is the one route in HANGAR's scope whose §5.9 pagination
+	// mechanism is `cursor`, not `page` — see fetchAllCursorPages.
+	// projectsItemsField is the array key inside its CorporationsProjectsListing
+	// envelope, verbatim from the spec.
+	projectsPath       = "/corporations/{corporation_id}/projects"
+	projectsItemsField = "projects"
 
 	// Phase 8.1: the detail routes Phase 8 left unwired (see this file's
 	// original corporationDispatch comment, which described a
@@ -386,12 +433,14 @@ func (w *CorporationWorker) doWalletDivisionSync(ctx context.Context, s *store.S
 				"corporation_id": strconv.FormatInt(corporationID, 10),
 				"division":       strconv.FormatInt(int64(division), 10),
 			},
-			AccessToken:     accessToken,
-			CacheMode:       derefStr(route.CacheMode),
-			RateLimitGroup:  derefStr(route.RateLimitGroup),
-			RateLimitMax:    BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
-			RateLimitWindow: sync.IntervalToDuration(route.RateLimitWindow),
-			UserKey:         fmt.Sprintf("hangar:%d", characterID),
+			AccessToken:      accessToken,
+			CacheMode:        derefStr(route.CacheMode),
+			RateLimitGroup:   derefStr(route.RateLimitGroup),
+			RateLimitMax:     BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
+			RateLimitRealMax: ReconcileRateLimitMax(derefInt32(route.RateLimitMax)),
+			RateLimitWindow:  sync.IntervalToDuration(route.RateLimitWindow),
+			UserKey:          fmt.Sprintf("hangar:%d", characterID),
+			EntityID:         corporationID,
 		}
 
 		var resp *esi.Response
@@ -402,6 +451,9 @@ func (w *CorporationWorker) doWalletDivisionSync(ctx context.Context, s *store.S
 			resp, doErr = w.Gateway.Do(ctx, baseReq)
 		}
 		if doErr != nil {
+			if r, ok := classifyRefusal(doErr, w.Policy.TTLFloor, time.Now()); ok {
+				return totalRows, r.reason, snoozeRefusal(ctx, s, sub.SubscriptionID, r)
+			}
 			return totalRows, normalize.Outcome(0, true), fmt.Errorf("worker: division %d of %s: %w", division, route.UpstreamPath, doErr)
 		}
 
@@ -442,6 +494,9 @@ func (w *CorporationWorker) doWalletDivisionSync(ctx context.Context, s *store.S
 		case http.StatusNotFound:
 			// An unused division legitimately 404s — data, not a failure.
 			continue
+		case http.StatusTooManyRequests:
+			return totalRows, normalize.Outcome(resp.StatusCode, false),
+				snoozeAfter429(ctx, s, sub.SubscriptionID, resp, w.Policy.TTLFloor)
 		default:
 			return totalRows, normalize.Outcome(resp.StatusCode, false), fmt.Errorf("worker: division %d of %s returned status %d", division, route.UpstreamPath, resp.StatusCode)
 		}
@@ -490,24 +545,38 @@ func (w *CorporationWorker) doSync(ctx context.Context, s *store.Store, sub gen.
 
 	baseReq := esi.Request{
 		Method: route.Method, UpstreamPath: route.UpstreamPath,
-		PathParams:      map[string]string{"corporation_id": strconv.FormatInt(corporationID, 10)},
-		AccessToken:     accessToken,
-		CacheMode:       derefStr(route.CacheMode),
-		RateLimitGroup:  derefStr(route.RateLimitGroup),
-		RateLimitMax:    BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
-		RateLimitWindow: sync.IntervalToDuration(route.RateLimitWindow),
-		UserKey:         fmt.Sprintf("hangar:%d", characterID),
-		Validators:      validators,
+		PathParams:       map[string]string{"corporation_id": strconv.FormatInt(corporationID, 10)},
+		AccessToken:      accessToken,
+		CacheMode:        derefStr(route.CacheMode),
+		RateLimitGroup:   derefStr(route.RateLimitGroup),
+		RateLimitMax:     BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
+		RateLimitRealMax: ReconcileRateLimitMax(derefInt32(route.RateLimitMax)),
+		RateLimitWindow:  sync.IntervalToDuration(route.RateLimitWindow),
+		UserKey:          fmt.Sprintf("hangar:%d", characterID),
+		// The 403 breaker is keyed on the CORPORATION, not on the acting
+		// character (§5.8: "one director losing a corporation role must not
+		// break the route for every other corporation"). Keying it on the
+		// character would open a circuit that the very next attempt's
+		// re-election makes irrelevant, and would never notice a
+		// corporation whose whole director pool has lost the role.
+		EntityID:   corporationID,
+		Validators: validators,
 	}
 
 	var resp *esi.Response
 	var doErr error
-	if pagePaginatedRoutes[route.UpstreamPath] {
+	switch {
+	case route.UpstreamPath == projectsPath:
+		resp, doErr = fetchAllCursorPages(ctx, w.Gateway, baseReq, projectsItemsField)
+	case pagePaginatedRoutes[route.UpstreamPath]:
 		resp, doErr = fetchAllPages(ctx, w.Gateway, baseReq)
-	} else {
+	default:
 		resp, doErr = w.Gateway.Do(ctx, baseReq)
 	}
 	if doErr != nil {
+		if r, ok := classifyRefusal(doErr, w.Policy.TTLFloor, time.Now()); ok {
+			return 0, r.reason, snoozeRefusal(ctx, s, sub.SubscriptionID, r)
+		}
 		return 0, normalize.Outcome(0, true), doErr
 	}
 
@@ -573,101 +642,12 @@ func (w *CorporationWorker) doSync(ctx context.Context, s *store.Store, sub gen.
 		}
 		return 0, outcome, nil
 
+	case http.StatusTooManyRequests:
+		return 0, outcome, snoozeAfter429(ctx, s, sub.SubscriptionID, resp, w.Policy.TTLFloor)
+
 	default:
 		return 0, outcome, fmt.Errorf("worker: unexpected status %d from %s", resp.StatusCode, route.UpstreamPath)
 	}
-}
-
-// fetchAllPages walks a page-paginated route (page=1..X-Pages) and asserts
-// every page's Last-Modified header matches — a mismatch means the
-// dataset changed mid-read (01_ARCHITECTURE.md §5.9's torn-set rule) and
-// the WHOLE assembled payload is discarded, never partially committed.
-// The concatenated body (a JSON array on every Phase 8 page-paginated
-// route) is a synthesized single esi.Response so callers downstream never
-// need to know pagination happened at all.
-func fetchAllPages(ctx context.Context, gw *esi.Client, base esi.Request) (*esi.Response, error) {
-	first := cloneRequestWithPage(base, 1)
-	resp, err := gw.Do(ctx, first)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK || resp.Pages <= 1 {
-		return resp, nil
-	}
-
-	elements, err := splitJSONArray(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("worker: page 1 is not a JSON array: %w", err)
-	}
-	firstLastMod, firstHasLastMod := resp.LastModified, resp.HasLastModified
-
-	for page := 2; page <= resp.Pages; page++ {
-		pageResp, err := gw.Do(ctx, cloneRequestWithPage(base, page))
-		if err != nil {
-			return nil, fmt.Errorf("worker: fetching page %d of %d for %s: %w", page, resp.Pages, base.UpstreamPath, err)
-		}
-		if pageResp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("worker: page %d of %s returned status %d mid-walk", page, base.UpstreamPath, pageResp.StatusCode)
-		}
-		if firstHasLastMod != pageResp.HasLastModified || (firstHasLastMod && !firstLastMod.Equal(pageResp.LastModified)) {
-			return nil, fmt.Errorf("worker: torn page set for %s: Last-Modified changed between page 1 and page %d — discarding, will retry next scheduled attempt", base.UpstreamPath, page)
-		}
-		more, err := splitJSONArray(pageResp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("worker: page %d of %s is not a JSON array: %w", page, base.UpstreamPath, err)
-		}
-		elements = append(elements, more...)
-	}
-
-	combined := joinJSONArray(elements)
-	return &esi.Response{
-		StatusCode: http.StatusOK, Body: combined, ETag: resp.ETag,
-		LastModified: resp.LastModified, HasLastModified: resp.HasLastModified, Pages: resp.Pages,
-	}, nil
-}
-
-func cloneRequestWithPage(base esi.Request, page int) esi.Request {
-	req := base
-	q := base.Query
-	if q == nil {
-		q = make(map[string][]string)
-	} else {
-		cloned := make(map[string][]string, len(q))
-		for k, v := range q {
-			cloned[k] = v
-		}
-		q = cloned
-	}
-	q["page"] = []string{strconv.Itoa(page)}
-	req.Query = q
-	return req
-}
-
-// splitJSONArray decodes a JSON array body into its raw element messages
-// without re-marshalling them (preserving exact upstream byte content —
-// important for money fields' decimal precision), for later concatenation
-// across pages.
-func splitJSONArray(body []byte) ([]json.RawMessage, error) {
-	var elements []json.RawMessage
-	if err := json.Unmarshal(body, &elements); err != nil {
-		return nil, err
-	}
-	return elements, nil
-}
-
-// joinJSONArray re-assembles a slice of raw JSON elements into one JSON
-// array body.
-func joinJSONArray(elements []json.RawMessage) []byte {
-	out := make([]byte, 0, 2+len(elements)*32)
-	out = append(out, '[')
-	for i, e := range elements {
-		if i > 0 {
-			out = append(out, ',')
-		}
-		out = append(out, e...)
-	}
-	out = append(out, ']')
-	return out
 }
 
 // fanoutDetailItem is one candidate detail call fanoutDetail should make:
@@ -717,13 +697,18 @@ func (w *CorporationWorker) fanoutDetail(
 		resp, doErr := w.Gateway.Do(ctx, esi.Request{
 			Method: route.Method, UpstreamPath: route.UpstreamPath,
 			PathParams: pathParams, Query: query, AccessToken: accessToken,
-			CacheMode:       derefStr(route.CacheMode),
-			RateLimitGroup:  derefStr(route.RateLimitGroup),
-			RateLimitMax:    BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
-			RateLimitWindow: sync.IntervalToDuration(route.RateLimitWindow),
-			UserKey:         fmt.Sprintf("hangar:%d", characterID),
+			CacheMode:        derefStr(route.CacheMode),
+			RateLimitGroup:   derefStr(route.RateLimitGroup),
+			RateLimitMax:     BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
+			RateLimitRealMax: ReconcileRateLimitMax(derefInt32(route.RateLimitMax)),
+			RateLimitWindow:  sync.IntervalToDuration(route.RateLimitWindow),
+			UserKey:          fmt.Sprintf("hangar:%d", characterID),
+			EntityID:         corporationID,
 		})
 		if doErr != nil {
+			if r, ok := classifyRefusal(doErr, w.Policy.TTLFloor, time.Now()); ok {
+				return rowsAffected, r.reason, snoozeRefusal(ctx, s, sub.SubscriptionID, r)
+			}
 			return rowsAffected, normalize.Outcome(0, true), fmt.Errorf("worker: fetching detail for id %d of %s: %w", item.id, route.UpstreamPath, doErr)
 		}
 
@@ -747,6 +732,9 @@ func (w *CorporationWorker) fanoutDetail(
 				return rowsAffected, normalize.Outcome(resp.StatusCode, false), err
 			}
 			return rowsAffected, normalize.Outcome(resp.StatusCode, false), nil
+		case http.StatusTooManyRequests:
+			return rowsAffected, normalize.Outcome(resp.StatusCode, false),
+				snoozeAfter429(ctx, s, sub.SubscriptionID, resp, w.Policy.TTLFloor)
 		default:
 			return rowsAffected, normalize.Outcome(resp.StatusCode, false), fmt.Errorf("worker: detail id %d of %s returned status %d", item.id, route.UpstreamPath, resp.StatusCode)
 		}
@@ -965,14 +953,19 @@ func (w *CorporationWorker) doProjectContributionsFanout(ctx context.Context, s 
 				"corporation_id": strconv.FormatInt(corporationID, 10),
 				"project_id":     p.ProjectID.String(),
 			},
-			AccessToken:     accessToken,
-			CacheMode:       derefStr(route.CacheMode),
-			RateLimitGroup:  derefStr(route.RateLimitGroup),
-			RateLimitMax:    BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
-			RateLimitWindow: sync.IntervalToDuration(route.RateLimitWindow),
-			UserKey:         fmt.Sprintf("hangar:%d", characterID),
+			AccessToken:      accessToken,
+			CacheMode:        derefStr(route.CacheMode),
+			RateLimitGroup:   derefStr(route.RateLimitGroup),
+			RateLimitMax:     BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
+			RateLimitRealMax: ReconcileRateLimitMax(derefInt32(route.RateLimitMax)),
+			RateLimitWindow:  sync.IntervalToDuration(route.RateLimitWindow),
+			UserKey:          fmt.Sprintf("hangar:%d", characterID),
+			EntityID:         corporationID,
 		})
 		if doErr != nil {
+			if r, ok := classifyRefusal(doErr, w.Policy.TTLFloor, time.Now()); ok {
+				return rowsAffected, r.reason, snoozeRefusal(ctx, s, sub.SubscriptionID, r)
+			}
 			return rowsAffected, normalize.Outcome(0, true), fmt.Errorf("worker: fetching contributions for project %s of corp %d: %w", p.ProjectID, corporationID, doErr)
 		}
 
@@ -995,6 +988,9 @@ func (w *CorporationWorker) doProjectContributionsFanout(ctx context.Context, s 
 				return rowsAffected, normalize.Outcome(resp.StatusCode, false), err
 			}
 			return rowsAffected, normalize.Outcome(resp.StatusCode, false), nil
+		case http.StatusTooManyRequests:
+			return rowsAffected, normalize.Outcome(resp.StatusCode, false),
+				snoozeAfter429(ctx, s, sub.SubscriptionID, resp, w.Policy.TTLFloor)
 		default:
 			return rowsAffected, normalize.Outcome(resp.StatusCode, false), fmt.Errorf("worker: contributions fetch for project %s of corp %d returned status %d", p.ProjectID, corporationID, resp.StatusCode)
 		}

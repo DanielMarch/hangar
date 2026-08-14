@@ -322,3 +322,127 @@ func BenchmarkResolve5000Users(b *testing.B) {
 		require.NoError(b, err)
 	}
 }
+
+// ── PHASE 20.2, DEFECT B40 ───────────────────────────────────────────────
+
+// TestFirstLoginPromotesExactlyOneAdministrator is B40's exit criterion. A
+// freshly installed HANGAR seeds `admin` and `member` with NO GRANTS, so
+// before this phase the first SSO user held zero permissions and no route
+// existed by which anyone could grant them one.
+func TestFirstLoginPromotesExactlyOneAdministrator(t *testing.T) {
+	pool := newMigratedPool(t)
+	s := store.New(pool)
+	ctx := context.Background()
+
+	first := seedUser(t, s)
+	promoted, err := rbac.BootstrapFirstAdmin(ctx, pool, first)
+	require.NoError(t, err)
+	require.True(t, promoted, "an installation with no administrator must promote its first authenticated user")
+
+	// The promotion is only real if app.effective_permission carries it —
+	// middleware.RequirePermission reads nothing else, and an unmaterialised
+	// grant is a grant that does not exist (defect B21's second half).
+	row, err := s.GetEffectivePermission(ctx, first, domain.SuperuserPermission)
+	require.NoError(t, err)
+	require.True(t, row.Permitted, "the superuser grant must be materialised, not merely inserted")
+
+	perms, err := s.ListEffectivePermissions(ctx, first)
+	require.NoError(t, err)
+	require.NotEmpty(t, perms, "the first administrator must hold the whole closed set through superuser")
+
+	// The SECOND user logging in is an ordinary member. This is the guard
+	// that stops "first login" meaning "every login".
+	second := seedUser(t, s)
+	promoted, err = rbac.BootstrapFirstAdmin(ctx, pool, second)
+	require.NoError(t, err)
+	require.False(t, promoted, "an installation that already has an administrator must not promote anyone else")
+
+	_, err = s.GetEffectivePermission(ctx, second, domain.SuperuserPermission)
+	require.Error(t, err, "the second user must hold nothing — zero roles is zero permissions")
+}
+
+// TestBootstrapRespectsACuratedAdminRole covers the operator who has
+// already decided what `admin` may do. The role is still assigned — someone
+// has to be able to administer the installation — but its curated grant set
+// is not silently replaced by a superuser grant.
+func TestBootstrapRespectsACuratedAdminRole(t *testing.T) {
+	pool := newMigratedPool(t)
+	s := store.New(pool)
+	ctx := context.Background()
+
+	roles, err := s.ListRoles(ctx)
+	require.NoError(t, err)
+	var adminRole gen.AppRole
+	for _, r := range roles {
+		if r.Name == rbac.BootstrapRoleName {
+			adminRole = r
+		}
+	}
+	require.NotEqual(t, uuid.Nil, adminRole.RoleID, "db/seed/roles.sql must have seeded the admin role")
+
+	// An operator curated the role before anyone logged in.
+	_, err = s.AddRoleGrant(ctx, adminRole.RoleID, "admin.sync.view", "allow")
+	require.NoError(t, err)
+
+	user := seedUser(t, s)
+	promoted, err := rbac.BootstrapFirstAdmin(ctx, pool, user)
+	require.NoError(t, err)
+	require.True(t, promoted)
+
+	grants, err := s.ListRoleGrants(ctx, adminRole.RoleID)
+	require.NoError(t, err)
+	require.Len(t, grants, 1, "a curated admin role must not gain a superuser grant behind the operator's back")
+	require.Equal(t, "admin.sync.view", grants[0].Permission)
+
+	sync, err := s.GetEffectivePermission(ctx, user, "admin.sync.view")
+	require.NoError(t, err)
+	require.True(t, sync.Permitted, "the curated grant must still reach the user")
+}
+
+// TestBootstrapIsSuppressedByADeniedSuperuser pins the agreement between
+// CountSuperuserHolders and internal/rbac.Resolve's absolute deny
+// precedence. A user whose superuser grant is DENIED is not an
+// administrator, so an installation holding only that user still has none —
+// and must still be able to bootstrap one. If the two disagreed, such an
+// installation would be permanently locked out.
+func TestBootstrapIsSuppressedByADeniedSuperuser(t *testing.T) {
+	pool := newMigratedPool(t)
+	s := store.New(pool)
+	ctx := context.Background()
+
+	denied := seedUser(t, s)
+	role, err := rbac.CreateRole(ctx, s, "denied-super-"+uuid.NewString(), nil, false)
+	require.NoError(t, err)
+	_, err = s.AddRoleGrant(ctx, role.RoleID, domain.SuperuserPermission, "allow")
+	require.NoError(t, err)
+	_, err = s.AddRoleGrant(ctx, role.RoleID, domain.SuperuserPermission, "deny")
+	require.NoError(t, err)
+	require.NoError(t, s.AssignUserRole(ctx, denied, role.RoleID, uuid.NullUUID{}))
+
+	live, err := rbac.ResolveLive(ctx, s, denied, domain.SuperuserPermission)
+	require.NoError(t, err)
+	require.False(t, live, "deny beats allow absolutely — this user is not an administrator")
+
+	promoted, err := rbac.BootstrapFirstAdmin(ctx, pool, seedUser(t, s))
+	require.NoError(t, err)
+	require.True(t, promoted,
+		"a denied superuser must not count as an administrator, or the installation can never gain one")
+}
+
+// TestBootstrapNamesAMissingSeededRole — cmd/hangar's SSO hook swallows a
+// bootstrap error so a failed promotion cannot fail a login, which makes
+// the error text the only thing an operator will ever see. It has to say
+// what to do, not just what failed.
+func TestBootstrapNamesAMissingSeededRole(t *testing.T) {
+	pool := newMigratedPool(t)
+	s := store.New(pool)
+	ctx := context.Background()
+
+	_, err := pool.Exec(ctx, "DELETE FROM app.role WHERE name = $1", rbac.BootstrapRoleName)
+	require.NoError(t, err)
+
+	_, err = rbac.BootstrapFirstAdmin(ctx, pool, seedUser(t, s))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "hangar migrate up",
+		"the error must tell an operator what to do, not just what failed")
+}

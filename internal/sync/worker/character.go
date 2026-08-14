@@ -105,14 +105,11 @@ var characterDispatch = map[string]characterHandler{
 		}
 		return res.RowsAffected, nil
 	},
-	// KNOWN GAP: this route is page-paginated the same way the corporation
-	// journal is (X-Pages), but CharacterWorker's doSync (Phase 7) does not
-	// page-walk — none of Phase 7's own routes needed it. Only the
-	// single-page case (ESI's default page=1 response) is wired, so the
-	// route has real, tested coverage rather than none at all. Flagged
-	// rather than silently accepted as "good enough":
-	// worker/corporation.go's fetchAllPages is the correct mechanism and
-	// this route should eventually call it too.
+	// PHASE 20.2 (B31): the Phase 7 "KNOWN GAP" recorded here — this route
+	// is page-paginated (X-Pages) and doSync did not walk it, so only page
+	// 1 ever synced — is closed. characterPagePaginatedRoutes (below) now
+	// routes it through the shared walker before the handler sees a body,
+	// exactly as the corporation journal always has.
 	"/characters/{character_id}/wallet/journal": func(ctx context.Context, s *store.Store, characterID int64, body []byte) (int32, error) {
 		dto, err := handlers.ParseWalletJournalPage(body)
 		if err != nil {
@@ -326,7 +323,7 @@ func (w *CharacterWorker) doSync(ctx context.Context, s *store.Store, sub gen.Ap
 		validators = v
 	}
 
-	resp, doErr := w.Gateway.Do(ctx, esi.Request{
+	baseReq := esi.Request{
 		Method: route.Method, UpstreamPath: route.UpstreamPath,
 		PathParams:     map[string]string{"character_id": strconv.FormatInt(characterID, 10)},
 		AccessToken:    accessToken,
@@ -336,12 +333,28 @@ func (w *CharacterWorker) doSync(ctx context.Context, s *store.Store, sub gen.Ap
 		// char-notification reserve holds budget back from — see
 		// reserve.go. Every other group is unaffected (the helper returns
 		// the route's real ceiling).
-		RateLimitMax:    BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
-		RateLimitWindow: sync.IntervalToDuration(route.RateLimitWindow),
-		UserKey:         fmt.Sprintf("hangar:%d", characterID),
-		Validators:      validators,
-	})
+		RateLimitMax: BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
+		// ...and Phase 20.2's B29 reconciler must see the ceiling WITHOUT
+		// that reserve applied, which is the whole reason
+		// ReconcileRateLimitMax exists (reserve.go's header).
+		RateLimitRealMax: ReconcileRateLimitMax(derefInt32(route.RateLimitMax)),
+		RateLimitWindow:  sync.IntervalToDuration(route.RateLimitWindow),
+		UserKey:          fmt.Sprintf("hangar:%d", characterID),
+		EntityID:         characterID,
+		Validators:       validators,
+	}
+
+	var resp *esi.Response
+	var doErr error
+	if characterPagePaginatedRoutes[route.UpstreamPath] {
+		resp, doErr = fetchAllPages(ctx, w.Gateway, baseReq)
+	} else {
+		resp, doErr = w.Gateway.Do(ctx, baseReq)
+	}
 	if doErr != nil {
+		if r, ok := classifyRefusal(doErr, w.Policy.TTLFloor, time.Now()); ok {
+			return 0, r.reason, snoozeRefusal(ctx, s, sub.SubscriptionID, r)
+		}
 		return 0, normalize.Outcome(0, true), doErr
 	}
 
@@ -392,9 +405,39 @@ func (w *CharacterWorker) doSync(ctx context.Context, s *store.Store, sub gen.Ap
 		}
 		return 0, outcome, nil
 
+	case resp.StatusCode == http.StatusTooManyRequests:
+		// §5.5: charge nothing (Governor 1's cost table already did),
+		// snooze this subscription only, leave siblings alone. It is NOT a
+		// job failure — returning an error here would have River retry on
+		// its own schedule, which is the "do not spin" rule inverted.
+		return 0, outcome, snoozeAfter429(ctx, s, sub.SubscriptionID, resp, w.Policy.TTLFloor)
+
 	default:
 		return 0, outcome, fmt.Errorf("worker: unexpected status %d from %s", resp.StatusCode, route.UpstreamPath)
 	}
+}
+
+// characterPagePaginatedRoutes are the character routes the live spec
+// declares a `page` query parameter for, confirmed against the embedded
+// snapshot.
+//
+// ── PHASE 20.2 (B31): THE KNOWN GAP THIS CLOSES ──────────────────────────
+// Phase 7 recorded, in a comment on the wallet-journal entry of
+// characterDispatch, that these routes are page-paginated and that
+// CharacterWorker did not walk them — so only page 1 was ever synced and a
+// character with more than ~2500 journal entries silently lost the rest.
+// It was left flagged rather than fixed because worker/corporation.go's
+// walker was the only one and it was not shared. B31 makes the walker a
+// single implementation (internal/esi/pagination), so there is no longer a
+// reason for one worker to have pagination and the other not to.
+var characterPagePaginatedRoutes = map[string]bool{
+	"/characters/{character_id}/assets":         true,
+	"/characters/{character_id}/blueprints":     true,
+	"/characters/{character_id}/contacts":       true,
+	"/characters/{character_id}/contracts":      true,
+	"/characters/{character_id}/mining":         true,
+	"/characters/{character_id}/orders/history": true,
+	"/characters/{character_id}/wallet/journal": true,
 }
 
 // doMailBodyFanout fetches the body of every mail header this character
@@ -423,14 +466,26 @@ func (w *CharacterWorker) doMailBodyFanout(ctx context.Context, s *store.Store, 
 				"character_id": strconv.FormatInt(characterID, 10),
 				"mail_id":      strconv.FormatInt(h.MailID, 10),
 			},
-			AccessToken:     accessToken,
-			CacheMode:       derefStr(route.CacheMode),
-			RateLimitGroup:  derefStr(route.RateLimitGroup),
-			RateLimitMax:    BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
-			RateLimitWindow: sync.IntervalToDuration(route.RateLimitWindow),
-			UserKey:         fmt.Sprintf("hangar:%d", characterID),
+			AccessToken:      accessToken,
+			CacheMode:        derefStr(route.CacheMode),
+			RateLimitGroup:   derefStr(route.RateLimitGroup),
+			RateLimitMax:     BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
+			RateLimitRealMax: ReconcileRateLimitMax(derefInt32(route.RateLimitMax)),
+			RateLimitWindow:  sync.IntervalToDuration(route.RateLimitWindow),
+			UserKey:          fmt.Sprintf("hangar:%d", characterID),
+			EntityID:         characterID,
 		})
 		if doErr != nil {
+			// A refusal part-way through the fanout keeps whatever bodies
+			// already committed (each is its own upsert) and snoozes the
+			// rest for the next attempt, which re-reads
+			// ListMailHeadersWithoutBody and picks up exactly where this
+			// one stopped. There is no partial-set hazard here the way
+			// there is for a paged collection: mail bodies are independent
+			// rows, not one dataset read in slices.
+			if r, ok := classifyRefusal(doErr, w.Policy.TTLFloor, time.Now()); ok {
+				return rowsAffected, r.reason, snoozeRefusal(ctx, s, sub.SubscriptionID, r)
+			}
 			return rowsAffected, normalize.Outcome(0, true), fmt.Errorf("worker: fetching body for mail %d of character %d: %w", h.MailID, characterID, doErr)
 		}
 
@@ -453,6 +508,9 @@ func (w *CharacterWorker) doMailBodyFanout(ctx context.Context, s *store.Store, 
 				return rowsAffected, normalize.Outcome(resp.StatusCode, false), err
 			}
 			return rowsAffected, normalize.Outcome(resp.StatusCode, false), nil
+		case http.StatusTooManyRequests:
+			return rowsAffected, normalize.Outcome(resp.StatusCode, false),
+				snoozeAfter429(ctx, s, sub.SubscriptionID, resp, w.Policy.TTLFloor)
 		default:
 			return rowsAffected, normalize.Outcome(resp.StatusCode, false), fmt.Errorf("worker: body fetch for mail %d of character %d returned status %d", h.MailID, characterID, resp.StatusCode)
 		}

@@ -4,6 +4,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
+
+	"github.com/hangar-project/hangar/internal/i18n"
 )
 
 // ErrMissingSecret is wrapped with the offending field's env var name so
@@ -70,6 +73,17 @@ func Validate(cfg *Config) error {
 	case "full", "none":
 	default:
 		errs = append(errs, fmt.Errorf("HANGAR_SYNC_JITTER: invalid value %q (want full|none)", cfg.Sync.Jitter))
+	}
+
+	// PHASE 20.2 (B23). Validated here, at boot, against internal/i18n's
+	// own table — never against a second list, and never deferred to the
+	// first ESI request. The set is enumerated from UILocales() so the
+	// error message cannot drift from what the resolver accepts: adding a
+	// tenth locale to locales.json makes it valid here in the same commit,
+	// with no edit to this file.
+	if _, err := i18n.ResolveESILanguage(cfg.Locale); err != nil {
+		errs = append(errs, fmt.Errorf("HANGAR_LOCALE: invalid value %q (want one of %s)",
+			cfg.Locale, strings.Join(i18n.UILocales(), ", ")))
 	}
 
 	// Discord is strictly optional (RedisConfig's pattern) — these checks

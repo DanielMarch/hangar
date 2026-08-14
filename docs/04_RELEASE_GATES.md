@@ -46,7 +46,9 @@ remediation, not a precedent.
 
 | Gate | Metric / artefact | Intended phase | Actual |
 | :-- | :-- | :-- | :-- |
-| 1 | `esi_ledger_divergence`, `esi_ledger_mode`, `esi_replica_live_count`, `esi_429_total{has_headers}`, `esi_420_total`, `esi_error_limit_remaining` | 4 | **20.2**, with the B28/B29 wiring that makes them move |
+| 1 | `esi_ledger_divergence`, `esi_ledger_mode`, `esi_replica_live_count` | 4 | 20.1 — **landed** |
+| 1 | `esi_429_total{has_headers}`, `esi_429_headerless_total{group}`, `esi_420_total`, `esi_error_limit_remaining` | 4 | **20.2 — landed**, with the B28/B29 wiring that makes them move |
+| 1 | `test/load/gate1_esi.go` + the recording proxy | — | **20.2 — landed**; exercised by its own integration suite, and NOT run as a gate until 20.8 |
 | 2 | `app.provisioning_audit.event_at` / `platform_call_completed_at`, `provisioning_revocation_latency_seconds` | 11 | **20.3**, with the B26/B27 wiring |
 | 3 | `alert_delivery_total{channel,outcome}`, `alert_dead_letter_depth`, dedupe hash log | 14 | **20.4**, with the B25 wiring |
 | 4 | `docs/BASELINE.md` measured counts, capability→endpoint→phase traceability table | 0, 15 | 0, 15 (+ **20.5**) |

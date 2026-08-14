@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -47,10 +48,16 @@ func NewRegistry() *prometheus.Registry {
 //	esi_ledger_mode              Governor1.Mode() is live via buildGateway
 //	esi_ledger_divergence        computed from app.esi_ledger_bucket/_entry
 //
+// PHASE 20.2 adds the four Gate 1 metrics that B29's wiring makes move, and
+// not one line earlier:
+//
+//	esi_error_limit_remaining    a gauge over app.esi_error_budget, below
+//	esi_429_total{has_headers}   \
+//	esi_429_headerless_total{group}  > counters, in gatewayCounters below,
+//	esi_420_total                /   incremented where the response is classified
+//
 // Deliberately NOT declared here, with the phase that owns each:
 //
-//	esi_429_total, esi_420_total, esi_error_limit_remaining,
-//	esi_429_headerless_total                            → 20.2, with B29
 //	provisioning_revocation_latency_seconds             → 20.3, with B26/B27
 //	alert_delivery_total, alert_dead_letter_depth       → 20.4, with B25
 //
@@ -96,11 +103,58 @@ type DivergenceRow struct {
 	// whose headers have stopped arriving behind a wall of reassuring
 	// zeroes. A nil row contributes no sample at all.
 	ServerRemaining *int64
+
+	// ObservedAt is when that reading arrived, and Window is the bucket's
+	// floating window.
+	//
+	// ── PHASE 20.2: AN EXPIRED READING IS NOT A READING EITHER ───────────
+	// LocalRemaining is computed live at scrape time; ServerRemaining is a
+	// snapshot from the last response that carried X-Ratelimit-Remaining.
+	// Under load those are the same instant — every response settles and
+	// then reconciles the same bucket — so the comparison is exact. On an
+	// IDLE bucket it is not: local consumption ages out of the floating
+	// window by design and climbs back towards max_tokens, while the stored
+	// reading does not move, and the gauge ends up reporting most of the
+	// bucket as divergence.
+	//
+	// Measured on the development installation immediately after B29's
+	// wiring went live: `corp-detail` read 173 against a Gate 1.3 tolerance
+	// of 1, from a reading 69 seconds old on a bucket that had simply not
+	// been polled since. Nothing was wrong with the ledger — the two numbers
+	// described different moments.
+	//
+	// A reading older than one window is therefore dropped rather than
+	// reported, on exactly the same principle as the nil case above: a
+	// subtraction whose operands describe different moments is not a
+	// measurement. Gate 1's own run is unaffected, because under sustained
+	// load every bucket is reconciled on every response. The admin dashboard
+	// still shows the stale reading WITH its age, because "nothing has been
+	// heard from this bucket in a while" is exactly what an operator needs
+	// to see and exactly what this gauge cannot express.
+	ObservedAt *time.Time
+	Window     time.Duration
 }
 
 // DivergenceLister lists the current per-bucket readings.
 type DivergenceLister interface {
 	LedgerDivergence(ctx context.Context) ([]DivergenceRow, error)
+}
+
+// ErrorBudgetReader reports Governor 2's remaining installation-wide error
+// budget for esi_error_limit_remaining (Gate 1.4).
+//
+// `ok` is false when app.esi_error_budget has no row yet — Governor 2's
+// Init creates it, and Init runs in the process that builds the ESI
+// gateway, so a freshly migrated installation genuinely has no reading.
+// That is NOT a remaining budget of zero, which would read as "the
+// installation is about to be paused" for a system that has not made a
+// single request. No reading, no sample.
+//
+// The subtraction (max − error_count) is done by the caller, in cmd/hangar,
+// because the maximum is configuration (HANGAR_ESI_ERROR_LIMIT_MAX) and
+// this package deliberately reads none.
+type ErrorBudgetReader interface {
+	ErrorBudgetRemaining(ctx context.Context) (remaining int64, ok bool, err error)
 }
 
 // gatewayCollector reports the Gate 1 metrics whose subsystems are live, by
@@ -117,13 +171,15 @@ type gatewayCollector struct {
 	replicas      LedgerDivergenceSource
 	mode          ModeSource
 	divergence    DivergenceLister
+	errorBudget   ErrorBudgetReader
 	liveThreshold time.Duration
 	log           *slog.Logger
 
-	replicaCount *prometheus.Desc
-	ledgerMode   *prometheus.Desc
-	ledgerDiv    *prometheus.Desc
-	scrapeErrors *prometheus.CounterVec
+	replicaCount   *prometheus.Desc
+	ledgerMode     *prometheus.Desc
+	ledgerDiv      *prometheus.Desc
+	errorRemaining *prometheus.Desc
+	scrapeErrors   *prometheus.CounterVec
 }
 
 // NewGatewayCollector builds the Phase 20.1 collector. Any of its sources
@@ -134,6 +190,7 @@ func NewGatewayCollector(
 	replicas LedgerDivergenceSource,
 	mode ModeSource,
 	divergence DivergenceLister,
+	errorBudget ErrorBudgetReader,
 	liveThreshold time.Duration,
 	log *slog.Logger,
 ) prometheus.Collector {
@@ -141,7 +198,7 @@ func NewGatewayCollector(
 		log = slog.Default()
 	}
 	return &gatewayCollector{
-		replicas: replicas, mode: mode, divergence: divergence,
+		replicas: replicas, mode: mode, divergence: divergence, errorBudget: errorBudget,
 		liveThreshold: liveThreshold, log: log,
 		replicaCount: prometheus.NewDesc(
 			"esi_replica_live_count",
@@ -155,6 +212,10 @@ func NewGatewayCollector(
 			"esi_ledger_divergence",
 			"Maximum absolute difference, across the buckets of a rate-limit group, between the local ledger's remaining count and the server's X-Ratelimit-Remaining. Gate 1.3 requires max <= 1 per group. Groups the server has not reported on emit no sample.",
 			[]string{"group"}, nil),
+		errorRemaining: prometheus.NewDesc(
+			"esi_error_limit_remaining",
+			"Governor 2's remaining installation-wide error budget in the current fixed window (max minus error_count). Gate 1.4 watches this cross the proactive-pause threshold before any 420 arrives. No sample is emitted until the budget row exists.",
+			nil, nil),
 		scrapeErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "hangar_metric_scrape_errors_total",
 			Help: "Scrapes that could not read a source. A non-zero value means the gauges below are stale, which is not the same as healthy.",
@@ -166,6 +227,7 @@ func (c *gatewayCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.replicaCount
 	ch <- c.ledgerMode
 	ch <- c.ledgerDiv
+	ch <- c.errorRemaining
 	c.scrapeErrors.Describe(ch)
 }
 
@@ -216,8 +278,9 @@ func (c *gatewayCollector) Collect(ch chan<- prometheus.Metric) {
 			// why a user_key label would be a cardinality bomb during the
 			// very run it exists to measure.
 			maxByGroup := make(map[string]int64, len(rows))
+			now := time.Now()
 			for _, row := range rows {
-				if row.ServerRemaining == nil {
+				if row.ServerRemaining == nil || !row.readingIsCurrent(now) {
 					continue
 				}
 				d := row.LocalRemaining - *row.ServerRemaining
@@ -234,7 +297,111 @@ func (c *gatewayCollector) Collect(ch chan<- prometheus.Metric) {
 		}
 	}
 
+	if c.errorBudget != nil {
+		remaining, ok, err := c.errorBudget.ErrorBudgetRemaining(ctx)
+		switch {
+		case err != nil:
+			c.scrapeErrors.WithLabelValues("error_budget").Inc()
+			c.log.WarnContext(ctx, "telemetry: scraping error budget", "error", err)
+		case ok:
+			ch <- prometheus.MustNewConstMetric(c.errorRemaining, prometheus.GaugeValue, float64(remaining))
+		}
+	}
+
 	c.scrapeErrors.Collect(ch)
+}
+
+// ── Gate 1's counters (Phase 20.2, defect B29) ───────────────────────────
+//
+// Counters, not scrape-time gauges, because each is a RATE over events that
+// leave no durable trace: a 429 is answered, snoozed and forgotten, so
+// there is no table to read it back from at scrape time the way
+// esi_ledger_divergence has app.esi_ledger_bucket. That asymmetry is
+// spelled out on gatewayCollector above and is why these live in a separate
+// collector rather than being bolted onto it.
+
+// GatewayCounters is the Prometheus collector behind internal/esi.Observer.
+// One instance per process, registered once, passed to the ESI client.
+type GatewayCounters struct {
+	total429      *prometheus.CounterVec
+	headerless429 *prometheus.CounterVec
+	total420      prometheus.Counter
+}
+
+// NewGatewayCounters builds the counter set.
+//
+// ── LABEL CARDINALITY, THE 20.1 LESSON ───────────────────────────────────
+// `group` is app.esi_route.rate_limit_group: a closed set of a few dozen
+// names from the ingested spec, so it is bounded by the catalogue and not
+// by the installation's size. There is deliberately NO user_key/character
+// label anywhere here — Gate 1 is a 5000-character run, and a per-character
+// label would put tens of thousands of series into Prometheus during the
+// very run these metrics exist to measure. See DivergenceRow's note.
+func NewGatewayCounters() *GatewayCounters {
+	return &GatewayCounters{
+		total429: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "esi_429_total",
+			Help: "429 responses received from ESI, split by whether the response carried X-Ratelimit-* headers at all.",
+		}, []string{"has_headers"}),
+		headerless429: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "esi_429_headerless_total",
+			Help: "429 responses that carried no rate-limit headers (CCP's in-monolith limiters), per rate-limit group. 01_ARCHITECTURE.md §5.5 requires these be charged nothing and snoozed, never read as remaining=0.",
+		}, []string{"group"}),
+		total420: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "esi_420_total",
+			Help: "420 'error limited' responses from ESI. Gate 1.2's pass condition is that this stays at zero: Governor 2's proactive pause is supposed to fire first.",
+		}),
+	}
+}
+
+// Observe429 implements internal/esi.Observer.
+func (c *GatewayCounters) Observe429(group string, hasHeaders bool) {
+	c.total429.WithLabelValues(strconv.FormatBool(hasHeaders)).Inc()
+	if !hasHeaders {
+		c.headerless429.WithLabelValues(labelOrUnset(group)).Inc()
+	}
+}
+
+// Observe420 implements internal/esi.Observer.
+func (c *GatewayCounters) Observe420() { c.total420.Inc() }
+
+// Describe implements prometheus.Collector.
+func (c *GatewayCounters) Describe(ch chan<- *prometheus.Desc) {
+	c.total429.Describe(ch)
+	c.headerless429.Describe(ch)
+	c.total420.Describe(ch)
+}
+
+// Collect implements prometheus.Collector.
+func (c *GatewayCounters) Collect(ch chan<- prometheus.Metric) {
+	c.total429.Collect(ch)
+	c.headerless429.Collect(ch)
+	c.total420.Collect(ch)
+}
+
+// labelOrUnset keeps an empty rate-limit group (a route the spec declares
+// no x-rate-limit for) from producing a label value of "", which reads on a
+// dashboard as a missing label rather than as a real, nameable category.
+func labelOrUnset(group string) string {
+	if group == "" {
+		return "unset"
+	}
+	return group
+}
+
+// readingIsCurrent reports whether the stored server reading and the live
+// local count describe the same moment closely enough to be subtracted —
+// see DivergenceRow.ObservedAt. A row with no window recorded is treated as
+// current, because the alternative is dropping every sample on a schema
+// this code cannot interpret.
+func (r DivergenceRow) readingIsCurrent(now time.Time) bool {
+	if r.ObservedAt == nil {
+		return false
+	}
+	if r.Window <= 0 {
+		return true
+	}
+	return now.Sub(*r.ObservedAt) <= r.Window
 }
 
 // scrapeTimeout bounds every source read in one Collect. A scrape that

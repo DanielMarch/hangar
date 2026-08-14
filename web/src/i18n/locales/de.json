@@ -47,7 +47,13 @@
     "boundaryBody": "Dieser Bereich konnte nicht geladen werden.",
     "retry": "Erneut versuchen",
     "forbiddenTitle": "Kein Zugriff",
-    "forbiddenBody": "Du hast keine Berechtigung, dies anzuzeigen."
+    "forbiddenBody": "Du hast keine Berechtigung, dies anzuzeigen.",
+    "rootTitle": "HANGAR konnte diese Seite nicht darstellen",
+    "rootBody": "Vor dem Laden der Seite ist ein Fehler aufgetreten. Die Details unten sind der Fehler selbst — bitte füge sie jedem Fehlerbericht bei.",
+    "rootSignIn": "Zur Anmeldeseite",
+    "rootReload": "Anwendung neu laden",
+    "notFoundTitle": "Seite nicht gefunden",
+    "notFoundBack": "Zurück zum Dashboard"
   },
   "breadcrumbs": {
     "home": "Start"

@@ -47,7 +47,13 @@
     "boundaryBody": "이 섹션을 불러오지 못했습니다.",
     "retry": "다시 시도",
     "forbiddenTitle": "접근 권한 없음",
-    "forbiddenBody": "이것을 볼 권한이 없습니다."
+    "forbiddenBody": "이것을 볼 권한이 없습니다.",
+    "rootTitle": "HANGAR가 이 페이지를 표시하지 못했습니다",
+    "rootBody": "페이지를 불러오기 전에 오류가 발생했습니다. 아래 내용이 오류 자체이므로 버그 신고 시 함께 첨부해 주세요.",
+    "rootSignIn": "로그인 페이지로 이동",
+    "rootReload": "애플리케이션 다시 불러오기",
+    "notFoundTitle": "페이지를 찾을 수 없습니다",
+    "notFoundBack": "대시보드로 돌아가기"
   },
   "breadcrumbs": {
     "home": "홈"

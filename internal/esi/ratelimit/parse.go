@@ -111,6 +111,19 @@ type Outcome struct {
 	ServerRemaining   int
 	ServerRemainingOK bool
 
+	// ServerMaxTokens/ServerWindow carry X-Ratelimit-Limit's parsed
+	// "<max-tokens>/<window>" pair. §5.5's bucket table says max_tokens is
+	// "from x-rate-limit, reconciled from X-Ratelimit-Limit" — so when the
+	// server states a ceiling, that ceiling is the one reconciliation must
+	// converge against, not whatever the catalogue's x-rate-limit extension
+	// said when it was last ingested. ServerLimitOK is false when the header
+	// is absent or unparseable, in which case the caller keeps its own
+	// catalogue value; a malformed header is never a reason to invent a
+	// ceiling of zero.
+	ServerMaxTokens int
+	ServerWindow    time.Duration
+	ServerLimitOK   bool
+
 	// SnoozeFor is set on a 429: Retry-After's value if present, else
 	// the caller's ttl_floor. Zero means "no snooze required" (never the
 	// case for a 429 in this design — see ClassifyResponse).
@@ -143,6 +156,12 @@ func ClassifyResponse(status int, header http.Header, transportErr bool, ttlFloo
 
 	if remaining, ok := ParseRemaining(header.Get("X-Ratelimit-Remaining")); ok {
 		out.ServerRemaining, out.ServerRemainingOK = remaining, true
+	}
+
+	if raw := header.Get("X-Ratelimit-Limit"); raw != "" {
+		if maxTokens, window, err := ParseRateLimitLimit(raw); err == nil && maxTokens > 0 {
+			out.ServerMaxTokens, out.ServerWindow, out.ServerLimitOK = maxTokens, window, true
+		}
 	}
 
 	if status == http.StatusTooManyRequests {

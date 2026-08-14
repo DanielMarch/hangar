@@ -25,6 +25,7 @@ package reachability
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -46,7 +47,38 @@ import (
 const (
 	analysisGOOS   = "linux"
 	analysisGOARCH = "amd64"
+	// CGO IS PINNED OFF, and it is not optional.
+	//
+	// ── PHASE 20.2: WHAT THIS COSTS WHEN IT IS LEFT INHERITED ────────────
+	// Go defaults CGO_ENABLED to 0 when cross-compiling, so pinning
+	// GOOS=linux from a Windows host normally disables cgo by itself — and
+	// this guard passed for two phases on that accident. It stops being an
+	// accident the moment anything in the environment sets CGO_ENABLED=1,
+	// which `make ci` does on every run, because `go test -race` requires
+	// it. The analysis then tries to type-check runtime/cgo's C sources for
+	// linux using the host's mingw headers and dies on a missing <grp.h>,
+	// and deadcode exits non-zero having analysed nothing:
+	//
+	//     linux_syscall.c:11:10: fatal error: grp.h: No such file or directory
+	//     deadcode: packages contain errors
+	//
+	// Zero is also the CORRECT target regardless of how it is reached:
+	// SRS §9.2 makes CGO_ENABLED=0 contractual for every shipped binary
+	// (see the Makefile's build/build-all and check-static-binary), so a
+	// cgo-enabled analysis would be answering a question about a build
+	// HANGAR does not produce.
+	analysisCGO = "0"
 )
+
+// analysisEnv is the environment every subprocess in this file runs with:
+// the host's, with the analysis target pinned on top.
+func analysisEnv() []string {
+	return append(os.Environ(),
+		"GOOS="+analysisGOOS,
+		"GOARCH="+analysisGOARCH,
+		"CGO_ENABLED="+analysisCGO,
+	)
+}
 
 // deadcodeFormat prints one `package/path.FuncName` per unreachable
 // function. Deliberately NOT the default diagnostic format, which leads
@@ -74,10 +106,23 @@ func TestEveryProductionCallerIsAccountedFor(t *testing.T) {
 
 	analyse := exec.Command(toolPath, "-test=false", "-f="+deadcodeFormat, "./cmd/hangar")
 	analyse.Dir = repoRoot
-	analyse.Env = append(os.Environ(), "GOOS="+analysisGOOS, "GOARCH="+analysisGOARCH)
+	analyse.Env = analysisEnv()
+	// Capture stderr explicitly. deadcode reports an ANALYSIS failure — a
+	// package that will not load — on stderr and writes nothing at all to
+	// stdout, so the original `analyse.Output()` reported the bare and
+	// unactionable "running deadcode failed: exit status 1".
+	//
+	// That is precisely what this guard said during Phase 20.2's `make
+	// ci-strict` run, and the message was worth nothing: the test passed
+	// when re-run by hand, which made it look like flake. It was not. It
+	// was the inherited CGO_ENABLED=1 above, and one line of stderr said so
+	// immediately. A guard that cannot run has to say WHY, or the next
+	// person re-runs it, sees green, and ships.
+	var stderr bytes.Buffer
+	analyse.Stderr = &stderr
 	out, err := analyse.Output()
 	if err != nil {
-		t.Fatalf("running deadcode failed: %v\n%s", err, out)
+		t.Fatalf("running deadcode failed: %v\nstdout:\n%s\nstderr:\n%s", err, out, stderr.String())
 	}
 
 	unreachable := map[string]bool{}
@@ -232,10 +277,12 @@ func TestNoPackageIsAbsentFromTheBinary(t *testing.T) {
 	// The packages currently known to be absent, each with its defect.
 	// Same contract as the allowlist: this shrinks, and an entry that has
 	// become reachable is a failure.
+	// PHASE 20.2 closed two of the three. internal/i18n is reached through
+	// internal/config's HANGAR_LOCALE validation and cmd/hangar's gateway
+	// assembly (B23); internal/esi/pagination is now the single page-walk
+	// implementation, called by internal/sync/worker (B31).
 	known := map[string]string{
-		"internal/sde":            "B22 — the whole SDE import pipeline; closed by Phase 20.5",
-		"internal/i18n":           "B23 — locale resolution, incl. capability 58; closed by Phase 20.2",
-		"internal/esi/pagination": "B31 — dead duplicate of sync/worker's page-walker; closed by Phase 20.2",
+		"internal/sde": "B22 — the whole SDE import pipeline; closed by Phase 20.5",
 	}
 
 	for _, pkg := range absent {
@@ -255,7 +302,7 @@ func goList(t *testing.T, dir string, args ...string) []string {
 	t.Helper()
 	cmd := exec.Command("go", append([]string{"list"}, args...)...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GOOS="+analysisGOOS, "GOARCH="+analysisGOARCH)
+	cmd.Env = analysisEnv()
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("go list %v failed: %v", args, err)

@@ -47,7 +47,13 @@
     "boundaryBody": "Această secțiune nu a putut fi încărcată.",
     "retry": "Reîncearcă",
     "forbiddenTitle": "Fără acces",
-    "forbiddenBody": "Nu ai permisiunea să vezi acest conținut."
+    "forbiddenBody": "Nu ai permisiunea să vezi acest conținut.",
+    "rootTitle": "HANGAR nu a putut afișa această pagină",
+    "rootBody": "A apărut o eroare înainte ca pagina să se încarce. Detaliile de mai jos sunt eroarea în sine — vă rugăm să le includeți în orice raport de defect.",
+    "rootSignIn": "Mergi la pagina de autentificare",
+    "rootReload": "Reîncarcă aplicația",
+    "notFoundTitle": "Pagină negăsită",
+    "notFoundBack": "Înapoi la panoul de control"
   },
   "breadcrumbs": {
     "home": "Acasă"

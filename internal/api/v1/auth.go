@@ -33,6 +33,13 @@ const authTag = "auth"
 func registerAuth(hapi huma.API, deps api.Deps) {
 	get[EmptyIn, MeOut](hapi, deps, "", "/api/v1/me", "get-me", "The caller's own user record", authTag, meHandler(deps))
 	get[EmptyIn, CollectionOut](hapi, deps, "", "/api/v1/me/characters", "list-my-characters", "Characters linked to the caller's account", authTag, myCharactersHandler(deps))
+	// PHASE 20.2 (B26/B40). The caller's own materialised permission set,
+	// behind a resolved session and no RBAC permission of its own — a user
+	// must be able to discover what they can do without already being able
+	// to do something. It is also what lets the SPA hide a control instead
+	// of rendering it and 403ing on click, which is SRS §5.2's "degrade
+	// gracefully" for a user with a narrow role.
+	get[EmptyIn, CollectionOut](hapi, deps, "", "/api/v1/me/permissions", "list-my-permissions", "The caller's own effective permissions", authTag, myPermissionsHandler(deps))
 	mutate[SubIDEmptyIn, ReauthorizeOut](hapi, deps, http.MethodPost, "", "/api/v1/me/characters/{id}/reauthorize", "reauthorize-character", "Re-mint the ESI OAuth redirect for one already-linked character", authTag, reauthorizeHandler(deps))
 	mutate[IDIn, EmptyOut](hapi, deps, http.MethodDelete, "", "/api/v1/me/characters/{id}", "unlink-character", "Unlink a character from the caller's account", authTag, unlinkCharacterHandler(deps))
 
@@ -114,6 +121,32 @@ func meHandler(deps api.Deps) func(context.Context, *EmptyIn) (*MeOut, error) {
 		out := &MeOut{}
 		out.Body.Data = rowOf(user)
 		return out, nil
+	}
+}
+
+// myPermissionsHandler is GET /api/v1/me/permissions. It reads the
+// MATERIALISED table, not a live grant resolution, for the same reason
+// middleware.RequirePermission does: the materialised row is the
+// authoritative answer to "will the next request be allowed", and a live
+// recomputation here could disagree with what the middleware will actually
+// enforce a millisecond later.
+func myPermissionsHandler(deps api.Deps) func(context.Context, *EmptyIn) (*CollectionOut, error) {
+	return func(ctx context.Context, _ *EmptyIn) (*CollectionOut, error) {
+		userID, ok := userIDFromCtx(ctx)
+		if !ok {
+			return nil, huma.Error401Unauthorized("unauthenticated")
+		}
+		names, err := deps.Store.ListEffectivePermissions(ctx, userID)
+		if err != nil {
+			return nil, api.Internal("listing effective permissions", err)
+		}
+		data := make([]map[string]any, len(names))
+		for i, name := range names {
+			data[i] = map[string]any{"permission": name}
+		}
+		return &CollectionOut{Body: api.Collection[map[string]any]{
+			Data: data, Page: api.EmptyPage(int32(len(data))), Sync: api.Sync{},
+		}}, nil
 	}
 }
 

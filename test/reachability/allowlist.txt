@@ -52,22 +52,6 @@ internal/alerting.writeLengthPrefixed
 internal/alerting/render.HasTemplate
 internal/alerting/render.Render
 
-# B26 (closed by Phase 20.3) — RBAC mutation surface and permission resolution; no role-management route is registered
-internal/rbac.AddRoleGrant
-internal/rbac.AddSquadMember
-internal/rbac.AddSquadRole
-internal/rbac.AssignUserRole
-internal/rbac.CreateRole
-internal/rbac.DeleteRole
-internal/rbac.RemoveRoleGrant
-internal/rbac.RemoveSquadMember
-internal/rbac.RemoveSquadRole
-internal/rbac.Resolve
-internal/rbac.ResolveLive
-internal/rbac.RevokeUserRole
-internal/rbac.UserAffectedBySquadMember
-internal/rbac.UsersAffectedBySquadRole
-
 # B27 (closed by Phase 20.3) — scope-set comparison behind Gate 2's 'scope set reduced' trigger
 internal/scopes.MergeScopes
 internal/scopes.NeedsReauthorization
@@ -80,24 +64,6 @@ internal/scopes.Set.Missing
 internal/sso.Lifecycle.InvalidateForInvalidGrant
 internal/sso.Lifecycle.InvalidateForOwnerHashChange
 internal/sso.NewLifecycle
-
-# B28 (closed by Phase 20.2) — entity circuit breaker: Gate 1 §1.3's 5-consecutive-403 condition
-internal/esi/breaker.EntityBreaker.Allow
-internal/esi/breaker.EntityBreaker.RecordFailure
-internal/esi/breaker.EntityBreaker.RecordSuccess
-internal/esi/breaker.EntityBreaker.State
-internal/esi/breaker.EntityBreaker.circuitFor
-internal/esi/breaker.NewEntityBreaker
-internal/esi/breaker.entityKey
-
-# B29 (closed by Phase 20.2) — X-Ratelimit-Limit parsing, never invoked on a real response
-internal/esi/ratelimit.ParseRateLimitLimit
-
-# B29 (closed by Phase 20.2) — X-Ratelimit-Remaining parsing, never invoked on a real response
-internal/esi/ratelimit.ParseRemaining
-
-# B29 (closed by Phase 20.2) — rate-limit header reconciliation; Client.Do calls only ClassifyCost
-internal/esi/ratelimit.ClassifyResponse
 
 # B30 (closed by Phase 20.5) — ESI route handler implemented but never dispatched by any worker
 internal/sync/handlers.ParseAssetNames
@@ -170,9 +136,10 @@ internal/events.Verify  # signature verification published for CONSUMERS of HANG
 internal/provisioning/drivers/teamspeak.Unescape  # TS3 wire decoder, symmetric with Escape; the WebQuery driver parses JSON, so only Escape is on the live path
 internal/sso.NoopRevocationNotifier.NotifyRevocation  # null-object test double
 internal/sync.StubElector.Elect  # test double
+internal/rbac.Resolve  # RECLASSIFIED IN 20.2 (was B26). The single-permission pure resolver. Production resolves in BULK — RefreshUser -> ResolveAllLive -> ResolveAll — because materialising one user writes the whole closed set in one pass; this form exists for TestDenyPrecedesAllowTruthTable, which drives every grant combination through it directly.
+internal/rbac.ResolveLive  # as Resolve — the live, from-scratch cross-check TestMaterializedMatchesRecomputed uses to prove app.effective_permission agrees with a recomputation. The middleware deliberately never calls it: it reads the materialised row, and a second live path could disagree with what is about to be enforced.
 internal/sync/normalize.ETag  # as RowsAffected
 internal/sync/normalize.LastModified  # as RowsAffected
 internal/sync/normalize.RowsAffected  # normalisation accessors covered by unit tests; handlers read the struct fields
-internal/sync/worker.ReconcileRateLimitMax  # ledger reconciliation helper; folded into the B29 work in 20.2
 internal/telemetry.Hostname  # os.Hostname wrapper; the heartbeat inlines its own
 internal/telemetry.Tracer  # otel.Tracer passthrough kept beside InitTracerProvider

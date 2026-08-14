@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/hangar-project/hangar/internal/config"
 	"github.com/hangar-project/hangar/internal/crypto"
@@ -14,14 +13,12 @@ import (
 	"github.com/hangar-project/hangar/internal/esi/catalogue"
 	"github.com/hangar-project/hangar/internal/esi/ratelimit"
 	"github.com/hangar-project/hangar/internal/esi/transport"
+	"github.com/hangar-project/hangar/internal/i18n"
 	"github.com/hangar-project/hangar/internal/sso"
 	"github.com/hangar-project/hangar/internal/store"
+	"github.com/hangar-project/hangar/internal/telemetry"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-// routeBreakerProbeTTL bounds how long an open circuit stays open before
-// allowing one probe request through (§ breaker half-open behaviour).
-const routeBreakerProbeTTL = 60 * time.Second
 
 // l1CacheMaxCostBytes bounds internal/esi/cache's in-process L1 tier.
 const l1CacheMaxCostBytes = 128 * 1024 * 1024 // 128MiB
@@ -35,10 +32,14 @@ const l1CacheMaxCostBytes = 128 * 1024 * 1024 // 128MiB
 // needs the concrete type's Mode(). Returning it is better than a type
 // assertion at the call site: the assertion would compile, then silently
 // stop producing the metric the day the ledger is constructed differently.
-func buildGateway(cfg *config.Config, pool *pgxpool.Pool, s *store.Store, logger *slog.Logger) (*esi.Client, *ratelimit.Governor1, error) {
+//
+// PHASE 20.2: and the Gate 1 counters, for the same reason — the client
+// holds them only as the narrow esi.Observer interface, and the registry
+// needs the concrete collector.
+func buildGateway(cfg *config.Config, pool *pgxpool.Pool, s *store.Store, logger *slog.Logger) (*esi.Client, *ratelimit.Governor1, *telemetry.GatewayCounters, error) {
 	l1, err := cache.NewL1(l1CacheMaxCostBytes)
 	if err != nil {
-		return nil, nil, fmt.Errorf("gateway: building L1 cache: %w", err)
+		return nil, nil, nil, fmt.Errorf("gateway: building L1 cache: %w", err)
 	}
 	cacheStore := &cache.Store{L1: l1, L2: cache.NewPostgresL2(s.PostgresCacheL2(), logger)}
 
@@ -65,19 +66,39 @@ func buildGateway(cfg *config.Config, pool *pgxpool.Pool, s *store.Store, logger
 			logger.ErrorContext(ctx, "hangar: "+name, "attrs", attrs)
 		})
 	if err := governor2.Init(context.Background()); err != nil {
-		return nil, nil, fmt.Errorf("gateway: initialising error budget: %w", err)
+		return nil, nil, nil, fmt.Errorf("gateway: initialising error budget: %w", err)
 	}
 
+	// PHASE 20.2 (B23). The ESI Accept-Language is INSTALLATION-WIDE, not
+	// per acting user. Background sync has no acting user to take a
+	// preference from, and a per-user value would fragment the ESI cache
+	// (the resolved language is part of the key, §5.3) up to ninefold for
+	// data that is identical in every locale except a handful of localised
+	// name fields. Validate() has already rejected an unknown locale, so a
+	// resolution failure here is not reachable through the config path —
+	// but it is still fatal rather than silently falling back to "en",
+	// because a gateway quietly speaking the wrong language is exactly the
+	// class of thing this phase exists to stop.
+	language, err := i18n.ResolveESILanguage(cfg.Locale)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("gateway: resolving ESI language: %w", err)
+	}
+
+	counters := telemetry.NewGatewayCounters()
+
 	return &esi.Client{
-		HTTPClient:   httpClient,
-		BaseURL:      catalogue.EsiBaseURL,
-		Cache:        cacheStore,
-		RouteBreaker: breaker.NewRouteBreaker(routeBreakerProbeTTL, nil),
-		Ledger:       governor1,
-		ErrorBudget:  governor2,
-		TTLFloor:     cfg.ESI.TTLFloor,
-		Tenant:       "hangar",
-	}, governor1, nil
+		HTTPClient:    httpClient,
+		BaseURL:       catalogue.EsiBaseURL,
+		Cache:         cacheStore,
+		RouteBreaker:  breaker.NewRouteBreaker(breaker.DefaultRouteProbeTTL, nil),
+		EntityBreaker: breaker.NewEntityBreaker(breaker.DefaultEntityProbeTTL, nil),
+		Ledger:        governor1,
+		ErrorBudget:   governor2,
+		Metrics:       counters,
+		TTLFloor:      cfg.ESI.TTLFloor,
+		Language:      language,
+		Tenant:        "hangar",
+	}, governor1, counters, nil
 }
 
 // buildRefresher assembles the internal/sso.Refresher Phase 7's gateway

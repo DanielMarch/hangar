@@ -8,6 +8,28 @@ import (
 	"time"
 )
 
+// DefaultRouteProbeTTL and DefaultEntityProbeTTL are the half-open probe
+// intervals §5.8 calls "the route TTL".
+//
+// They live here, next to the breakers, because TWO places need to agree on
+// them: cmd/hangar, which constructs the breakers, and internal/sync/worker,
+// which decides how long to snooze a subscription whose breaker just
+// refused a call. A worker snoozing for less than the probe interval wakes
+// up only to be refused again and writes a sync_run row for the privilege;
+// one snoozing for much more leaves the entity dark long after the circuit
+// would have let a probe through. A shared constant is the only way those
+// two numbers cannot drift apart.
+//
+// The entity interval is fifteen times the route one on purpose. A 5XX
+// clears when ESI recovers, which can be seconds. Five consecutive 403s
+// clear when somebody grants a corporation role in-game — a human action,
+// measured in hours — and probing that every minute spends Governor 2's
+// installation-wide error budget on a wait that is not ours to shorten.
+const (
+	DefaultRouteProbeTTL  = 60 * time.Second
+	DefaultEntityProbeTTL = 15 * time.Minute
+)
+
 // State is the breaker's current disposition.
 type State int
 

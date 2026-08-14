@@ -164,6 +164,23 @@ type Querier interface {
 	// more ⇒ clustered. sqlc.arg(live_threshold) is a negative interval, e.g.
 	// '-30 seconds', added to now().
 	CountLiveReplicas(ctx context.Context, liveThreshold time.Duration) (int64, error)
+	// PHASE 20.2 (defect B40). How many users currently hold an ALLOWED
+	// superuser grant by either path — the exact question "does this
+	// installation have an administrator yet?" reduces to, and the guard
+	// internal/rbac.BootstrapFirstAdmin runs before promoting a first-time SSO
+	// user.
+	//
+	// It counts USERS, not grants: a role could grant superuser and be held by
+	// nobody, which is an installation with no administrator however the
+	// grants read. A deny anywhere on superuser removes that user from the
+	// count, matching internal/rbac.Resolve's absolute deny precedence exactly
+	// — the two must agree, or a user the middleware treats as unprivileged
+	// would still suppress the bootstrap and leave the installation locked.
+	//
+	// The permission name is an argument rather than a literal so it cannot
+	// drift from internal/domain.SuperuserPermission, the same convention
+	// CheckPermission above uses.
+	CountSuperuserHolders(ctx context.Context, superuserPermission string) (int64, error)
 	CountUnacknowledgedOpenVocabulary(ctx context.Context, vocabulary string) (int64, error)
 	// Deliberately NOT ClaimUndispatchedOutboxEvents with a huge limit: that
 	// query takes row locks and skips the ones another dispatcher holds, so it
@@ -502,7 +519,6 @@ type Querier interface {
 	// app.character_token(valid) WHERE NOT valid is what keeps this a
 	// millisecond query at scale.
 	HasInvalidCharacterToken(ctx context.Context, userID uuid.NullUUID) (bool, error)
-	IncrementErrorBudget(ctx context.Context) (AppEsiErrorBudget, error)
 	InitDiscordInvalidBudget(ctx context.Context) error
 	InitErrorBudget(ctx context.Context) error
 	// app.character_corporation_history, app.corporation_alliance_history,
@@ -694,10 +710,17 @@ type Querier interface {
 	// the two have to be brought together, which is what this does.
 	//
 	// Definitions match internal/esi/ratelimit's reconciler exactly:
-	//   local_consumed  = sum of live entry costs in this bucket
+	//   local_consumed  = sum of live SETTLED/SYNTHETIC entry costs in this bucket
 	//   local_remaining = max_tokens - local_consumed, floored at zero
 	// Gate 1.3's threshold is max(|local_remaining - server_remaining|) <= 1
 	// per group.
+	//
+	// PHASE 20.2: `state != 'reserved'` added, and it is load-bearing. It must
+	// measure the SAME population SumSettledLedgerEntryCost reconciles against
+	// (see that query for the measurement that forced this) — otherwise the
+	// metric reports 5 per in-flight request on a perfectly healthy
+	// installation, and Gate 1.3 becomes a measure of concurrency rather than
+	// of ledger accuracy.
 	//
 	// The subtraction itself is deliberately NOT done here. server_remaining
 	// is nullable — the server has said nothing about this bucket yet — and
@@ -1010,7 +1033,6 @@ type Querier interface {
 	// Called on a success by the character that just acted, so a candidate
 	// that failed twice and then succeeded once is no longer penalised.
 	ResetActingCharacter403(ctx context.Context, arg ResetActingCharacter403Params) error
-	ResetErrorBudgetWindow(ctx context.Context) error
 	ResolveSquadApplication(ctx context.Context, applicationID uuid.UUID, status string, resolvedBy uuid.NullUUID) error
 	RetireEsiRoute(ctx context.Context, routeID uuid.UUID) error
 	RevokeApiToken(ctx context.Context, tokenID uuid.UUID) error
@@ -1063,7 +1085,33 @@ type Querier interface {
 	// conflated them — which is a large part of why an installation with ZERO
 	// subscriptions looked merely quiet for the whole life of the project.
 	SubscriptionEnabledForPath(ctx context.Context, upstreamPath string) (bool, error)
-	SumLedgerEntryCost(ctx context.Context, rateLimitGroup string, userKey string) (int64, error)
+	// RECONCILIATION ONLY, and it deliberately EXCLUDES 'reserved' rows.
+	//
+	// ── PHASE 20.2, MEASURED ON A LIVE INSTALLATION ──────────────────────────
+	// This was SumLedgerEntryCost, with no state filter, and it is the input to
+	// 01_ARCHITECTURE.md §5.5's "the server always wins" comparison. Including
+	// in-flight reservations in that comparison is a category error: a
+	// reservation is HANGAR's PREDICTION of a request whose result the server's
+	// X-Ratelimit-Remaining cannot possibly have counted yet, because the
+	// request has not finished.
+	//
+	// The consequence was visible within a minute of B29's wiring going live
+	// against real ESI. One in-flight reservation makes local availability look
+	// 5 lower than the server's, so the reconciler evicts settled entries —
+	// forgiving consumption that really happened. The reservation then settles
+	// at cost 2, local availability now looks HIGHER than the server's, and the
+	// next response injects a synthetic entry to compensate. The two directions
+	// chase each other: measured on the development installation,
+	// `char-location` held 6 synthetic entries worth 15 and reported a
+	// divergence of 10 against a Gate 1.3 tolerance of 1, on an installation
+	// with no errors and nothing wrong with it.
+	//
+	// Settled and synthetic entries are exactly the population the server has
+	// had a chance to observe, so they are the population to reconcile against.
+	// The ACQUIRE path is untouched and still counts reservations — that is the
+	// whole point of predictive reservation (see acquireLedgerEntrySQL's `used`
+	// CTE in shared.go, which has no state filter and must not gain one).
+	SumSettledLedgerEntryCost(ctx context.Context, rateLimitGroup string, userKey string) (int64, error)
 	// app.character_skill, character_skillqueue, character_attributes,
 	// character_clone, character_implant, character_jump_fatigue,
 	// character_loyalty_point, character_agent_research, character_title,

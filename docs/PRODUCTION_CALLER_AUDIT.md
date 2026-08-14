@@ -128,3 +128,45 @@ Per rule §0.4, wiring these up during Phase 20 and then running the gates does 
 into passes either: "a gate that requires a code change to pass is a failed gate, not a fixed
 one." The wiring is still worth doing — an inert subsystem should not stay inert — but the gate
 result that follows it is evidence about the *next* release candidate, not this one.
+
+---
+
+## Closure register — Phase 20.2
+
+Recorded here rather than by editing the findings above, so this document keeps meaning "what
+the audit found" and not "what is currently broken". Each row names the wiring, not the
+intention.
+
+| Defect | Closed by | Verified by |
+| :-- | :-- | :-- |
+| **B23** — `internal/i18n` absent from the binary | `HANGAR_LOCALE` (installation-wide, default `en`), validated at boot by `internal/config.Validate` against `i18n.UILocales()`, resolved by `cmd/hangar`'s `buildGateway` into `esi.Client.Language` — which now also SENDS `Accept-Language`, which it never had | `TestNoPackageIsAbsentFromTheBinary`; `TestLocaleIsValidatedAtBoot`; `TestEveryUILocaleIsAcceptedByValidate`; `TestResolvedLanguageIsSentAndKeyed` |
+| **B28** — the entity circuit breaker never runs | `esi.Client.EntityBreaker`, consulted per `(route, EntityID)` in `Do`, failing only on 403 and resetting only on 2XX/3XX; workers pass the character or corporation id | `TestEntityBreakerIsScopedToTheEntity`; `TestEntityBreakerIgnoresStatusesThatSayNothingAboutAuthorisation`; `TestEntityBreakerOpensAfterFiveConsecutive403s` (integration, against the Gate 1 proxy) |
+| **B29** — rate-limit header reconciliation never runs | `Client.Do` calls `ratelimit.ClassifyResponse` once; reconciliation, the 429 snooze and the headerless signal all read its `Outcome`. `IncrementErrorBudget`/`ResetErrorBudgetWindow` DELETED as superseded races, not wired | `TestReconcileUsesTheServersOwnCeiling`; `TestReconcileFallsBackToTheUNREDUCEDCeiling`; `TestAbsentRemainingHeaderIsNotAReadingOfZero`; `TestClientReconcilesAgainstServerHeaders`; `TestHeaderless429SnoozesAndCounts`; `TestRetryAfter429SnoozesForExactlyThatDuration` |
+| **B31** — `internal/esi/pagination` is a dead duplicate | It is now the single implementation. Concurrency 4 adopted (the spec's value); the torn-set check tightened to the live, stricter reading; the cursor walker implemented and wired to `/corporations/{id}/projects` | `TestNoPackageIsAbsentFromTheBinary`; `TestMissingValidatorMidSetIsTorn`; `TestNoValidatorAnywhereIsNotTorn`; `TestFetchAllPagesFansOutAtFour`; `TestFetchAllCursorPagesFollowsTheCursor` |
+| **B39** — blank unauthenticated page | **Not reproducible.** A root `errorComponent`/`notFoundComponent` added regardless — its absence is what made any throw on the unauthenticated path render nothing at all | manual, cold browser context; see the phase report |
+| **B40** — a fresh SSO user holds zero permissions | `rbac.BootstrapFirstAdmin`, called from the SSO callback's `OnUserAuthenticated` hook, gated on `CountSuperuserHolders() == 0` inside one transaction | `TestFirstLoginPromotesExactlyOneAdministrator`; `TestBootstrapRespectsACuratedAdminRole`; `TestBootstrapIsSuppressedByADeniedSuperuser` |
+| **B26** — the RBAC mutation surface has no caller | **Surface half closed early** (B40 could not be fixed without it): `internal/api/v1/admin_roles.go` registers role create/delete/get, per-grant add/remove, user-role assign/revoke, the permission vocabulary and `GET /api/v1/me/permissions`; the squad endpoints now go through `internal/rbac`'s wrappers instead of the raw queries | both reachability guards; `admin_roles.go`'s routes appear in `docs/openapi.json` |
+
+**Two symbols from B26 are RECLASSIFIED rather than closed.** `rbac.Resolve` and
+`rbac.ResolveLive` remain unreachable and have moved to the allowlist's "not defects" section.
+Production resolves in BULK — `RefreshUser` → `ResolveAllLive` → `ResolveAll` — because
+materialising one user writes the whole closed set in one pass. The single-permission forms are
+the truth-table test surface and the documented materialisation cross-check; the middleware
+deliberately never calls them, because it reads the materialised row and a second live path could
+disagree with what is about to be enforced. `GetUserByMainCharacterID` likewise stays: nothing in
+HANGAR looks a user up by their main character, and inventing an endpoint to give a query a caller
+would be the allowlist wagging the codebase.
+
+### Findings made DURING 20.2, not by the original audit
+
+The pattern of the last five phases held: running the system found what running the tests could
+not.
+
+| Finding | Evidence | Disposition |
+| :-- | :-- | :-- |
+| Every deliberate gateway refusal reached River as a FAILED JOB | Governor 1 exhaustion, a Governor 2 pause and both breakers all returned a plain error from `Client.Do`, which River records as a failure and retries on its own backoff — the exact inverse of §5.5's "the caller snoozes the subscription; it does not spin" | **Fixed in 20.2.** `internal/sync/worker/unavailable.go` |
+| `PATCH /api/v1/admin/users/{id}` silently dropped `is_active` and `is_admin` | Both declared in `UpdateUserIn` since Phase 15, both advertised in the OpenAPI document, neither read by the handler. The endpoint answered 200 and changed nothing | **Fixed in 20.2** |
+| Squad membership/role writes bypassed `internal/rbac` | The endpoints called the raw generated queries, so `app.effective_permission` was never recomputed and the §4.9 outbox row was never written. Adding somebody to a role-granting squad changed no permission they actually held | **Fixed in 20.2** |
+| Two squad handlers discarded their errors | `_ = deps.Store.AddSquadRole(...)` reported success for a save that had failed — on a permission-granting operation | **Fixed in 20.2** |
+| The ESI cache key omits the compatibility date | `cache.KeyInput` declares `CompatibilityDate` and `esi.Client.cacheKey` never populates it, so advancing the pin does not invalidate a single cached body. §5.3's formula names the field | **NOT fixed. Recorded for 20.3.** `Client` has no pin source, and threading one in invalidates the whole cache — which 20.2 is already doing once for B23. Doing both in one release makes the second invalidation invisible |
+| `/corporations/{id}/projects/{project_id}/contributors` is parsed with the wrong DTO | B38 renamed the path from `.../contributions` and kept the `contributions` parser. The spec's `CorporationsProjectsContributors` is an OBJECT of `{contributors, cursor}` whose elements are `{id, name, contributed}`; `ParseCorporationProjectContributions` expects a bare array of `{amount, character_id}`. It has never failed because the route is a fan-out path and therefore not subscribable, so it has never executed | **NOT fixed. Recorded for 20.5**, which owns B30 (route handlers that are never dispatched). Fixing it properly needs a decision about what `contributed` maps to in `app.corporation_project_contribution` |

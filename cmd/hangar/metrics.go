@@ -10,6 +10,7 @@ import (
 	"github.com/hangar-project/hangar/internal/esi/ratelimit"
 	"github.com/hangar-project/hangar/internal/store"
 	"github.com/hangar-project/hangar/internal/telemetry"
+	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -29,8 +30,9 @@ import (
 //
 // gateway may be nil: `migrate` and `openapi` never construct an ESI
 // gateway, and a process without one should still export its Go and
-// process collectors rather than refuse to serve metrics at all.
-func buildMetricsRegistry(s *store.Store, gateway *ratelimit.Governor1, logger *slog.Logger) *prometheus.Registry {
+// process collectors rather than refuse to serve metrics at all. counters
+// may likewise be nil — only the process that owns an ESI client has any.
+func buildMetricsRegistry(s *store.Store, gateway *ratelimit.Governor1, counters *telemetry.GatewayCounters, errorLimitMax int, logger *slog.Logger) *prometheus.Registry {
 	reg := telemetry.NewRegistry()
 
 	var mode telemetry.ModeSource
@@ -38,8 +40,11 @@ func buildMetricsRegistry(s *store.Store, gateway *ratelimit.Governor1, logger *
 		mode = governorMode{gateway}
 	}
 	reg.MustRegister(telemetry.NewGatewayCollector(
-		s, mode, ledgerDivergence{s}, telemetry.LiveThreshold, logger,
+		s, mode, ledgerDivergence{s}, errorBudget{s: s, max: errorLimitMax}, telemetry.LiveThreshold, logger,
 	))
+	if counters != nil {
+		reg.MustRegister(counters)
+	}
 	return reg
 }
 
@@ -125,6 +130,13 @@ func (d ledgerDivergence) LedgerDivergence(ctx context.Context) ([]telemetry.Div
 		converted := telemetry.DivergenceRow{
 			Group:          row.RateLimitGroup,
 			LocalRemaining: row.LocalRemaining,
+			// Both required for the freshness rule — see
+			// telemetry.DivergenceRow.ObservedAt. Omitting them does not
+			// produce a wrong number, it produces NO samples at all, which
+			// is the safe direction and was still wrong for half an hour of
+			// this phase's own verification.
+			ObservedAt: row.ServerObservedAt,
+			Window:     row.Window,
 		}
 		if row.ServerRemaining != nil {
 			server := int64(*row.ServerRemaining)
@@ -133,4 +145,33 @@ func (d ledgerDivergence) LedgerDivergence(ctx context.Context) ([]telemetry.Div
 		out = append(out, converted)
 	}
 	return out, nil
+}
+
+// errorBudget adapts app.esi_error_budget to telemetry.ErrorBudgetReader,
+// doing the max-minus-count subtraction here because the maximum is
+// configuration and internal/telemetry reads none.
+//
+// A missing row reports ok=false rather than a remaining of `max`: Governor
+// 2 creates the row on Init, and Init runs in the process that builds the
+// ESI gateway, so `serve` on a fresh installation legitimately has nothing
+// to report. Reporting the full budget would be a reassuring number about a
+// governor that is not running.
+type errorBudget struct {
+	s   *store.Store
+	max int
+}
+
+func (e errorBudget) ErrorBudgetRemaining(ctx context.Context) (int64, bool, error) {
+	row, err := e.s.GetErrorBudget(ctx)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	remaining := int64(e.max) - int64(row.ErrorCount)
+	if remaining < 0 {
+		remaining = 0
+	}
+	return remaining, true, nil
 }

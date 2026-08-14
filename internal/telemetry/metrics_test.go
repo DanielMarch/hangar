@@ -45,18 +45,32 @@ func quietLogger() *slog.Logger {
 
 func int64p(v int64) *int64 { return &v }
 
+// freshReading stamps a divergence row as observed just now, within its
+// window. Phase 20.2 made a stale reading emit no sample (see
+// DivergenceRow.ObservedAt), so every row asserting on a VALUE has to say
+// when it was observed — a test that forgot would silently assert on an
+// empty gauge.
+func freshReading(rows []DivergenceRow) []DivergenceRow {
+	now := time.Now()
+	for i := range rows {
+		rows[i].ObservedAt = &now
+		rows[i].Window = 15 * time.Minute
+	}
+	return rows
+}
+
 // TestLedgerDivergenceIsPerGroupMaximum pins the aggregation that keeps
 // Gate 1's own metric from becoming a cardinality bomb during Gate 1's own
 // run: buckets are keyed (group, user_key) and a 5000-character run has
 // 5000 user keys, so the collector must emit one series per GROUP carrying
 // that group's maximum — which is also exactly what Gate 1.3 measures.
 func TestLedgerDivergenceIsPerGroupMaximum(t *testing.T) {
-	collector := NewGatewayCollector(nil, nil, stubDivergence{rows: []DivergenceRow{
+	collector := NewGatewayCollector(nil, nil, stubDivergence{rows: freshReading([]DivergenceRow{
 		{Group: "market", LocalRemaining: 100, ServerRemaining: int64p(99)},  // 1
 		{Group: "market", LocalRemaining: 100, ServerRemaining: int64p(93)},  // 7  <- max
 		{Group: "market", LocalRemaining: 100, ServerRemaining: int64p(100)}, // 0
 		{Group: "corp", LocalRemaining: 50, ServerRemaining: int64p(52)},     // 2 (absolute)
-	}}, LiveThreshold, quietLogger())
+	})}, nil, LiveThreshold, quietLogger())
 
 	expected := `
 # HELP esi_ledger_divergence Maximum absolute difference, across the buckets of a rate-limit group, between the local ledger's remaining count and the server's X-Ratelimit-Remaining. Gate 1.3 requires max <= 1 per group. Groups the server has not reported on emit no sample.
@@ -77,7 +91,7 @@ esi_ledger_divergence{group="market"} 7
 func TestBucketWithNoServerReadingEmitsNoSample(t *testing.T) {
 	collector := NewGatewayCollector(nil, nil, stubDivergence{rows: []DivergenceRow{
 		{Group: "silent", LocalRemaining: 100, ServerRemaining: nil},
-	}}, LiveThreshold, quietLogger())
+	}}, nil, LiveThreshold, quietLogger())
 
 	if n := testutil.CollectAndCount(collector, "esi_ledger_divergence"); n != 0 {
 		t.Errorf("a bucket with no server reading produced %d samples, want 0 — a null reading must not become a zero", n)
@@ -90,7 +104,7 @@ func TestBucketWithNoServerReadingEmitsNoSample(t *testing.T) {
 // numeric series — not something answerable by watching a string label
 // appear and disappear.
 func TestModeIsAnEnumGauge(t *testing.T) {
-	collector := NewGatewayCollector(nil, stubMode{mode: "clustered"}, nil, LiveThreshold, quietLogger())
+	collector := NewGatewayCollector(nil, stubMode{mode: "clustered"}, nil, nil, LiveThreshold, quietLogger())
 
 	expected := `
 # HELP esi_ledger_mode Governor 1 ledger mode as an enum gauge: 1 for the active mode, 0 for the others.
@@ -109,7 +123,7 @@ esi_ledger_mode{mode="solo"} 0
 // ever heartbeated as live, permanently selecting clustered mode.
 func TestReplicaThresholdIsNegative(t *testing.T) {
 	replicas := &stubReplicas{n: 3}
-	collector := NewGatewayCollector(replicas, nil, nil, LiveThreshold, quietLogger())
+	collector := NewGatewayCollector(replicas, nil, nil, nil, LiveThreshold, quietLogger())
 
 	if n := testutil.CollectAndCount(collector, "esi_replica_live_count"); n != 1 {
 		t.Fatalf("expected exactly one replica-count sample, got %d", n)
@@ -129,6 +143,7 @@ func TestFailingSourceEmitsNoSampleAndCountsTheError(t *testing.T) {
 		&stubReplicas{err: errors.New("database unreachable")},
 		nil,
 		stubDivergence{err: errors.New("database unreachable")},
+		nil,
 		LiveThreshold, quietLogger(),
 	)
 
@@ -158,10 +173,55 @@ hangar_metric_scrape_errors_total{source="replicas"} 3
 // ModeSource is nil and they report fewer series rather than crashing on
 // scrape.
 func TestNilSourcesDoNotPanic(t *testing.T) {
-	collector := NewGatewayCollector(nil, nil, nil, LiveThreshold, quietLogger())
+	collector := NewGatewayCollector(nil, nil, nil, nil, LiveThreshold, quietLogger())
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(collector)
 	if _, err := reg.Gather(); err != nil {
 		t.Fatalf("gathering with every source nil failed: %v", err)
+	}
+}
+
+// TestStaleServerReadingEmitsNoSample — PHASE 20.2, found by running the
+// system against real ESI rather than by reading the code.
+//
+// LocalRemaining is computed live; ServerRemaining is a snapshot from the
+// last response that carried the header. On an idle bucket the local
+// consumption ages out of the floating window by design and climbs back
+// towards max_tokens while the stored reading stands still, so subtracting
+// them reports most of the bucket as divergence. `corp-detail` read 173
+// against Gate 1.3's tolerance of 1, from a reading 69 seconds old, on an
+// installation with nothing wrong with it.
+//
+// A subtraction whose operands describe different moments is not a
+// measurement — the same rule as the nil case, one step further.
+func TestStaleServerReadingEmitsNoSample(t *testing.T) {
+	stale := time.Now().Add(-20 * time.Minute)
+	collector := NewGatewayCollector(nil, nil, stubDivergence{rows: []DivergenceRow{
+		{Group: "idle", LocalRemaining: 300, ServerRemaining: int64p(127), ObservedAt: &stale, Window: 15 * time.Minute},
+	}}, nil, LiveThreshold, quietLogger())
+
+	if n := testutil.CollectAndCount(collector, "esi_ledger_divergence"); n != 0 {
+		t.Errorf("a reading older than the bucket window produced %d samples, want 0 — "+
+			"local and server would be describing different moments", n)
+	}
+}
+
+// TestReadingInsideTheWindowStillCounts is the other half: the freshness
+// rule must not quietly switch the gauge off. A reading from within the
+// window is exactly what Gate 1.3 is built on, and under load every bucket
+// is reconciled on every response.
+func TestReadingInsideTheWindowStillCounts(t *testing.T) {
+	recent := time.Now().Add(-30 * time.Second)
+	collector := NewGatewayCollector(nil, nil, stubDivergence{rows: []DivergenceRow{
+		{Group: "busy", LocalRemaining: 300, ServerRemaining: int64p(299), ObservedAt: &recent, Window: 15 * time.Minute},
+	}}, nil, LiveThreshold, quietLogger())
+
+	expected := `
+# HELP esi_ledger_divergence Maximum absolute difference, across the buckets of a rate-limit group, between the local ledger's remaining count and the server's X-Ratelimit-Remaining. Gate 1.3 requires max <= 1 per group. Groups the server has not reported on emit no sample.
+# TYPE esi_ledger_divergence gauge
+esi_ledger_divergence{group="busy"} 1
+`
+	if err := testutil.CollectAndCompare(collector, strings.NewReader(expected), "esi_ledger_divergence"); err != nil {
+		t.Error(err)
 	}
 }

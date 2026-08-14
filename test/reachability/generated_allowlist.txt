@@ -17,26 +17,29 @@
 # surfaces recent sync runs. Reconciliation sets `enabled` through
 # DisableUnscopedSubscriptions, which is why SetSyncSubscriptionEnabled is
 # still unused.
+#
+# PHASE 20.2: SnoozeSyncSubscription left this group. §5.5 requires a 429 —
+# and every deliberate gateway refusal — to snooze the affected subscription
+# rather than fail its job, and internal/sync/worker/unavailable.go is now
+# that caller. The column had existed since Phase 6 and nothing had ever
+# written to it.
 ListRecentSyncRuns
 SetSyncNoCacheOptIn
 SetSyncSubscriptionEnabled
-SnoozeSyncSubscription
 
 # B24 — §4.9 webhook endpoint configuration surface
 CreateWebhookEndpoint
 ListWebhookEndpointsForUser
 RevokeWebhookEndpoint
 
-# B26 — RBAC mutation and resolution surface
-GetRole
+# B26 — CLOSED in Phase 20.2 apart from one reader. GetRole, ListPermissions,
+# ListEffectivePermissions and SetUserActive all gained production callers
+# with the role-management surface (internal/api/v1/admin_roles.go) and the
+# PATCH /admin/users/{id} fix. What is left is the one query with no natural
+# consumer: nothing in HANGAR looks a user up BY their main character, and
+# inventing an endpoint to give it one would be the allowlist wagging the
+# codebase.
 GetUserByMainCharacterID
-ListEffectivePermissions
-ListPermissions
-SetUserActive
-
-# B29 — Governor 2's error budget is never incremented or reset
-IncrementErrorBudget
-ResetErrorBudgetWindow
 
 # B25 — alert routing, channels and the unknown-type boards
 CountAlertTypesByDomain

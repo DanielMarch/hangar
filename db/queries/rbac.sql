@@ -130,6 +130,45 @@ SELECT * FROM app.effective_permission WHERE user_id = $1 AND permission = $2;
 -- name: ListEffectivePermissions :many
 SELECT permission FROM app.effective_permission WHERE user_id = $1 AND permitted ORDER BY permission;
 
+-- name: CountSuperuserHolders :one
+-- PHASE 20.2 (defect B40). How many users currently hold an ALLOWED
+-- superuser grant by either path — the exact question "does this
+-- installation have an administrator yet?" reduces to, and the guard
+-- internal/rbac.BootstrapFirstAdmin runs before promoting a first-time SSO
+-- user.
+--
+-- It counts USERS, not grants: a role could grant superuser and be held by
+-- nobody, which is an installation with no administrator however the
+-- grants read. A deny anywhere on superuser removes that user from the
+-- count, matching internal/rbac.Resolve's absolute deny precedence exactly
+-- — the two must agree, or a user the middleware treats as unprivileged
+-- would still suppress the bootstrap and leave the installation locked.
+--
+-- The permission name is an argument rather than a literal so it cannot
+-- drift from internal/domain.SuperuserPermission, the same convention
+-- CheckPermission above uses.
+WITH holders AS (
+    SELECT ur.user_id, g.effect
+      FROM app.user_role ur
+      JOIN app.role_grant g ON g.role_id = ur.role_id
+     WHERE g.permission = sqlc.arg(superuser_permission)::text
+    UNION ALL
+    SELECT c.user_id, g.effect
+      FROM app.squad_role sr
+      JOIN app.squad_member sm ON sm.squad_id = sr.squad_id
+      JOIN app.character c ON c.character_id = sm.character_id
+      JOIN app.role_grant g ON g.role_id = sr.role_id
+     WHERE g.permission = sqlc.arg(superuser_permission)::text
+       AND c.user_id IS NOT NULL
+)
+SELECT count(*)::bigint AS holders
+  FROM (
+    SELECT user_id
+      FROM holders
+     GROUP BY user_id
+    HAVING bool_or(effect = 'allow') AND NOT bool_or(effect = 'deny')
+  ) permitted;
+
 -- name: DeleteRole :exec
 -- Guards system roles (`admin`, `member`, db/seed/roles.sql) at the SQL
 -- level, not just by Go-side convention — NOT is_system in the WHERE

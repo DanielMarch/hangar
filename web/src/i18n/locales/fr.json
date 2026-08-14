@@ -47,7 +47,13 @@
     "boundaryBody": "Cette section n'a pas pu être chargée.",
     "retry": "Réessayer",
     "forbiddenTitle": "Accès refusé",
-    "forbiddenBody": "Vous n'avez pas la permission de voir ceci."
+    "forbiddenBody": "Vous n'avez pas la permission de voir ceci.",
+    "rootTitle": "HANGAR n'a pas pu afficher cette page",
+    "rootBody": "Une erreur s'est produite avant le chargement de la page. Les détails ci-dessous sont l'erreur elle-même — merci de les joindre à tout rapport de bogue.",
+    "rootSignIn": "Aller à la page de connexion",
+    "rootReload": "Recharger l'application",
+    "notFoundTitle": "Page introuvable",
+    "notFoundBack": "Revenir au tableau de bord"
   },
   "breadcrumbs": {
     "home": "Accueil"

@@ -55,16 +55,30 @@ func (s *fakeStore) EvictAgedLedgerEntries(ctx context.Context, group, userKey s
 	return nil
 }
 
-func (s *fakeStore) SumLedgerEntryCost(ctx context.Context, group, userKey string) (int64, error) {
+// SumSettledLedgerEntryCost implements Store. It excludes reservations, as
+// the real query does — reconciliation compares against what the SERVER can
+// have counted, and an in-flight request is not that (Phase 20.2).
+func (s *fakeStore) SumSettledLedgerEntryCost(ctx context.Context, group, userKey string) (int64, error) {
+	return s.sumCosts(group, userKey, false), nil
+}
+
+// sumCosts is the test-only total, with a switch for whether reservations
+// count. The flush tests assert on the ALL-inclusive total, because a flush
+// must carry an in-flight reservation across a mode transition intact.
+func (s *fakeStore) sumCosts(group, userKey string, includeReserved bool) int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var total int64
 	for _, e := range s.entries {
-		if e.RateLimitGroup == group && e.UserKey == userKey {
-			total += int64(e.Cost)
+		if e.RateLimitGroup != group || e.UserKey != userKey {
+			continue
 		}
+		if !includeReserved && e.State == "reserved" {
+			continue
+		}
+		total += int64(e.Cost)
 	}
-	return total, nil
+	return total
 }
 
 func (s *fakeStore) GetOldestLiveLedgerEntry(ctx context.Context, group, userKey string) (time.Time, error) {
@@ -209,8 +223,7 @@ func TestModeTransitionLosesNoEntries(t *testing.T) {
 	require.NoError(t, g1.forceModeCheck(ctx))
 	require.Equal(t, ModeClustered, g1.Mode())
 
-	total, err := fake.SumLedgerEntryCost(ctx, req.Group, req.UserKey)
-	require.NoError(t, err)
+	total := fake.sumCosts(req.Group, req.UserKey, true)
 	require.EqualValues(t, sum, total, "solo->clustered flush must preserve the exact live-cost sum, including the in-flight reservation")
 
 	// Settle the in-flight reservation directly against the fake store

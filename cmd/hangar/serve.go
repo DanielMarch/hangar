@@ -134,7 +134,7 @@ func runServe(ctx context.Context) error {
 	// is bound to the published port, and /metrics is unauthenticated.
 	// `serve` builds no ESI gateway (only `work` does), so it contributes
 	// the replica and divergence gauges and no ledger mode.
-	stopMetrics := startMetricsListener(hbCtx, cfg.MetricsAddr, buildMetricsRegistry(store.New(pool), nil, logger), logger)
+	stopMetrics := startMetricsListener(hbCtx, cfg.MetricsAddr, buildMetricsRegistry(store.New(pool), nil, nil, cfg.ESI.ErrorLimitMax, logger), logger)
 	defer stopMetrics()
 
 	mux := http.NewServeMux()
@@ -163,7 +163,7 @@ func runServe(ctx context.Context) error {
 	// SPA login screen cannot build against.
 	s := store.New(pool)
 
-	flow, err := buildSSOFlow(ctx, cfg, s, keyring, logger)
+	flow, err := buildSSOFlow(ctx, cfg, pool, s, keyring, logger)
 	if err != nil {
 		return err
 	}

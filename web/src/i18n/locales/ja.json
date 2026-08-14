@@ -47,7 +47,13 @@
     "boundaryBody": "このセクションを読み込めませんでした。",
     "retry": "再試行",
     "forbiddenTitle": "アクセス権がありません",
-    "forbiddenBody": "これを表示する権限がありません。"
+    "forbiddenBody": "これを表示する権限がありません。",
+    "rootTitle": "HANGAR はこのページを表示できませんでした",
+    "rootBody": "ページの読み込み前にエラーが発生しました。以下の詳細はエラーそのものです。バグ報告の際は必ず添えてください。",
+    "rootSignIn": "サインインページへ",
+    "rootReload": "アプリケーションを再読み込み",
+    "notFoundTitle": "ページが見つかりません",
+    "notFoundBack": "ダッシュボードに戻る"
   },
   "breadcrumbs": {
     "home": "ホーム"

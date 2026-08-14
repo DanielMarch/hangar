@@ -51,6 +51,7 @@ func RegisterAll(hapi huma.API, deps api.Deps) {
 	registerSquads(hapi, deps)
 	registerSupport(hapi, deps)
 	registerAdmin(hapi, deps)
+	registerAdminRoles(hapi, deps)
 }
 
 // ---- shared input/output shapes -------------------------------------------------

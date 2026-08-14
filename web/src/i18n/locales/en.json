@@ -47,7 +47,13 @@
     "boundaryBody": "This section failed to load.",
     "retry": "Retry",
     "forbiddenTitle": "No access",
-    "forbiddenBody": "You don't have permission to view this."
+    "forbiddenBody": "You don't have permission to view this.",
+    "rootTitle": "HANGAR could not render this page",
+    "rootBody": "Something failed before the page could load. The details below are the error itself — please include them in any bug report.",
+    "rootSignIn": "Go to the sign-in page",
+    "rootReload": "Reload the application",
+    "notFoundTitle": "Page not found",
+    "notFoundBack": "Return to the dashboard"
   },
   "breadcrumbs": {
     "home": "Home"

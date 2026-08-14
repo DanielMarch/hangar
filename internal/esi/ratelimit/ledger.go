@@ -118,7 +118,13 @@ func (l *LedgerSolo) Reconcile(ctx context.Context, group, userKey string, maxTo
 	now := l.clock.Now()
 	b.evict(now)
 
-	inject, evictTarget, needsEvict := reconcileAction(maxTokens, b.available(), serverRemaining)
+	// SETTLED availability, not available(): a reservation is HANGAR's
+	// prediction of a request the server's X-Ratelimit-Remaining cannot yet
+	// have counted, so including it makes local look lower than the server
+	// and drives the reconciler to evict real consumption. See
+	// db/queries/esi_ledger.sql's SumSettledLedgerEntryCost for the
+	// oscillation this produced against real ESI.
+	inject, evictTarget, needsEvict := reconcileAction(maxTokens, b.settledAvailable(), serverRemaining)
 	if needsEvict {
 		b.evictOldestUntil(evictTarget)
 		return nil

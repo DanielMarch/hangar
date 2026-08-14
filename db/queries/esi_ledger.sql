@@ -57,10 +57,37 @@ DELETE FROM app.esi_ledger_entry
    AND state != 'reserved'
    AND consumed_at <= now() - sqlc.arg(window_interval)::interval;
 
--- name: SumLedgerEntryCost :one
+-- name: SumSettledLedgerEntryCost :one
+-- RECONCILIATION ONLY, and it deliberately EXCLUDES 'reserved' rows.
+--
+-- ── PHASE 20.2, MEASURED ON A LIVE INSTALLATION ──────────────────────────
+-- This was SumLedgerEntryCost, with no state filter, and it is the input to
+-- 01_ARCHITECTURE.md §5.5's "the server always wins" comparison. Including
+-- in-flight reservations in that comparison is a category error: a
+-- reservation is HANGAR's PREDICTION of a request whose result the server's
+-- X-Ratelimit-Remaining cannot possibly have counted yet, because the
+-- request has not finished.
+--
+-- The consequence was visible within a minute of B29's wiring going live
+-- against real ESI. One in-flight reservation makes local availability look
+-- 5 lower than the server's, so the reconciler evicts settled entries —
+-- forgiving consumption that really happened. The reservation then settles
+-- at cost 2, local availability now looks HIGHER than the server's, and the
+-- next response injects a synthetic entry to compensate. The two directions
+-- chase each other: measured on the development installation,
+-- `char-location` held 6 synthetic entries worth 15 and reported a
+-- divergence of 10 against a Gate 1.3 tolerance of 1, on an installation
+-- with no errors and nothing wrong with it.
+--
+-- Settled and synthetic entries are exactly the population the server has
+-- had a chance to observe, so they are the population to reconcile against.
+-- The ACQUIRE path is untouched and still counts reservations — that is the
+-- whole point of predictive reservation (see acquireLedgerEntrySQL's `used`
+-- CTE in shared.go, which has no state filter and must not gain one).
 SELECT coalesce(sum(cost), 0)::bigint AS total_cost
   FROM app.esi_ledger_entry
- WHERE rate_limit_group = $1 AND user_key = $2;
+ WHERE rate_limit_group = $1 AND user_key = $2
+   AND state != 'reserved';
 
 -- AcquireLedgerEntry (the primary clustered acquire path) is deliberately
 -- NOT a sqlc query — see shared.go's acquireLedgerEntrySQL const for both
@@ -152,10 +179,17 @@ UPDATE app.esi_ledger_bucket
 -- the two have to be brought together, which is what this does.
 --
 -- Definitions match internal/esi/ratelimit's reconciler exactly:
---   local_consumed  = sum of live entry costs in this bucket
+--   local_consumed  = sum of live SETTLED/SYNTHETIC entry costs in this bucket
 --   local_remaining = max_tokens - local_consumed, floored at zero
 -- Gate 1.3's threshold is max(|local_remaining - server_remaining|) <= 1
 -- per group.
+--
+-- PHASE 20.2: `state != 'reserved'` added, and it is load-bearing. It must
+-- measure the SAME population SumSettledLedgerEntryCost reconciles against
+-- (see that query for the measurement that forced this) — otherwise the
+-- metric reports 5 per in-flight request on a perfectly healthy
+-- installation, and Gate 1.3 becomes a measure of concurrency rather than
+-- of ledger accuracy.
 --
 -- The subtraction itself is deliberately NOT done here. server_remaining
 -- is nullable — the server has said nothing about this bucket yet — and
@@ -180,6 +214,7 @@ SELECT b.rate_limit_group,
   LEFT JOIN (
         SELECT rate_limit_group, user_key, sum(cost)::bigint AS local_consumed
           FROM app.esi_ledger_entry
+         WHERE state != 'reserved'
          GROUP BY rate_limit_group, user_key
        ) e
     ON e.rate_limit_group = b.rate_limit_group AND e.user_key = b.user_key

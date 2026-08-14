@@ -40,6 +40,32 @@ type Client struct {
 	Ledger       ratelimit.Ledger      // nil disables Governor 1 (rate limiting)
 	ErrorBudget  *ratelimit.Governor2  // nil disables Governor 2 (error-limit pause)
 
+	// EntityBreaker is §5.8's 403 breaker: >=5 consecutive 403s for the
+	// same (route, entity) stops calling that pair until a half-open probe
+	// at the route TTL. nil disables it; a Request with EntityID == 0
+	// (global routes, which have no owner) never consults it.
+	//
+	// ── B28: WHY THIS SITS BESIDE THE RE-ELECTION PATH, NOT INSTEAD OF IT ──
+	// internal/sync/worker already records a 403 against
+	// app.sync_acting_character_history and re-elects on the next attempt.
+	// That mechanism answers WHICH character acts. This one answers WHETHER
+	// to call at all: after five consecutive 403s the acting-character pool
+	// has demonstrably been exhausted (each attempt elects afresh, and the
+	// elector orders by fewest recent 403s, so five attempts have already
+	// walked the viable candidates), and continuing to call spends Governor
+	// 2's installation-wide error budget on a request that cannot succeed.
+	//
+	// The two never disagree because they never decide the same thing, and
+	// they share one reset: a 2XX/3XX closes the entity circuit AND clears
+	// that character's 403 history, so one success by any character re-opens
+	// the route for the entity.
+	EntityBreaker *breaker.EntityBreaker
+
+	// Metrics receives Gate 1's counter signals (§1.2, §1.3). nil disables
+	// them entirely — every call site is nil-guarded — which is what a unit
+	// test constructing a bare Client gets.
+	Metrics Observer
+
 	// TTLFloor feeds ratelimit.ClassifyResponse's headerless-429 snooze
 	// fallback (internal/config.ESIConfig.TTLFloor).
 	TTLFloor time.Duration
@@ -55,9 +81,32 @@ type Client struct {
 // ErrBreakerOpen is returned when RouteBreaker.Allow refuses the call.
 var ErrBreakerOpen = errors.New("esi: circuit breaker open for route")
 
+// ErrEntityBreakerOpen is returned when EntityBreaker.Allow refuses the
+// call for this (route, entity) pair — §5.8's 403 breaker. Distinct from
+// ErrBreakerOpen because the caller's response differs: a route breaker
+// means ESI is unwell, an entity breaker means THIS owner's authorisation
+// is, and only the latter is worth surfacing to an operator as "we cannot
+// read this corporation".
+var ErrEntityBreakerOpen = errors.New("esi: entity circuit breaker open (5 consecutive 403s)")
+
 // ErrErrorBudgetPaused is returned when Governor 2 has paused the
 // installation (§5.7).
 var ErrErrorBudgetPaused = errors.New("esi: installation-wide error budget paused")
+
+// Observer receives the Gate 1 counter signals Do produces. It is an
+// interface rather than a direct dependency on internal/telemetry so this
+// package keeps no Prometheus import and a test can count calls with a
+// three-line double.
+type Observer interface {
+	// Observe429 counts one 429, split by whether it carried rate-limit
+	// headers at all (04_RELEASE_GATES.md §1.3's headerless-429 row).
+	// group is app.esi_route.rate_limit_group, which is bounded by the
+	// catalogue and therefore safe as a label; a character id never is.
+	Observe429(group string, hasHeaders bool)
+	// Observe420 counts one observed 420 from ESI — Gate 1.2's pass
+	// condition is that this stays at zero for the whole run.
+	Observe420()
+}
 
 // Request describes one ESI call. UpstreamPath is app.esi_route's column,
 // verbatim, with `{param}` placeholders — never derived or pluralised
@@ -81,6 +130,23 @@ type Request struct {
 	RateLimitGroup  string
 	RateLimitMax    int
 	RateLimitWindow time.Duration
+
+	// RateLimitRealMax is the route's UNREDUCED ceiling, used only for
+	// Ledger.Reconcile. RateLimitMax above may be a call-site policy
+	// reduction — internal/sync/worker.BackgroundRateLimitMax holds five
+	// tokens of char-notification back for interactive callers — and
+	// feeding that fiction to the reconciler would desync the ledger from
+	// the very truth it exists to import (§5.5 "the server always wins";
+	// see internal/sync/worker/reserve.go's header). Zero means "same as
+	// RateLimitMax", which is correct for every caller that applies no
+	// reduction.
+	RateLimitRealMax int
+
+	// EntityID is the owner this call is made on behalf of — the character
+	// id, the corporation id, or 0 for a global/unowned route. It keys
+	// §5.8's entity-scoped 403 breaker and nothing else; it never reaches
+	// the wire.
+	EntityID int64
 	// UserKey is the Governor 1 bucket's user dimension —
 	// "applicationID:characterID" for an authenticated call (§5.5).
 	UserKey string
@@ -115,6 +181,21 @@ type Response struct {
 	// routes in that phase's scope are all single-page); Phase 8's wallet
 	// journal is the first consumer.
 	Pages int
+
+	// SnoozeFor is how long the CALLER's subscription must be snoozed
+	// because of this response: Retry-After's value on a 429 that carries
+	// one, otherwise Client.TTLFloor. Zero on every non-429.
+	//
+	// It is returned rather than acted on here because internal/esi has no
+	// idea what a subscription is — §5.5's "snooze the affected
+	// subscription only, siblings unaffected" is a statement about
+	// app.sync_subscription rows, which only internal/sync/worker can honour.
+	SnoozeFor time.Duration
+
+	// Is429Headerless marks a 429 that arrived with no X-Ratelimit-*
+	// headers at all (CCP's in-monolith limiters do this). Informational
+	// for the caller's logging; the counter is already incremented here.
+	Is429Headerless bool
 }
 
 // buildURL substitutes {name} placeholders in path with PathParams,
@@ -161,6 +242,9 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 	if c.RouteBreaker != nil && !c.RouteBreaker.Allow(req.UpstreamPath) {
 		return nil, fmt.Errorf("%w: %s", ErrBreakerOpen, req.UpstreamPath)
 	}
+	if c.EntityBreaker != nil && req.EntityID != 0 && !c.EntityBreaker.Allow(req.UpstreamPath, req.EntityID) {
+		return nil, fmt.Errorf("%w: %s for entity %d", ErrEntityBreakerOpen, req.UpstreamPath, req.EntityID)
+	}
 	if c.ErrorBudget != nil {
 		paused, err := c.ErrorBudget.IsPaused(ctx)
 		if err != nil {
@@ -195,6 +279,14 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 	if req.AccessToken != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+req.AccessToken)
 	}
+	// PHASE 20.2 (B23). The resolved language was already part of the cache
+	// key (§5.3) and was never actually SENT — so before internal/i18n was
+	// wired the field was empty and the omission was invisible, and the
+	// moment it was populated the cache would have keyed on a language the
+	// request never asked for. Set together, or neither.
+	if c.Language != "" {
+		httpReq.Header.Set("Accept-Language", c.Language)
+	}
 	condSent := cache.ApplyConditionalHeaders(httpReq, req.Validators, req.CacheMode)
 
 	resp, sendErr := c.HTTPClient.Do(httpReq)
@@ -207,9 +299,16 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 		header = resp.Header
 	}
 
+	// ── B29: ONE CLASSIFICATION POINT ────────────────────────────────────
+	// This used to be a bare ClassifyCost, and everything else in §5.5 that
+	// depends on the response's headers — reconciliation, the 429 snooze,
+	// the headerless-429 signal — simply did not happen. ClassifyResponse
+	// is the whole rule in one place; every branch below reads its Outcome
+	// rather than re-deriving anything from `status`.
+	outcome := ratelimit.ClassifyResponse(status, header, sendErr != nil, c.TTLFloor)
+
 	if reservation != nil {
-		cost := ratelimit.ClassifyCost(status, sendErr != nil)
-		if settleErr := c.Ledger.Settle(ctx, reservation, cost, respondedAt); settleErr != nil {
+		if settleErr := c.Ledger.Settle(ctx, reservation, outcome.Cost, respondedAt); settleErr != nil {
 			// Settlement failure must not mask the real response — log
 			// via the caller (no logger on Client to keep it dependency-
 			// light); surfaced through the returned error only if the
@@ -218,15 +317,19 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 				sendErr = errors.Join(sendErr, settleErr)
 			}
 		}
+		// Reconciliation runs AFTER settle, deliberately: the server's
+		// reading already accounts for the request we just made, so
+		// converging against it before this request's own cost is in the
+		// ledger would inject a synthetic entry covering a cost that is
+		// about to be added again.
+		c.reconcile(ctx, req, outcome)
 	}
 
 	if sendErr != nil {
 		if c.RouteBreaker != nil {
 			c.RouteBreaker.RecordFailure(req.UpstreamPath)
 		}
-		if c.ErrorBudget != nil {
-			_ = c.ErrorBudget.RecordError(ctx, false)
-		}
+		c.recordErrorBudget(ctx, outcome, status)
 		return nil, fmt.Errorf("esi: request failed: %w", sendErr)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -235,15 +338,31 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 		if c.RouteBreaker != nil {
 			c.RouteBreaker.RecordFailure(req.UpstreamPath)
 		}
-		if c.ErrorBudget != nil {
-			_ = c.ErrorBudget.RecordError(ctx, status == 420)
+	} else if c.RouteBreaker != nil {
+		c.RouteBreaker.RecordSuccess(req.UpstreamPath)
+	}
+	c.recordErrorBudget(ctx, outcome, status)
+
+	// §5.8's entity breaker, and only for the two statuses that say
+	// anything about THIS owner's authorisation. Every other status (a
+	// 404, a 5XX, a 429) is silent about it and must leave the circuit
+	// exactly as it was — counting a 5XX here would open an entity's
+	// breaker for an outage that has nothing to do with its roles.
+	if c.EntityBreaker != nil && req.EntityID != 0 {
+		switch {
+		case status == http.StatusForbidden:
+			c.EntityBreaker.RecordFailure(req.UpstreamPath, req.EntityID)
+		case status >= 200 && status < 400:
+			c.EntityBreaker.RecordSuccess(req.UpstreamPath, req.EntityID)
 		}
-	} else {
-		if c.RouteBreaker != nil {
-			c.RouteBreaker.RecordSuccess(req.UpstreamPath)
+	}
+
+	if c.Metrics != nil {
+		if status == http.StatusTooManyRequests {
+			c.Metrics.Observe429(req.RateLimitGroup, !outcome.Is429Headerless)
 		}
-		if status >= 400 && c.ErrorBudget != nil {
-			_ = c.ErrorBudget.RecordError(ctx, status == 420)
+		if status == statusErrorLimited {
+			c.Metrics.Observe420()
 		}
 	}
 
@@ -279,8 +398,60 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 	return &Response{
 		StatusCode: status, Body: body, ETag: etag,
 		LastModified: lastMod, HasLastModified: hasLastMod,
-		Pages: parsePages(header.Get("X-Pages")),
+		Pages:     parsePages(header.Get("X-Pages")),
+		SnoozeFor: outcome.SnoozeFor, Is429Headerless: outcome.Is429Headerless,
 	}, nil
+}
+
+// statusErrorLimited is ESI's 420 "error limited" status. Not in net/http's
+// constant set (it is not an IANA-registered code), so it is named here
+// rather than left as a bare literal at the two places that test for it.
+const statusErrorLimited = 420
+
+// recordErrorBudget charges one non-2XX/3XX outcome against Governor 2's
+// installation-wide window (§5.7). The classification of what counts is
+// ClassifyResponse's, not a second copy of the rule here — that duplication
+// is precisely how the transport-error branch and the response branch used
+// to disagree about whether a 420 was possible.
+func (c *Client) recordErrorBudget(ctx context.Context, outcome ratelimit.Outcome, status int) {
+	if c.ErrorBudget == nil || !outcome.IsErrorForGovernor2 {
+		return
+	}
+	_ = c.ErrorBudget.RecordError(ctx, status == statusErrorLimited)
+}
+
+// reconcile applies §5.5's "the server always wins" against the bucket this
+// request was admitted from.
+//
+// It is a no-op unless the response actually carried X-Ratelimit-Remaining:
+// an absent header is NOT a reading of zero (that would stall the
+// installation on every headerless 429 — §5.5's own edge case), and a
+// bucket the server has said nothing about must keep the local view rather
+// than converge on a fiction.
+//
+// The ceiling is the server's own X-Ratelimit-Limit when it sent one, and
+// the route's UNREDUCED catalogue value otherwise. Never Request.
+// RateLimitMax, which may carry a call-site reserve — see the field's
+// comment and internal/sync/worker/reserve.go.
+func (c *Client) reconcile(ctx context.Context, req Request, outcome ratelimit.Outcome) {
+	if c.Ledger == nil || req.RateLimitGroup == "" || !outcome.ServerRemainingOK {
+		return
+	}
+	maxTokens := req.RateLimitRealMax
+	if maxTokens <= 0 {
+		maxTokens = req.RateLimitMax
+	}
+	if outcome.ServerLimitOK {
+		maxTokens = outcome.ServerMaxTokens
+	}
+	if maxTokens <= 0 {
+		return
+	}
+	// A reconciliation failure is not the caller's problem: the response is
+	// already in hand and returning an error here would turn a bookkeeping
+	// hiccup into a failed sync. The divergence it leaves behind is exactly
+	// what esi_ledger_divergence exists to show.
+	_ = c.Ledger.Reconcile(ctx, req.RateLimitGroup, req.UserKey, maxTokens, outcome.ServerRemaining)
 }
 
 // parsePages parses the X-Pages header (§5.9). An absent or malformed

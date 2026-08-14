@@ -19,7 +19,7 @@ type Store interface {
 	GetLedgerBucketForUpdate(ctx context.Context, rateLimitGroup string, userKey string) (gen.GetLedgerBucketForUpdateRow, error)
 	ExpireLedgerReservations(ctx context.Context, rateLimitGroup string, userKey string) ([]gen.AppEsiLedgerEntry, error)
 	EvictAgedLedgerEntries(ctx context.Context, rateLimitGroup string, userKey string, windowInterval time.Duration) error
-	SumLedgerEntryCost(ctx context.Context, rateLimitGroup string, userKey string) (int64, error)
+	SumSettledLedgerEntryCost(ctx context.Context, rateLimitGroup string, userKey string) (int64, error)
 	GetOldestLiveLedgerEntry(ctx context.Context, rateLimitGroup string, userKey string) (time.Time, error)
 	ReserveLedgerEntry(ctx context.Context, rateLimitGroup string, userKey string, requestTimeout time.Duration) (gen.AppEsiLedgerEntry, error)
 	SettleLedgerEntry(ctx context.Context, entryID uuid.UUID, cost int16) error
@@ -244,7 +244,7 @@ func (l *LedgerClustered) Reconcile(ctx context.Context, group, userKey string, 
 			return fmt.Errorf("lock bucket: %w", err)
 		}
 
-		used, err := q.SumLedgerEntryCost(ctx, group, userKey)
+		used, err := q.SumSettledLedgerEntryCost(ctx, group, userKey)
 		if err != nil {
 			return fmt.Errorf("sum cost: %w", err)
 		}
@@ -273,7 +273,7 @@ func (l *LedgerClustered) Reconcile(ctx context.Context, group, userKey string, 
 // enough cost rather than guessing a row count.
 func (l *LedgerClustered) evictUntil(ctx context.Context, q Store, group, userKey string, maxTokens, target int) error {
 	for {
-		used, err := q.SumLedgerEntryCost(ctx, group, userKey)
+		used, err := q.SumSettledLedgerEntryCost(ctx, group, userKey)
 		if err != nil {
 			return fmt.Errorf("sum cost: %w", err)
 		}
@@ -291,7 +291,7 @@ func (l *LedgerClustered) evictUntil(ctx context.Context, q Store, group, userKe
 			if err := q.DeleteLedgerEntryByID(ctx, c.EntryID); err != nil {
 				return fmt.Errorf("delete evicted entry: %w", err)
 			}
-			used, err := q.SumLedgerEntryCost(ctx, group, userKey)
+			used, err := q.SumSettledLedgerEntryCost(ctx, group, userKey)
 			if err != nil {
 				return fmt.Errorf("sum cost: %w", err)
 			}

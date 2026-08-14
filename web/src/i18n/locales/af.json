@@ -47,7 +47,13 @@
     "boundaryBody": "Hierdie afdeling kon nie laai nie.",
     "retry": "Probeer weer",
     "forbiddenTitle": "Geen toegang nie",
-    "forbiddenBody": "Jy het nie toestemming om dit te sien nie."
+    "forbiddenBody": "Jy het nie toestemming om dit te sien nie.",
+    "rootTitle": "HANGAR kon nie hierdie bladsy vertoon nie",
+    "rootBody": "Iets het misgeloop voordat die bladsy kon laai. Die besonderhede hieronder is die fout self — sluit dit asseblief by enige foutverslag in.",
+    "rootSignIn": "Gaan na die aanmeldbladsy",
+    "rootReload": "Herlaai die toepassing",
+    "notFoundTitle": "Bladsy nie gevind nie",
+    "notFoundBack": "Keer terug na die paneelbord"
   },
   "breadcrumbs": {
     "home": "Tuis"

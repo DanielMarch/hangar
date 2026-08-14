@@ -135,14 +135,21 @@ func (w *GlobalWorker) doSync(ctx context.Context, s *store.Store, sub gen.AppSy
 
 	resp, doErr := w.Gateway.Do(ctx, esi.Request{
 		Method: route.Method, UpstreamPath: route.UpstreamPath,
-		CacheMode:       derefStr(route.CacheMode),
-		RateLimitGroup:  derefStr(route.RateLimitGroup),
-		RateLimitMax:    BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
-		RateLimitWindow: sync.IntervalToDuration(route.RateLimitWindow),
-		UserKey:         "hangar:global",
-		Validators:      validators,
+		CacheMode:        derefStr(route.CacheMode),
+		RateLimitGroup:   derefStr(route.RateLimitGroup),
+		RateLimitMax:     BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
+		RateLimitRealMax: ReconcileRateLimitMax(derefInt32(route.RateLimitMax)),
+		RateLimitWindow:  sync.IntervalToDuration(route.RateLimitWindow),
+		UserKey:          "hangar:global",
+		// EntityID stays 0: a global route has no owner, so §5.8's
+		// entity-scoped 403 breaker has nothing to key on. These routes are
+		// unauthenticated and cannot 403 for an authorisation reason.
+		Validators: validators,
 	})
 	if doErr != nil {
+		if r, ok := classifyRefusal(doErr, w.Policy.TTLFloor, time.Now()); ok {
+			return 0, r.reason, snoozeRefusal(ctx, s, sub.SubscriptionID, r)
+		}
 		return 0, normalize.Outcome(0, true), doErr
 	}
 
@@ -183,6 +190,9 @@ func (w *GlobalWorker) doSync(ctx context.Context, s *store.Store, sub gen.AppSy
 			return n, outcome, err
 		}
 		return n, outcome, nil
+
+	case http.StatusTooManyRequests:
+		return 0, outcome, snoozeAfter429(ctx, s, sub.SubscriptionID, resp, w.Policy.TTLFloor)
 
 	default:
 		return 0, outcome, fmt.Errorf("worker: unexpected status %d from %s", resp.StatusCode, route.UpstreamPath)

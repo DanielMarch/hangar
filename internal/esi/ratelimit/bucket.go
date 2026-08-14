@@ -109,6 +109,27 @@ func (b *bucket) available() int {
 	return b.maxTokens - b.liveCost()
 }
 
+// settledCost sums only the live SETTLED/SYNTHETIC entries, excluding
+// in-flight reservations. It is the reconciliation view (§5.5's "the server
+// always wins"), never the acquire view: acquire must count reservations,
+// which is the entire purpose of predictive reservation, while
+// reconciliation must not, because the server's reading cannot include a
+// request that has not finished. Mixing the two produced a permanent
+// divergence on a live installation — see
+// db/queries/esi_ledger.sql's SumSettledLedgerEntryCost.
+func (b *bucket) settledCost() int {
+	total := 0
+	for _, e := range b.ledger {
+		total += int(e.cost)
+	}
+	return total
+}
+
+// settledAvailable is available() over settled consumption only.
+func (b *bucket) settledAvailable() int {
+	return b.maxTokens - b.settledCost()
+}
+
 // oldestLiveConsumedAt returns the smallest consumedAt among live
 // settled/synthetic ledger entries (reservations excluded — their release
 // time isn't knowable in advance). ok is false when the ledger is empty.
@@ -159,9 +180,12 @@ func (b *bucket) injectSynthetic(cost int16, now time.Time) {
 }
 
 // evictOldestUntil pops oldest ledger entries (never reservations) until
-// available() would reach at least target, or the ledger is exhausted.
+// SETTLED availability would reach at least target, or the ledger is
+// exhausted. Settled, for the same reason Reconcile compares against
+// settled: the target came from the server, and the server has not counted
+// the in-flight reservations.
 func (b *bucket) evictOldestUntil(target int) {
-	for b.available() < target && b.ledger.Len() > 0 {
+	for b.settledAvailable() < target && b.ledger.Len() > 0 {
 		heap.Pop(&b.ledger)
 	}
 }

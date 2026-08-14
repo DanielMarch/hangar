@@ -96,6 +96,53 @@ func (q *Queries) CheckPermission(ctx context.Context, permission string, superu
 	return permitted, err
 }
 
+const countSuperuserHolders = `-- name: CountSuperuserHolders :one
+WITH holders AS (
+    SELECT ur.user_id, g.effect
+      FROM app.user_role ur
+      JOIN app.role_grant g ON g.role_id = ur.role_id
+     WHERE g.permission = $1::text
+    UNION ALL
+    SELECT c.user_id, g.effect
+      FROM app.squad_role sr
+      JOIN app.squad_member sm ON sm.squad_id = sr.squad_id
+      JOIN app.character c ON c.character_id = sm.character_id
+      JOIN app.role_grant g ON g.role_id = sr.role_id
+     WHERE g.permission = $1::text
+       AND c.user_id IS NOT NULL
+)
+SELECT count(*)::bigint AS holders
+  FROM (
+    SELECT user_id
+      FROM holders
+     GROUP BY user_id
+    HAVING bool_or(effect = 'allow') AND NOT bool_or(effect = 'deny')
+  ) permitted
+`
+
+// PHASE 20.2 (defect B40). How many users currently hold an ALLOWED
+// superuser grant by either path — the exact question "does this
+// installation have an administrator yet?" reduces to, and the guard
+// internal/rbac.BootstrapFirstAdmin runs before promoting a first-time SSO
+// user.
+//
+// It counts USERS, not grants: a role could grant superuser and be held by
+// nobody, which is an installation with no administrator however the
+// grants read. A deny anywhere on superuser removes that user from the
+// count, matching internal/rbac.Resolve's absolute deny precedence exactly
+// — the two must agree, or a user the middleware treats as unprivileged
+// would still suppress the bootstrap and leave the installation locked.
+//
+// The permission name is an argument rather than a literal so it cannot
+// drift from internal/domain.SuperuserPermission, the same convention
+// CheckPermission above uses.
+func (q *Queries) CountSuperuserHolders(ctx context.Context, superuserPermission string) (int64, error) {
+	row := q.db.QueryRow(ctx, countSuperuserHolders, superuserPermission)
+	var holders int64
+	err := row.Scan(&holders)
+	return holders, err
+}
+
 const createRole = `-- name: CreateRole :one
 INSERT INTO app.role (name, description, is_system)
 VALUES ($1, $2, $3)

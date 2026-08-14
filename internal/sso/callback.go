@@ -89,6 +89,29 @@ type Flow struct {
 	// OnOwnerHashChanged above.
 	OnTokenPersisted func(ctx context.Context, characterID int64, scopes []string)
 
+	// OnUserAuthenticated is called (if set) once a login has resolved a
+	// user and persisted its token, BEFORE the authenticated session is
+	// issued.
+	//
+	// PHASE 20.2, defect B40. cmd/hangar wires this to
+	// internal/rbac.BootstrapFirstAdmin, which promotes the user only when
+	// the installation has no administrator at all. It runs before
+	// CompleteSessionLogin deliberately: the session the browser receives
+	// must already be able to read something, or the operator's first
+	// screen after logging in is a wall of 403s that only clears on a
+	// reload they have no reason to perform.
+	//
+	// It fires on EVERY login, not only for a brand-new user, because an
+	// installation upgraded from a build that predates this hook has a real
+	// user who already exists and still holds nothing. The "is there an
+	// administrator yet" question is answered against the database by the
+	// callee, never inferred from isNewUser here.
+	//
+	// A hook rather than a direct call for the same reason as
+	// OnTokenPersisted below: internal/sso has no business importing the
+	// RBAC materialiser to complete a login.
+	OnUserAuthenticated func(ctx context.Context, userID uuid.UUID, isNewUser bool)
+
 	// LoginScopes resolves the scope set every login and reauthorization
 	// requests (defect B37). Resolved per call rather than once at
 	// construction, because `serve` ingests the route catalogue in the
@@ -243,6 +266,15 @@ func (f *Flow) HandleCallback(ctx context.Context, sessionID uuid.UUID, code, st
 	// turn a delayed sync into a locked-out user. The hook logs.
 	if f.OnTokenPersisted != nil {
 		f.OnTokenPersisted(ctx, characterID, []string(claims.Scopes))
+	}
+
+	// Defect B40: make sure SOMEBODY can administer this installation. Like
+	// the hook above, a failure here does not fail the login — the
+	// alternative is refusing to authenticate a user because a role
+	// assignment did not commit, which leaves the operator with neither a
+	// session nor a permission. The hook logs.
+	if f.OnUserAuthenticated != nil {
+		f.OnUserAuthenticated(ctx, userID, isNewUser)
 	}
 
 	expiresAt := time.Now().Add(f.sessionTTL())

@@ -33,26 +33,6 @@ func (q *Queries) GetErrorBudget(ctx context.Context) (AppEsiErrorBudget, error)
 	return i, err
 }
 
-const incrementErrorBudget = `-- name: IncrementErrorBudget :one
-UPDATE app.esi_error_budget
-   SET error_count = error_count + 1, updated_at = now()
- WHERE id = 1
-RETURNING id, window_start, error_count, paused, updated_at
-`
-
-func (q *Queries) IncrementErrorBudget(ctx context.Context) (AppEsiErrorBudget, error) {
-	row := q.db.QueryRow(ctx, incrementErrorBudget)
-	var i AppEsiErrorBudget
-	err := row.Scan(
-		&i.ID,
-		&i.WindowStart,
-		&i.ErrorCount,
-		&i.Paused,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const initErrorBudget = `-- name: InitErrorBudget :exec
 INSERT INTO app.esi_error_budget (id, window_start, error_count, paused)
 VALUES (1, now(), 0, false)
@@ -93,17 +73,6 @@ func (q *Queries) RecordErrorAgainstBudget(ctx context.Context, errorWindow time
 		&i.UpdatedAt,
 	)
 	return i, err
-}
-
-const resetErrorBudgetWindow = `-- name: ResetErrorBudgetWindow :exec
-UPDATE app.esi_error_budget
-   SET window_start = now(), error_count = 0, updated_at = now()
- WHERE id = 1
-`
-
-func (q *Queries) ResetErrorBudgetWindow(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, resetErrorBudgetWindow)
-	return err
 }
 
 const setErrorBudgetPaused = `-- name: SetErrorBudgetPaused :exec

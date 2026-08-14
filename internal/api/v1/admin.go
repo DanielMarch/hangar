@@ -733,6 +733,23 @@ func updateUserHandler(deps api.Deps) func(context.Context, *UpdateUserIn) (*Ite
 				return nil, api.Internal("setting main character", err)
 			}
 		}
+		// PHASE 20.2. UpdateUserIn has declared `is_active` and `is_admin`
+		// since Phase 15 and this handler SILENTLY DROPPED BOTH — the
+		// OpenAPI document advertised them, the SPA sent them, the endpoint
+		// answered 200, and nothing changed. Deactivating a compromised
+		// account is not a field to lose quietly.
+		if in.Body.IsActive != nil {
+			if err := deps.Store.SetUserActive(ctx, id, *in.Body.IsActive); err != nil {
+				return nil, api.Internal("setting user active", err)
+			}
+			auditAdminAction(ctx, deps, "admin.user.active_changed", id.String())
+		}
+		if in.Body.IsAdmin != nil {
+			if err := deps.Store.SetUserAdmin(ctx, id, *in.Body.IsAdmin); err != nil {
+				return nil, api.Internal("setting user admin", err)
+			}
+			auditAdminAction(ctx, deps, "admin.user.admin_changed", id.String())
+		}
 		row, err := deps.Store.GetUser(ctx, id)
 		if err != nil {
 			return nil, api.NotFound("user")

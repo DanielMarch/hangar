@@ -4,6 +4,27 @@
 // unlike characters.go/corporations.go this group actually has a
 // fully-specified permission per action, so each route below uses the
 // specific one rather than a single shared floor.
+//
+// ── PHASE 20.2, DEFECT B26: THE MUTATIONS GO THROUGH internal/rbac ───────
+// The four membership/role mutations below used to call the RAW generated
+// queries (deps.Store.AddSquadMember, AddSquadRole, ...). Those write
+// app.squad_member / app.squad_role faithfully and do NOTHING ELSE — and a
+// squad that grants a role is one of exactly two paths by which a role
+// reaches a user (02_DATABASE_SCHEMA.md §4.2). RequirePermission reads only
+// the MATERIALISED app.effective_permission, so adding somebody to a
+// role-granting squad changed no permission they actually held: the row
+// existed, the access did not, and the screen said the change had been
+// saved.
+//
+// internal/rbac's wrappers do the mutation, recompute the affected users'
+// effective permissions, and write §4.9's outbox event — all in ONE
+// transaction. That transactional coupling is the whole reason those
+// wrappers exist, and calling around them made it optional in practice.
+//
+// The two set-replacing handlers also stopped discarding their errors.
+// `_ = deps.Store.AddSquadRole(...)` reported success for a save that had
+// failed, which on a permission-granting operation is the worst possible
+// direction to be wrong in.
 package v1
 
 import (
@@ -13,6 +34,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/hangar-project/hangar/internal/api"
+	"github.com/hangar-project/hangar/internal/rbac"
 	"github.com/hangar-project/hangar/internal/store/gen"
 )
 
@@ -166,7 +188,10 @@ func addSquadMemberHandler(deps api.Deps) func(context.Context, *SquadMemberIn) 
 		if err != nil {
 			return nil, huma.Error400BadRequest("malformed id")
 		}
-		if err := deps.Store.AddSquadMember(ctx, id, in.Body.CharacterID); err != nil {
+		if deps.Pool == nil {
+			return nil, api.Internal("adding squad member", huma.Error500InternalServerError("no transactional pool configured"))
+		}
+		if err := rbac.AddSquadMember(ctx, deps.Pool, id, in.Body.CharacterID); err != nil {
 			return nil, api.Internal("adding squad member", err)
 		}
 		return &EmptyOut{}, nil
@@ -179,7 +204,10 @@ func removeSquadMemberHandler(deps api.Deps) func(context.Context, *SquadMemberD
 		if err != nil {
 			return nil, huma.Error400BadRequest("malformed id")
 		}
-		if err := deps.Store.RemoveSquadMember(ctx, id, in.CharacterID); err != nil {
+		if deps.Pool == nil {
+			return nil, api.Internal("removing squad member", huma.Error500InternalServerError("no transactional pool configured"))
+		}
+		if err := rbac.RemoveSquadMember(ctx, deps.Pool, id, in.CharacterID); err != nil {
 			return nil, api.Internal("removing squad member", err)
 		}
 		return &EmptyOut{}, nil
@@ -297,14 +325,23 @@ func setSquadRolesHandler(deps api.Deps) func(context.Context, *SquadRolesIn) (*
 		for _, r := range current {
 			have[r] = true
 		}
+		if deps.Pool == nil {
+			return nil, api.Internal("replacing squad roles", huma.Error500InternalServerError("no transactional pool configured"))
+		}
 		for rid := range want {
-			if !have[rid] {
-				_ = deps.Store.AddSquadRole(ctx, id, rid)
+			if have[rid] {
+				continue
+			}
+			if err := rbac.AddSquadRole(ctx, deps.Pool, id, rid); err != nil {
+				return nil, api.Internal("adding squad role", err)
 			}
 		}
 		for rid := range have {
-			if !want[rid] {
-				_ = deps.Store.RemoveSquadRole(ctx, id, rid)
+			if want[rid] {
+				continue
+			}
+			if err := rbac.RemoveSquadRole(ctx, deps.Pool, id, rid); err != nil {
+				return nil, api.Internal("removing squad role", err)
 			}
 		}
 		return &EmptyOut{}, nil

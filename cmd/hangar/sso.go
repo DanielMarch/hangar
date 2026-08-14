@@ -24,6 +24,7 @@ import (
 	"github.com/hangar-project/hangar/internal/config"
 	"github.com/hangar-project/hangar/internal/crypto"
 	"github.com/hangar-project/hangar/internal/esi/catalogue"
+	"github.com/hangar-project/hangar/internal/rbac"
 	"github.com/hangar-project/hangar/internal/scopes"
 	"github.com/hangar-project/hangar/internal/sso"
 	"github.com/hangar-project/hangar/internal/sso/jwks"
@@ -71,7 +72,7 @@ func (a jwksSettingStore) UpsertSetting(ctx context.Context, key string, value j
 // No jwks.Clock implementation is passed: jwks.NewCache already defaults
 // a nil clock to its own unexported systemClock (cache.go), so supplying
 // one here would add a type for no behavioural difference.
-func buildSSOFlow(ctx context.Context, cfg *config.Config, s *store.Store, keyring *crypto.Keyring, logger *slog.Logger) (*sso.Flow, error) {
+func buildSSOFlow(ctx context.Context, cfg *config.Config, pool store.Pool, s *store.Store, keyring *crypto.Keyring, logger *slog.Logger) (*sso.Flow, error) {
 	cache := jwks.NewCache(cfg.SSO.JWKSURL, jwksSettingStore{store: s}, nil, nil)
 
 	loadErr := cache.Load(ctx)
@@ -97,6 +98,35 @@ func buildSSOFlow(ctx context.Context, cfg *config.Config, s *store.Store, keyri
 		SessionTTL: cfg.Crypto.SessionTTL,
 		// Phase 20.2, defect B37.
 		LoginScopes: loginScopeResolver(s, cfg.SSO.Scopes, logger),
+		// Phase 20.2, defect B40: a freshly authenticated SSO user held ZERO
+		// permissions, and no route existed by which anyone could grant them
+		// any. BootstrapFirstAdmin promotes this user to the seeded `admin`
+		// role IF AND ONLY IF the installation currently has nobody holding
+		// superuser — see internal/rbac/bootstrap.go for why that condition
+		// and not "is this the first user row".
+		//
+		// Failure is logged, never returned, for the same reason as the
+		// subscription hook below: the login has succeeded, and refusing it
+		// over a role assignment leaves the operator with neither a session
+		// nor a permission. The log line is loud because an installation
+		// that reaches it is one nobody can administer.
+		OnUserAuthenticated: func(ctx context.Context, userID uuid.UUID, isNewUser bool) {
+			promoted, err := rbac.BootstrapFirstAdmin(ctx, pool, userID)
+			if err != nil {
+				logger.ErrorContext(ctx,
+					"rbac: first-administrator bootstrap failed — if this installation has no "+
+						"administrator, nobody can grant one through the API; "+
+						"run 'hangar admin bootstrap-token' to recover",
+					"user_id", userID, "new_user", isNewUser, "error", err)
+				return
+			}
+			if promoted {
+				logger.InfoContext(ctx,
+					"rbac: this installation had no administrator, so the authenticating user has been "+
+						"granted the seeded 'admin' role. Every subsequent login is unaffected.",
+					"user_id", userID, "role", rbac.BootstrapRoleName)
+			}
+		},
 		// Phase 20.1.1, defect B42: authorising a character schedules its
 		// routes immediately rather than at the next reconcile tick.
 		//

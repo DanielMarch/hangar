@@ -47,7 +47,13 @@
     "boundaryBody": "此部分加载失败。",
     "retry": "重试",
     "forbiddenTitle": "无访问权限",
-    "forbiddenBody": "您没有权限查看此内容。"
+    "forbiddenBody": "您没有权限查看此内容。",
+    "rootTitle": "HANGAR 无法渲染此页面",
+    "rootBody": "页面加载前发生错误。下面是错误本身，请在提交缺陷报告时一并附上。",
+    "rootSignIn": "前往登录页面",
+    "rootReload": "重新加载应用",
+    "notFoundTitle": "页面未找到",
+    "notFoundBack": "返回仪表板"
   },
   "breadcrumbs": {
     "home": "首页"

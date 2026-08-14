@@ -32,6 +32,28 @@ type Config struct {
 	PublicURL      string
 	TrustedProxies []string
 
+	// Locale is the installation's UI locale (HANGAR_LOCALE), one of
+	// internal/i18n's nine. It resolves — through internal/i18n's table,
+	// never a second copy of it — to the Accept-Language HANGAR's ESI
+	// gateway sends and keys its cache on (§5.3, §13).
+	//
+	// ── PHASE 20.2, DEFECT B23: WHY INSTALLATION-WIDE AND NOT PER USER ───
+	// internal/i18n was absent from the binary entirely, so nothing ever
+	// resolved a language and every ESI request went out with none. The
+	// obvious repair — take it from the acting user — is wrong twice:
+	// background sync is the overwhelming majority of HANGAR's ESI traffic
+	// and has no acting user at all, and the resolved language is part of
+	// the ESI cache key, so a per-user value fragments one shared cache
+	// into up to nine, for payloads that are byte-identical apart from a
+	// few localised name fields.
+	//
+	// It is deliberately NOT derived from the route catalogue the way
+	// internal/scopes/login.go derives its scope set. A scope set is a
+	// property of the spec and must track it; a locale is an operator's
+	// choice about their own installation and no amount of reading the
+	// spec reveals it.
+	Locale string
+
 	DB        DatabaseConfig
 	Redis     RedisConfig
 	Crypto    CryptoConfig
@@ -346,6 +368,7 @@ func applyDefaults(v *viper.Viper) {
 	v.SetDefault("metrics_addr", "0.0.0.0:9090")
 	v.SetDefault("public_url", "http://localhost:8080")
 	v.SetDefault("trusted_proxies", "")
+	v.SetDefault("locale", "en")
 
 	v.SetDefault("db_max_conns", 25)
 	v.SetDefault("db_min_conns", 5)
@@ -484,6 +507,7 @@ func Load(v *viper.Viper) (*Config, error) {
 		MetricsAddr:    v.GetString("metrics_addr"),
 		PublicURL:      v.GetString("public_url"),
 		TrustedProxies: splitCSV(v.GetString("trusted_proxies")),
+		Locale:         v.GetString("locale"),
 
 		DB: DatabaseConfig{
 			URL:              NewSecret(v.GetString("db_url")),

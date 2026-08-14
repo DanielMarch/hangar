@@ -472,6 +472,32 @@ the acting-character fallback in §6.3.
 Torn-set detection is a correctness control, not an optimisation: partially committing a
 paged wallet journal silently loses transactions.
 
+**Amended in Phase 20.2 (defect B31), against a measurement.** Two implementations of the
+page mechanism existed — `internal/esi/pagination`, fully tested and not imported by the
+binary at all, and a serial copy inside `internal/sync/worker` that was the one that ran.
+They disagreed on two points, and both are settled here rather than by preferring whichever
+was easier to keep. `internal/esi/pagination` is now the single implementation.
+
+* **Concurrency 4 stands and now actually happens.** The dead implementation had it, the
+  live one was serial. It is a cap, not a quota, and it cannot cause a rate-limit breach:
+  every page is issued through `internal/esi.Client.Do`, so every page takes a Governor 1
+  reservation, and a walk that runs out of budget is refused with a `RetryAtError` and
+  snoozed rather than admitted. The serial walker was never safer, only slower.
+* **The torn-set rule is TIGHTENED.** A page that disagrees with page 1 about whether it
+  carries `Last-Modified` **at all** is torn, not merely uninformative. The lenient reading
+  — skip a validator-less page and declare the set intact — treats the *absence* of the
+  evidence this rule is built on as evidence of intactness, which is the wrong direction for
+  a control whose whole justification is that the failure is silent. A set where **no** page
+  carries a validator is not torn: there is nothing to disagree about, and rejecting it
+  would make every validator-less paginated route permanently unsyncable.
+
+**The cursor mechanism's torn-set position, stated because its absence above is deliberate.**
+The `Last-Modified` rule belongs to `page` and only to `page`. CCP documents the cursor
+parameters as continuing "to walk forwards in time", i.e. the mechanism is designed for a set
+that may be appended to while it is read; applying the page rule there would make a
+corporation whose projects change mid-walk permanently unsyncable — the failure this control
+exists to prevent, inverted.
+
 ---
 
 ## 6. Sync engine (`internal/sync`)

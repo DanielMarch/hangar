@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/hangar-project/hangar/internal/config"
+	"github.com/hangar-project/hangar/internal/i18n"
 	"github.com/stretchr/testify/require"
 )
 
@@ -180,4 +181,50 @@ func TestSecretRedactsInEveryPath(t *testing.T) {
 	require.NotContains(t, string(wb), "super-secret-value")
 
 	require.Equal(t, "super-secret-value", s.Reveal())
+}
+
+// ── PHASE 20.2, DEFECT B23 ───────────────────────────────────────────────
+
+// TestLocaleIsValidatedAtBoot. internal/i18n was absent from the binary
+// entirely, so nothing ever resolved an ESI Accept-Language and the gateway
+// sent none. Now that HANGAR_LOCALE feeds the ESI cache key (§5.3), an
+// unrecognised value must fail at BOOT rather than at the first outbound
+// request — and the error must enumerate what IS valid, from internal/i18n's
+// own table rather than a second copy of it.
+func TestLocaleIsValidatedAtBoot(t *testing.T) {
+	env := fullValidEnv()
+	env["HANGAR_LOCALE"] = "klingon"
+	setEnv(t, env)
+
+	_, err := config.Load(config.New())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "HANGAR_LOCALE")
+	for _, want := range i18n.UILocales() {
+		require.Contains(t, err.Error(), want,
+			"the error must enumerate the valid set so an operator does not have to read the source")
+	}
+}
+
+// TestEveryUILocaleIsAcceptedByValidate closes the loop the other way: the
+// nine locales internal/i18n declares are exactly the nine config accepts,
+// so adding a tenth to locales.json needs no edit to internal/config.
+func TestEveryUILocaleIsAcceptedByValidate(t *testing.T) {
+	for _, locale := range i18n.UILocales() {
+		env := fullValidEnv()
+		env["HANGAR_LOCALE"] = locale
+		setEnv(t, env)
+
+		cfg, err := config.Load(config.New())
+		require.NoError(t, err, "locale %q is declared in locales.json and must validate", locale)
+		require.Equal(t, locale, cfg.Locale)
+	}
+}
+
+// TestLocaleDefaultsToEnglish — an installation that sets nothing gets a
+// working gateway, not a validation failure.
+func TestLocaleDefaultsToEnglish(t *testing.T) {
+	setEnv(t, fullValidEnv())
+	cfg, err := config.Load(config.New())
+	require.NoError(t, err)
+	require.Equal(t, "en", cfg.Locale)
 }
