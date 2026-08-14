@@ -76,6 +76,36 @@ type Client struct {
 	// Tenant is the cache key's installation-scoping field (§5.3) — a
 	// single-tenant HANGAR install uses a fixed value.
 	Tenant string
+
+	// CompatibilityPin resolves the installation's current ESI
+	// compatibility date ("YYYY-MM-DD") for the cache key. nil means "not
+	// pinned", which keys every entry under the empty string — correct for
+	// a unit test, and never the case in a real gateway.
+	//
+	// ── PHASE 20.3: THE CACHE KEY OMITTED THE COMPATIBILITY DATE ─────────
+	// 01_ARCHITECTURE.md §5.3's key formula is
+	//   sha256(method ‖ path ‖ query ‖ COMPATIBILITY_DATE ‖ tenant ‖
+	//          language ‖ token_subject)
+	// and cache.KeyInput has declared the field since Phase 3. cacheKey
+	// never populated it. Every cached body was therefore keyed as though
+	// the pin did not exist, and advancing the pin — the one operation the
+	// pin exists for, because it changes what ESI returns — invalidated
+	// NOTHING. An installation that advanced its pin kept serving bodies
+	// fetched under the old one until each aged out on its own TTL.
+	//
+	// It is a function rather than a string because the pin is stored in
+	// app.setting and an operator can advance it on a running installation
+	// (the pin-advance flow has its own confirmation dialog and its own
+	// e2e spec). A value captured at gateway construction would go stale at
+	// the exact moment it matters most.
+	//
+	// A resolution failure is treated as "" rather than failing the
+	// request. That is deliberate and it is the conservative direction: an
+	// unreadable pin means the key falls back to the shape it had before
+	// this fix, so a request still succeeds and still caches. Refusing to
+	// serve because app.setting could not be read would turn a degraded
+	// cache into an outage.
+	CompatibilityPin func() (string, error)
 }
 
 // ErrBreakerOpen is returned when RouteBreaker.Allow refuses the call.
@@ -127,20 +157,32 @@ type Request struct {
 	// RateLimitGroup/Max/Window are app.esi_route's Governor 1 bucket
 	// config; RateLimitGroup == "" disables Governor 1 for this call
 	// (only the discovery fetch and a handful of unthrottled routes).
+	//
+	// RateLimitMax is the route's REAL, advertised ceiling and must never
+	// carry a call-site reduction: it is what gets persisted as the
+	// bucket's max_tokens and what Ledger.Reconcile measures the server's
+	// X-Ratelimit-Remaining against. A reduction goes in
+	// RateLimitAdmissionMax below.
 	RateLimitGroup  string
 	RateLimitMax    int
 	RateLimitWindow time.Duration
 
-	// RateLimitRealMax is the route's UNREDUCED ceiling, used only for
-	// Ledger.Reconcile. RateLimitMax above may be a call-site policy
-	// reduction — internal/sync/worker.BackgroundRateLimitMax holds five
-	// tokens of char-notification back for interactive callers — and
-	// feeding that fiction to the reconciler would desync the ledger from
-	// the very truth it exists to import (§5.5 "the server always wins";
-	// see internal/sync/worker/reserve.go's header). Zero means "same as
-	// RateLimitMax", which is correct for every caller that applies no
-	// reduction.
-	RateLimitRealMax int
+	// RateLimitAdmissionMax is the ceiling THIS call may admit against
+	// when the caller holds part of the bucket back for somebody else —
+	// internal/sync/worker.BackgroundRateLimitMax keeps five
+	// char-notification tokens for interactive callers (§4.4). Zero means
+	// "no reduction", which is correct for every other caller.
+	//
+	// PHASE 20.3 replaced the previous RateLimitRealMax field, which said
+	// the same thing the other way round: RateLimitMax carried the
+	// REDUCED value and RateLimitRealMax the true one. That shape put the
+	// fiction on the field the ledger persists, so the reduction was
+	// written to app.esi_ledger_bucket.max_tokens and Gate 1.3 read a
+	// permanent divergence of 5 on char-notification. Defaulting the
+	// truth and making the policy the opt-in also means a caller that
+	// forgets this field loses a reserve, where a caller that forgot the
+	// old one corrupted the ledger.
+	RateLimitAdmissionMax int
 
 	// EntityID is the owner this call is made on behalf of — the character
 	// id, the corporation id, or 0 for a global/unowned route. It keys
@@ -259,8 +301,10 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 	if c.Ledger != nil && req.RateLimitGroup != "" {
 		res, err := c.Ledger.Acquire(ctx, ratelimit.AcquireRequest{
 			Group: req.RateLimitGroup, UserKey: req.UserKey,
-			MaxTokens: req.RateLimitMax, Window: req.RateLimitWindow,
-			RequestTimeout: c.requestTimeout(),
+			MaxTokens:          req.RateLimitMax,
+			AdmissionMaxTokens: req.RateLimitAdmissionMax,
+			Window:             req.RateLimitWindow,
+			RequestTimeout:     c.requestTimeout(),
 		})
 		if err != nil {
 			return nil, err // *ratelimit.RetryAtError on insufficient budget
@@ -430,17 +474,15 @@ func (c *Client) recordErrorBudget(ctx context.Context, outcome ratelimit.Outcom
 // than converge on a fiction.
 //
 // The ceiling is the server's own X-Ratelimit-Limit when it sent one, and
-// the route's UNREDUCED catalogue value otherwise. Never Request.
-// RateLimitMax, which may carry a call-site reserve — see the field's
-// comment and internal/sync/worker/reserve.go.
+// the route's catalogue value otherwise — Request.RateLimitMax, which since
+// Phase 20.3 is the real ceiling for every caller (a call-site reserve
+// lives in RateLimitAdmissionMax and never reaches this function or the
+// bucket row). See internal/sync/worker/reserve.go.
 func (c *Client) reconcile(ctx context.Context, req Request, outcome ratelimit.Outcome) {
 	if c.Ledger == nil || req.RateLimitGroup == "" || !outcome.ServerRemainingOK {
 		return
 	}
-	maxTokens := req.RateLimitRealMax
-	if maxTokens <= 0 {
-		maxTokens = req.RateLimitMax
-	}
+	maxTokens := req.RateLimitMax
 	if outcome.ServerLimitOK {
 		maxTokens = outcome.ServerMaxTokens
 	}
@@ -470,9 +512,23 @@ func parsePages(raw string) int {
 func (c *Client) cacheKey(req Request) string {
 	return cache.Key(cache.KeyInput{
 		Method: req.Method, Path: req.UpstreamPath, Query: req.Query,
-		Tenant: c.Tenant, ResolvedLanguage: c.Language,
+		CompatibilityDate: c.compatibilityDate(),
+		Tenant:            c.Tenant, ResolvedLanguage: c.Language,
 		TokenSubject: tokenSubject(req.AccessToken),
 	})
+}
+
+// compatibilityDate resolves the pin for the cache key, or "" — see
+// Client.CompatibilityPin for why a failure degrades rather than errors.
+func (c *Client) compatibilityDate() string {
+	if c.CompatibilityPin == nil {
+		return ""
+	}
+	pin, err := c.CompatibilityPin()
+	if err != nil {
+		return ""
+	}
+	return pin
 }
 
 func (c *Client) cachedBody(ctx context.Context, req Request) (body []byte, etag string, lastMod time.Time, hasLastMod bool, ok bool) {

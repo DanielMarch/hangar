@@ -98,6 +98,122 @@ func TestClusteredLedgerNeverExceedsMaxTokens(t *testing.T) {
 		"aggregate admitted requests must never let consumption exceed max_tokens")
 }
 
+// ── PHASE 20.3: THE ROW MUST HOLD THE REAL CEILING ──────────────────────
+//
+// This is the defect that carried out of 20.2 as Gate 1.3's only remaining
+// blocker, asserted where it was actually measured: the bucket row.
+// esi_ledger_divergence is computed as
+//
+//	|(max_tokens - settled_consumption) - server_remaining|
+//
+// straight out of app.esi_ledger_bucket, so a max_tokens carrying §4.4's
+// five-token char-notification reserve made a perfectly healthy
+// installation report a permanent divergence of exactly 5, against a
+// tolerance of 1.
+func TestClusteredAdmissionCeilingIsNeverStored(t *testing.T) {
+	pool := newMigratedPool(t)
+	ctx := context.Background()
+	ledger := ratelimit.NewLedgerClustered(pool)
+
+	background := ratelimit.AcquireRequest{
+		Group: "char-notification", UserKey: "char:store-real",
+		MaxTokens: 15, AdmissionMaxTokens: 10,
+		Window: 15 * time.Minute, RequestTimeout: 30 * time.Second,
+	}
+
+	res, err := ledger.Acquire(ctx, background)
+	require.NoError(t, err)
+	require.NoError(t, ledger.Settle(ctx, res, ratelimit.Cost2XX, time.Now()))
+
+	var stored int32
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT max_tokens FROM app.esi_ledger_bucket WHERE rate_limit_group = $1 AND user_key = $2`,
+		background.Group, background.UserKey).Scan(&stored))
+	require.Equal(t, int32(15), stored,
+		"app.esi_ledger_bucket.max_tokens must hold the route's REAL ceiling — the caller's reduced "+
+			"admission ceiling belongs to the call, not to a row every caller shares")
+
+	// The reserve still holds, cluster-wide, with the reduction now living
+	// entirely in the acquire statement's parameter.
+	admitted := 0
+	for i := 0; i < 50; i++ {
+		r, err := ledger.Acquire(ctx, background)
+		if err != nil {
+			require.ErrorIs(t, err, ratelimit.ErrRateLimited)
+			break
+		}
+		require.NoError(t, ledger.Settle(ctx, r, ratelimit.Cost2XX, time.Now()))
+		admitted++
+	}
+	require.Less(t, admitted, 50, "the background caller must be refused at its own reduced ceiling")
+
+	interactive := background
+	interactive.AdmissionMaxTokens = 0
+	r, err := ledger.Acquire(ctx, interactive)
+	require.NoError(t, err,
+		"an interactive caller applying no reduction must find the five reserved tokens")
+	require.NoError(t, ledger.Settle(ctx, r, ratelimit.Cost2XX, time.Now()))
+
+	// And that interactive call did not rewrite the row — the flip-flop
+	// that made every alternating call a real write before 20.3.
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT max_tokens FROM app.esi_ledger_bucket WHERE rate_limit_group = $1 AND user_key = $2`,
+		background.Group, background.UserKey).Scan(&stored))
+	require.Equal(t, int32(15), stored,
+		"two callers with different admission policies must agree on what is stored")
+}
+
+// TestClusteredDivergenceIsZeroForAReservedBucket closes the loop on the
+// measurement itself: with the real ceiling stored, a bucket whose
+// consumption the server agrees with reports divergence 0 — the reading
+// Gate 1.3 requires and the one char-notification could not produce before
+// 20.3, however healthy the installation.
+func TestClusteredDivergenceIsZeroForAReservedBucket(t *testing.T) {
+	pool := newMigratedPool(t)
+	ctx := context.Background()
+	ledger := ratelimit.NewLedgerClustered(pool)
+
+	req := ratelimit.AcquireRequest{
+		Group: "char-notification", UserKey: "char:divergence",
+		MaxTokens: 15, AdmissionMaxTokens: 10,
+		Window: 15 * time.Minute, RequestTimeout: 30 * time.Second,
+	}
+
+	// Two background calls, settled at 2XX cost: local consumption is 4, so
+	// local_remaining against the real ceiling is 11.
+	for i := 0; i < 2; i++ {
+		res, err := ledger.Acquire(ctx, req)
+		require.NoError(t, err)
+		require.NoError(t, ledger.Settle(ctx, res, ratelimit.Cost2XX, time.Now()))
+	}
+
+	// The server reports the same headroom it would for those two calls,
+	// against ITS ceiling of 15 — which is the whole point: ESI has never
+	// heard of the reserve.
+	require.NoError(t, ledger.Reconcile(ctx, req.Group, req.UserKey, 15, 11))
+
+	var maxTokens, serverRemaining int32
+	var consumed int64
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT b.max_tokens, b.server_remaining,
+		       coalesce((SELECT sum(e.cost) FROM app.esi_ledger_entry e
+		                  WHERE e.rate_limit_group = b.rate_limit_group
+		                    AND e.user_key = b.user_key
+		                    AND e.state != 'reserved'), 0)
+		  FROM app.esi_ledger_bucket b
+		 WHERE b.rate_limit_group = $1 AND b.user_key = $2`,
+		req.Group, req.UserKey).Scan(&maxTokens, &serverRemaining, &consumed))
+
+	localRemaining := int64(maxTokens) - consumed
+	divergence := localRemaining - int64(serverRemaining)
+	if divergence < 0 {
+		divergence = -divergence
+	}
+	require.LessOrEqual(t, divergence, int64(1),
+		"Gate 1.3 tolerance: max_tokens=%d consumed=%d local_remaining=%d server_remaining=%d",
+		maxTokens, consumed, localRemaining, serverRemaining)
+}
+
 // TestClusteredReservationSurvivesReplicaCrash (roadmap exit criterion): a
 // killed replica's reservations expire (at the request timeout) and are
 // reclaimed — charged the worst case, never freed — by the next acquire.

@@ -98,6 +98,13 @@ func buildGateway(cfg *config.Config, pool *pgxpool.Pool, s *store.Store, logger
 		TTLFloor:      cfg.ESI.TTLFloor,
 		Language:      language,
 		Tenant:        "hangar",
+		// PHASE 20.3. The same pinSource the transport already uses for the
+		// X-Compatibility-Date HEADER now also keys the CACHE (§5.3's
+		// formula names compatibility_date and esi.Client.cacheKey never
+		// populated it). One source for both, deliberately: a cache keyed
+		// on a different pin from the one the request was made under is
+		// worse than no pin in the key at all.
+		CompatibilityPin: pinSource,
 	}, governor1, counters, nil
 }
 

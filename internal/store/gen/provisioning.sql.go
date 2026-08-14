@@ -13,15 +13,42 @@ import (
 	"github.com/google/uuid"
 )
 
-const completeProvisioningAudit = `-- name: CompleteProvisioningAudit :exec
+const completeProvisioningAudit = `-- name: CompleteProvisioningAudit :one
 UPDATE app.provisioning_audit
    SET platform_call_completed_at = now(), outcome = $2, error = $3
  WHERE audit_id = $1
+RETURNING extract(epoch FROM (platform_call_completed_at - event_at))::double precision AS latency_seconds
 `
 
-func (q *Queries) CompleteProvisioningAudit(ctx context.Context, auditID uuid.UUID, outcome *string, error *string) error {
-	_, err := q.db.Exec(ctx, completeProvisioningAudit, auditID, outcome, error)
-	return err
+// PHASE 20.3. Now RETURNS the revocation latency, because that number is
+// what feeds provisioning_revocation_latency_seconds (Gate 2).
+//
+// The subtraction is done HERE, in the same statement that writes
+// platform_call_completed_at, and not in Go. Two reasons, and the second
+// is the one that matters:
+//
+//   - 04_RELEASE_GATES.md §2.2 defines the measurement as p99 of
+//     (platform_call_completed_at - event_at) FROM THIS TABLE. Computing
+//     it anywhere else risks the metric and the gate's own query
+//     disagreeing about the same run.
+//   - platform_call_completed_at is Postgres's now(); event_at was stamped
+//     by time.Now() in whichever process observed the originating event.
+//     Subtracting a Go instant from a Postgres instant in Go would add a
+//     third clock to a two-clock problem. Reading back what was actually
+//     STORED and differencing it in one place keeps the operands to the
+//     two the gate itself names. (Their clock domains still differ — that
+//     is inherent in §2.2's own definition, not introduced here.)
+//
+// Nullable because event_at is NOT NULL but a caller could complete an
+// audit row twice; the second UPDATE still returns a real interval, so in
+// practice this is never null. Typed as double precision seconds rather
+// than an interval so the caller can hand it straight to a Prometheus
+// histogram without a unit conversion nobody would remember to check.
+func (q *Queries) CompleteProvisioningAudit(ctx context.Context, auditID uuid.UUID, outcome *string, error *string) (float64, error) {
+	row := q.db.QueryRow(ctx, completeProvisioningAudit, auditID, outcome, error)
+	var latency_seconds float64
+	err := row.Scan(&latency_seconds)
+	return latency_seconds, err
 }
 
 const createEntitlementRule = `-- name: CreateEntitlementRule :one

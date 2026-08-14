@@ -23,6 +23,7 @@ import (
 
 	"github.com/hangar-project/hangar/internal/api"
 	apimw "github.com/hangar-project/hangar/internal/api/middleware"
+	"github.com/hangar-project/hangar/internal/scopes"
 	"github.com/hangar-project/hangar/internal/sso"
 	"github.com/hangar-project/hangar/internal/store"
 	"github.com/hangar-project/hangar/internal/store/gen"
@@ -150,6 +151,31 @@ func myPermissionsHandler(deps api.Deps) func(context.Context, *EmptyIn) (*Colle
 	}
 }
 
+// myCharactersHandler is GET /api/v1/me/characters.
+//
+// PHASE 20.3. Each row now carries `needs_reauthorization` and the exact
+// `missing_scopes` behind it. Without this the SPA can offer a
+// "reauthorize" button but cannot say WHICH characters need it or why, so
+// the answer to "why is this character's data stale" is a support question
+// rather than something the screen already answers. It is also the
+// user-facing half of the scope-reduction trigger: a character that lost a
+// scope shows up here immediately, rather than only in the operator's log.
+//
+// A per-character scope query is one small indexed lookup on a list a user
+// realistically has single digits of; it is not worth a join that would
+// have to reshape ListCharactersForUser's generated row for every other
+// caller.
+//
+// COST, stated rather than discovered later: the required set comes from
+// Flow.RequestedScopes, which is one indexed query against app.esi_route on
+// any installation whose catalogue has been ingested — and, on one whose
+// catalogue is still EMPTY, a parse of the 587 KB embedded snapshot per
+// call. That fallback is deliberate in loginScopeResolver (a value cached
+// at boot would be whatever the catalogue held before the background ingest
+// finished, which is how B37 would come back), and the installation that
+// pays it is a fresh one whose users have no characters to list yet. Worth
+// revisiting if this endpoint ever becomes hot before first ingest; not
+// worth a cache whose staleness would be invisible.
 func myCharactersHandler(deps api.Deps) func(context.Context, *EmptyIn) (*CollectionOut, error) {
 	return func(ctx context.Context, _ *EmptyIn) (*CollectionOut, error) {
 		userID, ok := userIDFromCtx(ctx)
@@ -161,8 +187,38 @@ func myCharactersHandler(deps api.Deps) func(context.Context, *EmptyIn) (*Collec
 			return nil, api.Internal("listing characters", err)
 		}
 		data := rowSliceOf(rows)
+
+		// Resolved once for the whole list, not per character: it is the
+		// same answer for every row and it may hit the catalogue.
+		//
+		// If it cannot be resolved, the two fields are OMITTED rather than
+		// defaulted. `needs_reauthorization: false` on a character we could
+		// not check is a reassuring answer to a question that was not
+		// asked — SRS §6's empty-versus-unavailable rule, and the same
+		// reasoning as a null `divergence` on the rate-limit board.
+		if required, rerr := requestedScopes(ctx, deps); rerr == nil {
+			for i, ch := range rows {
+				grantedList, gerr := deps.Store.ListCharacterTokenScopes(ctx, ch.CharacterID)
+				if gerr != nil {
+					continue
+				}
+				missing := scopes.NewSet(grantedList).Missing(required)
+				data[i]["needs_reauthorization"] = scopes.NeedsReauthorization(scopes.NewSet(grantedList), required)
+				data[i]["missing_scopes"] = missing
+			}
+		}
+
 		return &CollectionOut{Body: api.Collection[map[string]any]{Data: data, Page: api.EmptyPage(int32(len(data))), Sync: api.Sync{}}}, nil
 	}
+}
+
+// requestedScopes is the scope set HANGAR needs today, or an error when no
+// SSO flow is assembled to answer.
+func requestedScopes(ctx context.Context, deps api.Deps) ([]string, error) {
+	if deps.SSO == nil {
+		return nil, errNoSSOFlow
+	}
+	return deps.SSO.RequestedScopes(ctx)
 }
 
 // reauthorizeHandler is POST /api/v1/me/characters/{id}/reauthorize.
@@ -201,10 +257,36 @@ func reauthorizeHandler(deps api.Deps) func(context.Context, *SubIDEmptyIn) (*Re
 		// EVE for no scopes and came back with no refresh token — making
 		// "reauthorize" a no-op dressed as a fix for the very problem it
 		// is offered to solve.
-		scopeList, err := deps.SSO.RequestedScopes(ctx)
+		required, err := deps.SSO.RequestedScopes(ctx)
 		if err != nil {
 			return nil, api.Internal("resolving login scopes", err)
 		}
+
+		// PHASE 20.3. Reauthorize must never NARROW what a character
+		// already granted.
+		//
+		// RequestedScopes answers "what does HANGAR need today", derived
+		// from the route catalogue. A character may legitimately hold MORE
+		// than that — an operator set HANGAR_SSO_SCOPES wider, or the sync
+		// set shrank since they authorised. Sending only the derived set
+		// would re-authorise them with fewer scopes than they had, and EVE
+		// SSO scopes are replaced per authorization, not merged. That is
+		// Gate 2's "scope set reduced" trigger firing as a side effect of
+		// the button an operator presses to FIX a token — the login would
+		// succeed, the callback would detect the reduction, and HANGAR
+		// would dutifully revoke entitlements nobody asked it to.
+		//
+		// A read failure here is not fatal: falling back to the required
+		// set is exactly the old behaviour, and refusing to reauthorize
+		// because a scope lookup failed helps nobody. It is logged by
+		// being visible in the response's own scope list rather than
+		// silently swallowed, since the caller gets the URL it produced.
+		granted, scopeErr := deps.Store.ListCharacterTokenScopes(ctx, in.ID)
+		scopeList := required
+		if scopeErr == nil {
+			scopeList = scopes.MergeScopes(granted, required)
+		}
+
 		pending, err := deps.SSO.BeginLogin(ctx, scopeList, nil, nil)
 		if err != nil {
 			return nil, api.Internal("beginning reauthorization", err)

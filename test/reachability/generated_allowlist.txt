@@ -59,16 +59,13 @@ GetStarbaseDetail
 ListCorporationProjectContributions
 
 # B35 — TeamSpeak identity linking
-GetTeamspeakChallenge
 
 # Platform and entitlement configuration has no surface
 CreatePlatform
 CreatePlatformGroup
-GetPlatform
 ListEntitlementRulesForGroup
 ListEntitlementRulesForSource
 SetEntitlementRuleEnabled
-UpsertProvisioningState
 
 # Open-vocabulary boards (Gate 6 surfaces these; no reader is wired)
 AcknowledgeOpenVocabularyValue

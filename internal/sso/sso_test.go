@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -171,6 +172,17 @@ func (f *fakeStore) InvalidateCharacterToken(ctx context.Context, characterID in
 	return nil
 }
 
+func (f *fakeStore) ListCharacterTokenScopes(ctx context.Context, characterID int64) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, 0, len(f.scopes[characterID]))
+	for s := range f.scopes[characterID] {
+		out = append(out, s)
+	}
+	sort.Strings(out) // ORDER BY scope, matching the real query
+	return out, nil
+}
+
 func (f *fakeStore) ReplaceCharacterTokenScopes(ctx context.Context, characterID int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -205,9 +217,13 @@ type fakeSSOServer struct {
 	kid      string
 	clientID string
 
-	mu             sync.Mutex
-	nextChar       int64
-	ownerHash      string
+	mu        sync.Mutex
+	nextChar  int64
+	ownerHash string
+	// scopes is the `scp` claim the next token exchange will carry. Nil
+	// keeps Phase 5's single-scope default, so every test written before
+	// Phase 20.3 is unaffected.
+	scopeClaim     []string
 	grantResponses []string // if non-empty, popped in order as forced grant errors instead of a normal response
 	tokenCalls     int
 }
@@ -237,6 +253,7 @@ func newFakeSSOServer(t *testing.T, clientID string) *fakeSSOServer {
 		f.tokenCalls++
 		charID := f.nextChar
 		owner := f.ownerHash
+		scopeClaim := append([]string(nil), f.scopeClaim...)
 		var forcedGrantErr string
 		if len(f.grantResponses) > 0 {
 			forcedGrantErr = f.grantResponses[0]
@@ -250,7 +267,17 @@ func newFakeSSOServer(t *testing.T, clientID string) *fakeSSOServer {
 			return
 		}
 
-		access := f.signAccessToken(t, charID, owner, "Test Character", "esi-characters.read_contacts.v1")
+		// A single-scope token's `scp` is a JSON STRING, not an array
+		// (§7.2's own "edge case that will bite"), so the default keeps
+		// that shape and a multi-scope test gets the array form. Both
+		// reach jwks.Claims' scopes decoder, which is the point.
+		var scp any = "esi-characters.read_contacts.v1"
+		if len(scopeClaim) == 1 {
+			scp = scopeClaim[0]
+		} else if len(scopeClaim) > 1 {
+			scp = scopeClaim
+		}
+		access := f.signAccessToken(t, charID, owner, "Test Character", scp)
 		resp := map[string]any{
 			"access_token": access, "refresh_token": "refresh-" + uuid.NewString(),
 			"expires_in": 1200, "token_type": "Bearer",
@@ -259,6 +286,14 @@ func newFakeSSOServer(t *testing.T, clientID string) *fakeSSOServer {
 	})
 	f.srv = httptest.NewServer(mux)
 	return f
+}
+
+// setScopes controls the `scp` claim of every subsequent exchange, so a
+// test can re-authorise the same character with a narrower or wider set.
+func (f *fakeSSOServer) setScopes(scopes []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.scopeClaim = append([]string(nil), scopes...)
 }
 
 func (f *fakeSSOServer) setOwnerHash(h string) {

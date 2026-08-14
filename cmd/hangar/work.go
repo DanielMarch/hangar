@@ -5,12 +5,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/hangar-project/hangar/internal/crypto"
 	"github.com/hangar-project/hangar/internal/provisioning"
-	"github.com/hangar-project/hangar/internal/rbac"
 	"github.com/hangar-project/hangar/internal/store"
 	"github.com/hangar-project/hangar/internal/sync"
 	"github.com/hangar-project/hangar/internal/sync/planner"
@@ -72,10 +69,17 @@ func runWork(ctx context.Context) error {
 	}
 	refresher := buildRefresher(cfg, pool, keyring)
 
+	// Phase 20.3: Gate 2's metric is observed where the revocation
+	// completes, so the histogram belongs to the process that runs the
+	// urgent worker and to no other. Built before the registry so it can be
+	// registered on it.
+	revocationLatency := telemetry.NewRevocationLatency(provisioning.KnownOutcomes()...)
+
 	// Phase 20.1 (B36). `work` is the process that actually calls ESI, so
 	// it is the one whose esi_ledger_mode reading answers Gate 1.8. It has
 	// no other HTTP listener, which is why the metrics endpoint is its own.
-	stopMetrics := startMetricsListener(ctx, cfg.MetricsAddr, buildMetricsRegistry(s, governor1, counters, cfg.ESI.ErrorLimitMax, logger), logger)
+	stopMetrics := startMetricsListener(ctx, cfg.MetricsAddr,
+		buildMetricsRegistry(s, governor1, counters, revocationLatency, cfg.ESI.ErrorLimitMax, logger), logger)
 	defer stopMetrics()
 
 	syncPolicy := sync.PolicyConfig{TTLFloor: cfg.ESI.TTLFloor, BackoffCap: cfg.Sync.BackoffCap}
@@ -115,7 +119,7 @@ func runWork(ctx context.Context) error {
 	if err := registerMumbleDriver(ctx, cfg, pool, drivers, logger); err != nil {
 		return err
 	}
-	river.AddWorker(workers, &provisioning.UrgentWorker{Pool: pool, Drivers: drivers})
+	river.AddWorker(workers, &provisioning.UrgentWorker{Pool: pool, Drivers: drivers, Latency: revocationLatency})
 	river.AddWorker(workers, &provisioning.BulkWorker{Pool: pool, Drivers: drivers})
 
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
@@ -130,35 +134,34 @@ func runWork(ctx context.Context) error {
 		return err
 	}
 
-	// Wires internal/rbac's PermissionsChangedHook (internal/rbac/hook.go)
-	// to Phase 11's revocation path — an RBAC-triggered permission change
-	// (direct role grant/revoke, squad_role change, squad membership
-	// change, role deletion) now recomputes and, if it reduced any
-	// platform's entitlements, enqueues a provision-urgent job in the SAME
-	// transaction as the RBAC mutation. This is the wiring point, not
-	// internal/rbac itself, so internal/rbac compiles and tests with zero
-	// knowledge that internal/provisioning exists (roadmap: "a cleaner
-	// seam... avoids a new Phase 11 dependency inside a Phase 10
-	// package").
-	urgent := &provisioning.Urgent{River: riverClient}
-	rbac.PermissionsChangedHook = func(ctx context.Context, s *store.Store, userID uuid.UUID) error {
-		return urgent.HandleUserChangeTx(ctx, s, userID, time.Now(), "rbac_change")
-	}
+	// §9.2's revocation triggers this process can observe. Shared with
+	// `serve` since Phase 20.3 — see cmd/hangar/revocation.go for what was
+	// wrong with wiring them here only.
+	urgent := wireRevocationTriggers(riverClient)
 
 	// Token invalidation and owner-hash-change are §9.2's other two named
-	// triggers this process can observe directly — internal/sso.Refresher
-	// already exposes exactly these two hooks (Phase 5), previously unset.
-	// See internal/provisioning/urgent.go's HandleCharacterTokenChange doc
+	// triggers — internal/sso.Refresher already exposes exactly these two
+	// hooks (Phase 5), previously unset. See
+	// internal/provisioning/urgent.go's HandleCharacterTokenChange doc
 	// comment for why this necessarily opens its own transaction rather
 	// than the SSO token write's.
+	//
+	// PHASE 20.3: both now go through internal/sso.Lifecycle rather than
+	// straight to Urgent. That gives §7.2/§7.3's invalidation and its
+	// revocation notification ONE definition instead of two — see
+	// internal/sso/lifecycle.go's header for the split between it and
+	// refresh.go's in-transaction invalidation, and why the store call on
+	// this path is a deliberate idempotent re-assertion rather than an
+	// oversight.
+	lifecycle := buildTokenLifecycle(s, urgent, pool, logger)
 	refresher.OnInvalidGrant = func(ctx context.Context, characterID int64) {
-		if err := urgent.HandleCharacterTokenChange(ctx, pool, characterID, "token_invalidated"); err != nil {
-			logger.Error("provisioning: urgent revocation after token invalidation failed", "character_id", characterID, "error", err)
+		if err := lifecycle.InvalidateForInvalidGrant(ctx, characterID); err != nil {
+			logger.Error("sso: invalidating tokens after invalid_grant failed", "character_id", characterID, "error", err)
 		}
 	}
 	refresher.OnOwnerHashChanged = func(ctx context.Context, characterID int64) {
-		if err := urgent.HandleCharacterTokenChange(ctx, pool, characterID, "owner_hash_changed"); err != nil {
-			logger.Error("provisioning: urgent revocation after owner hash change failed", "character_id", characterID, "error", err)
+		if err := lifecycle.InvalidateForOwnerHashChange(ctx, characterID); err != nil {
+			logger.Error("sso: invalidating tokens after owner hash change failed", "character_id", characterID, "error", err)
 		}
 	}
 

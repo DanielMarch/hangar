@@ -134,7 +134,8 @@ func runServe(ctx context.Context) error {
 	// is bound to the published port, and /metrics is unauthenticated.
 	// `serve` builds no ESI gateway (only `work` does), so it contributes
 	// the replica and divergence gauges and no ledger mode.
-	stopMetrics := startMetricsListener(hbCtx, cfg.MetricsAddr, buildMetricsRegistry(store.New(pool), nil, nil, cfg.ESI.ErrorLimitMax, logger), logger)
+	stopMetrics := startMetricsListener(hbCtx, cfg.MetricsAddr,
+		buildMetricsRegistry(store.New(pool), nil, nil, nil, cfg.ESI.ErrorLimitMax, logger), logger)
 	defer stopMetrics()
 
 	mux := http.NewServeMux()
@@ -163,7 +164,23 @@ func runServe(ctx context.Context) error {
 	// SPA login screen cannot build against.
 	s := store.New(pool)
 
-	flow, err := buildSSOFlow(ctx, cfg, pool, s, keyring, logger)
+	// PHASE 20.3. §9.2's revocation triggers, in the process that performs
+	// most of the mutations that fire them. Before this, `serve` mounted
+	// the entire RBAC mutation surface with rbac.PermissionsChangedHook
+	// still nil — see cmd/hangar/revocation.go for the full account of what
+	// that meant for Gate 2's trigger matrix.
+	//
+	// A River client this process never Start()s: insert-only, no worker
+	// pool, no producers. cmd/hangar/work.go remains the only process that
+	// consumes provision-urgent.
+	insertOnlyRiver, err := newInsertOnlyRiverClient(pool)
+	if err != nil {
+		return err
+	}
+	urgent := wireRevocationTriggers(insertOnlyRiver)
+	lifecycle := buildTokenLifecycle(s, urgent, pool, logger)
+
+	flow, err := buildSSOFlow(ctx, cfg, pool, s, keyring, lifecycle, urgent, logger)
 	if err != nil {
 		return err
 	}
@@ -175,7 +192,7 @@ func runServe(ctx context.Context) error {
 	// finds none, and does so forever.
 	go runSubscriptionReconciler(hbCtx, s, logger)
 
-	deps := api.Deps{Store: s, Pool: pool, SSO: flow}
+	deps := api.Deps{Store: s, Pool: pool, SSO: flow, Urgent: urgent}
 	api.Version = version
 	hapi := api.NewAPI(mux, deps)
 	v1.RegisterAll(hapi, deps)

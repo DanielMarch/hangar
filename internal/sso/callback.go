@@ -46,6 +46,7 @@ type Store interface {
 	UpsertCharacterToken(ctx context.Context, arg gen.UpsertCharacterTokenParams) error
 	InvalidateCharacterToken(ctx context.Context, characterID int64, invalidReason *string) error
 
+	ListCharacterTokenScopes(ctx context.Context, characterID int64) ([]string, error)
 	ReplaceCharacterTokenScopes(ctx context.Context, characterID int64) error
 	AddCharacterTokenScope(ctx context.Context, characterID int64, scope string) error
 	UpsertEsiScope(ctx context.Context, scope string) error
@@ -72,6 +73,27 @@ type Flow struct {
 	// engine to call yet, so the default is a no-op; lifecycle.go wires
 	// the real invalidation regardless of whether this hook is set.
 	OnOwnerHashChanged func(ctx context.Context, characterID int64)
+
+	// OnScopesReduced is called (if set) when a login re-authorises a
+	// character with FEWER scopes than it previously held, with the scopes
+	// that were taken away. It fires BEFORE the new set is written, so the
+	// comparison is against what was actually stored.
+	//
+	// ── PHASE 20.3, GATE 2 TRIGGER ROW 3 ────────────────────────────────
+	// 04_RELEASE_GATES.md §2.3 requires "scope set reduced" to enqueue an
+	// urgent revocation, and until 20.3 it had NO PRODUCER of any kind:
+	// persistToken deleted the old app.character_token_scope rows and
+	// inserted the new ones without ever comparing them, so a user who
+	// re-authorised while un-ticking a scope silently lost the data behind
+	// it — and every entitlement derived from that data stayed granted
+	// until the next bulk reconcile.
+	//
+	// A scope reduction is not the same event as a token invalidation: the
+	// token is still valid, still refreshable, and still HANGAR's. What
+	// shrank is what it can read, which is why this is its own hook and
+	// its own invalid_reason-free path rather than a call into
+	// Lifecycle.
+	OnScopesReduced func(ctx context.Context, characterID int64, removed []string)
 
 	// OnTokenPersisted is called (if set) once a character's refresh token
 	// and granted scope set are committed, with the scopes that were
@@ -378,6 +400,25 @@ func (f *Flow) persistToken(ctx context.Context, characterID int64, tokenResp *T
 	if err := scopes.Ingest(ctx, f.Store, claims.Scopes); err != nil {
 		return fmt.Errorf("sso: persisting token: ingesting scopes: %w", err)
 	}
+
+	// Gate 2 trigger row 3, "scope set reduced" — detected here because
+	// here is the only moment both sets exist: the stored one is about to
+	// be deleted and the new one has not been written. See
+	// Flow.OnScopesReduced.
+	//
+	// A read failure is NOT fatal to the login. It means we could not tell
+	// whether anything was lost, and refusing to authenticate somebody
+	// because a comparison query failed would be a strictly worse outcome
+	// than the periodic reconcile catching the reduction later. It is also
+	// not treated as "nothing was removed": the hook simply does not fire,
+	// which leaves the question open rather than answering it wrongly.
+	previous, scopeErr := f.Store.ListCharacterTokenScopes(ctx, characterID)
+	if scopeErr == nil && f.OnScopesReduced != nil {
+		if removed := scopes.NewSet(claims.Scopes).Missing(previous); len(removed) > 0 {
+			f.OnScopesReduced(ctx, characterID, removed)
+		}
+	}
+
 	if err := f.Store.ReplaceCharacterTokenScopes(ctx, characterID); err != nil {
 		return fmt.Errorf("sso: persisting token: clearing old scopes: %w", err)
 	}

@@ -123,10 +123,35 @@ RETURNING *;
 -- nothing else from the triggering transaction to drive the platform call.
 SELECT * FROM app.provisioning_audit WHERE audit_id = $1;
 
--- name: CompleteProvisioningAudit :exec
+-- name: CompleteProvisioningAudit :one
+-- PHASE 20.3. Now RETURNS the revocation latency, because that number is
+-- what feeds provisioning_revocation_latency_seconds (Gate 2).
+--
+-- The subtraction is done HERE, in the same statement that writes
+-- platform_call_completed_at, and not in Go. Two reasons, and the second
+-- is the one that matters:
+--
+--   - 04_RELEASE_GATES.md §2.2 defines the measurement as p99 of
+--     (platform_call_completed_at - event_at) FROM THIS TABLE. Computing
+--     it anywhere else risks the metric and the gate's own query
+--     disagreeing about the same run.
+--   - platform_call_completed_at is Postgres's now(); event_at was stamped
+--     by time.Now() in whichever process observed the originating event.
+--     Subtracting a Go instant from a Postgres instant in Go would add a
+--     third clock to a two-clock problem. Reading back what was actually
+--     STORED and differencing it in one place keeps the operands to the
+--     two the gate itself names. (Their clock domains still differ — that
+--     is inherent in §2.2's own definition, not introduced here.)
+--
+-- Nullable because event_at is NOT NULL but a caller could complete an
+-- audit row twice; the second UPDATE still returns a real interval, so in
+-- practice this is never null. Typed as double precision seconds rather
+-- than an interval so the caller can hand it straight to a Prometheus
+-- histogram without a unit conversion nobody would remember to check.
 UPDATE app.provisioning_audit
    SET platform_call_completed_at = now(), outcome = $2, error = $3
- WHERE audit_id = $1;
+ WHERE audit_id = $1
+RETURNING extract(epoch FROM (platform_call_completed_at - event_at))::double precision AS latency_seconds;
 
 -- name: ListPendingProvisioningAudit :many
 -- The exposure board's audit-side view: event_at set, platform call never

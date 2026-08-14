@@ -89,7 +89,10 @@ func reconcileOneUser(ctx context.Context, pool store.Pool, rules []entitlement.
 			s := callErr.Error()
 			errStr = &s
 		}
-		if err := s.CompleteProvisioningAudit(ctx, audit.AuditID, &outcome, errStr); err != nil {
+		// The returned latency is deliberately discarded here — see
+		// UrgentWorker.Work for why the bulk pass must not feed Gate 2's
+		// histogram.
+		if _, err := s.CompleteProvisioningAudit(ctx, audit.AuditID, &outcome, errStr); err != nil {
 			return fmt.Errorf("provisioning: completing reconcile audit %s: %w", audit.AuditID, err)
 		}
 
@@ -98,6 +101,30 @@ func reconcileOneUser(ctx context.Context, pool store.Pool, rules []entitlement.
 			DesiredGroups: newDesired, ActualGroups: actual, LastReconciledAt: &eventAt,
 		})
 	})
+}
+
+// Outcome* are the closed set of values applyToDriver can produce, and the
+// values that reach app.provisioning_audit.outcome. They are exported so
+// cmd/hangar can pre-initialise Gate 2's histogram with every one of them —
+// see KnownOutcomes.
+const (
+	OutcomeSuccess         = "success"
+	OutcomePartialFailure  = "partial_failure"
+	OutcomeFailed          = "failed"
+	OutcomeSkippedUnlinked = "skipped_unlinked"
+)
+
+// KnownOutcomes is that set, in the order a dashboard reads best.
+//
+// It exists because a Prometheus HistogramVec with no observations exports
+// NO SERIES AT ALL — not even a zero — so a `/metrics` scrape of a healthy,
+// idle installation was indistinguishable from one where the revocation
+// path is not wired. That is 20.1's "a missing reading is never a zero"
+// lesson running the other way: for a COUNT OF EVENTS, zero is a true and
+// useful reading, and its absence is the misleading one. Pre-initialising
+// every label value makes an idle installation say so.
+func KnownOutcomes() []string {
+	return []string{OutcomeSuccess, OutcomePartialFailure, OutcomeFailed, OutcomeSkippedUnlinked}
 }
 
 // applyToDriver drives the platform for one user's added/removed groups,
@@ -113,10 +140,10 @@ func applyToDriver(ctx context.Context, driver Driver, driverErr error, link gen
 	}
 
 	if link.RemoteIdentity == nil {
-		return link.ActualGroups, "skipped_unlinked", nil
+		return link.ActualGroups, OutcomeSkippedUnlinked, nil
 	}
 	if driverErr != nil {
-		return link.ActualGroups, "failed", fmt.Errorf("provisioning: no driver for platform %s: %w", link.PlatformID, driverErr)
+		return link.ActualGroups, OutcomeFailed, fmt.Errorf("provisioning: no driver for platform %s: %w", link.PlatformID, driverErr)
 	}
 
 	var callErr error
@@ -144,7 +171,7 @@ func applyToDriver(ctx context.Context, driver Driver, driverErr error, link gen
 		out = append(out, g)
 	}
 	if callErr != nil {
-		return sortedCopy(out), "partial_failure", callErr
+		return sortedCopy(out), OutcomePartialFailure, callErr
 	}
-	return sortedCopy(out), "success", nil
+	return sortedCopy(out), OutcomeSuccess, nil
 }

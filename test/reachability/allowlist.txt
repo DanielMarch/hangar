@@ -52,19 +52,6 @@ internal/alerting.writeLengthPrefixed
 internal/alerting/render.HasTemplate
 internal/alerting/render.Render
 
-# B27 (closed by Phase 20.3) — scope-set comparison behind Gate 2's 'scope set reduced' trigger
-internal/scopes.MergeScopes
-internal/scopes.NeedsReauthorization
-internal/scopes.NewSet
-internal/scopes.Set.Has
-internal/scopes.Set.HasAll
-internal/scopes.Set.Missing
-
-# B27 (closed by Phase 20.3) — token lifecycle: Gate 2's invalid_grant and owner-hash-change triggers
-internal/sso.Lifecycle.InvalidateForInvalidGrant
-internal/sso.Lifecycle.InvalidateForOwnerHashChange
-internal/sso.NewLifecycle
-
 # B30 (closed by Phase 20.5) — ESI route handler implemented but never dispatched by any worker
 internal/sync/handlers.ParseAssetNames
 internal/sync/handlers.ParseCalendarAttendees
@@ -80,10 +67,6 @@ internal/sync/handlers.SyncMarketHistory
 internal/sync/handlers.SyncMarketPrices
 internal/sync/handlers.SyncPlanetColonyDetail
 
-# B32 (closed by Phase 20.3) — entitlement-rule write endpoint, never mounted by RegisterAll
-internal/api/v1.CreateEntitlementRule
-internal/api/v1.DeleteEntitlementRule
-
 # B33 (closed by Phase 20.5) — $filter grammar validation
 internal/api/filters.New
 internal/api/filters.Validate
@@ -94,11 +77,6 @@ internal/api/filters.containsSQLMeta
 internal/esi/cache.NewRedisL2
 internal/esi/cache.redisL2.Get
 internal/esi/cache.redisL2.Set
-
-# B35 (closed by Phase 20.3) — TeamSpeak identity-linking challenge
-internal/provisioning/drivers/teamspeak.IssueChallenge
-internal/provisioning/drivers/teamspeak.NewChallengeToken
-internal/provisioning/drivers/teamspeak.RedeemChallenge
 
 # GATE7 (closed by Phase 20.6) — shim helper awaiting the routes that use it (only 4 of 33 read routes are served)
 internal/api/v2shim.BreakingControllers
@@ -113,6 +91,20 @@ internal/api/v2shim.UnshimmableControllers
 internal/api/v2shim.numericString
 
 # == NOT DEFECTS ==========================================================
+
+# RECLASSIFIED in Phase 20.3, not closed. B27 wired the rest of internal/scopes
+# — MergeScopes, NeedsReauthorization, NewSet, Set.Has and Set.Missing all have
+# production callers now (the reauthorize scope merge, and the
+# needs_reauthorization/missing_scopes fields on GET /api/v1/me/characters).
+# HasAll is the BOOLEAN form of Missing, and production wants the list every
+# time: a user is told WHICH scopes are missing, never merely that some are.
+# Keeping both is not duplication to be resolved by deleting one — Missing is
+# the answer and HasAll is the predicate the truth-table tests assert against,
+# the same relationship rbac.Resolve has with ResolveAllLive. Adding a caller
+# that computes the boolean twice, or throwing away the list to use the
+# predicate, would be the allowlist wagging the codebase.
+internal/scopes.Set.HasAll
+
 # Unused helpers, test doubles, and API published for callers outside this
 # binary. Each is a deliberate keep, not a gap.
 
@@ -134,7 +126,6 @@ internal/events.PendingCount  # outbox depth query awaiting the alert_dead_lette
 internal/events.Recorder.Len  # test-facing accessor on the in-memory Recorder double
 internal/events.Verify  # signature verification published for CONSUMERS of HANGAR webhooks; deploy/verify-webhook-signature.sh is the shipped equivalent
 internal/provisioning/drivers/teamspeak.Unescape  # TS3 wire decoder, symmetric with Escape; the WebQuery driver parses JSON, so only Escape is on the live path
-internal/sso.NoopRevocationNotifier.NotifyRevocation  # null-object test double
 internal/sync.StubElector.Elect  # test double
 internal/rbac.Resolve  # RECLASSIFIED IN 20.2 (was B26). The single-permission pure resolver. Production resolves in BULK — RefreshUser -> ResolveAllLive -> ResolveAll — because materialising one user writes the whole closed set in one pass; this form exists for TestDenyPrecedesAllowTruthTable, which drives every grant combination through it directly.
 internal/rbac.ResolveLive  # as Resolve — the live, from-scratch cross-check TestMaterializedMatchesRecomputed uses to prove app.effective_permission agrees with a recomputation. The middleware deliberately never calls it: it reads the materialised row, and a second live path could disagree with what is about to be enforced.

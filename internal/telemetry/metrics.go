@@ -56,9 +56,14 @@ func NewRegistry() *prometheus.Registry {
 //	esi_429_headerless_total{group}  > counters, in gatewayCounters below,
 //	esi_420_total                /   incremented where the response is classified
 //
+// PHASE 20.3 adds Gate 2's metric, alongside the wiring that gives its
+// trigger matrix producers (B27's token-lifecycle events, B32's entitlement
+// rule writes, and the RBAC hook in the process that actually mutates RBAC):
+//
+//	provisioning_revocation_latency_seconds{outcome}  a histogram, below
+//
 // Deliberately NOT declared here, with the phase that owns each:
 //
-//	provisioning_revocation_latency_seconds             → 20.3, with B26/B27
 //	alert_delivery_total, alert_dead_letter_depth       → 20.4, with B25
 //
 // Adding one of those here before its wiring lands would be the same defect

@@ -54,7 +54,7 @@ func runSchedule(ctx context.Context) error {
 	// Phase 20.1 (B36). `schedule` builds no ESI gateway, so it reports the
 	// replica and divergence gauges but no ledger mode — a nil ModeSource
 	// yields fewer series rather than a wrong one.
-	stopMetrics := startMetricsListener(sigCtx, cfg.MetricsAddr, buildMetricsRegistry(store.New(pool), nil, nil, cfg.ESI.ErrorLimitMax, logger), logger)
+	stopMetrics := startMetricsListener(sigCtx, cfg.MetricsAddr, buildMetricsRegistry(store.New(pool), nil, nil, nil, cfg.ESI.ErrorLimitMax, logger), logger)
 	defer stopMetrics()
 
 	stopPlanner, err := startPlanner(sigCtx, cfg.DB.URL.Reveal(), pool, planner.Config{

@@ -24,6 +24,28 @@ type UrgentWorker struct {
 	river.WorkerDefaults[UrgentJobArgs]
 	Pool    *pgxpool.Pool
 	Drivers *Drivers
+
+	// Latency, when set, receives Gate 2's measurement for every audit row
+	// this worker completes. Nil is supported — internal/provisioning has
+	// no business requiring a metrics registry to function, and every
+	// existing test constructs an UrgentWorker without one.
+	Latency RevocationObserver
+}
+
+// RevocationObserver is the metric seam: internal/telemetry's
+// RevocationLatency satisfies it. An interface rather than the concrete
+// type so this package does not import the Prometheus client, matching how
+// internal/esi takes its Observer.
+type RevocationObserver interface {
+	ObserveRevocation(outcome string, seconds float64)
+}
+
+// observe records one completed revocation, tolerating a nil observer.
+func observe(o RevocationObserver, outcome string, seconds float64) {
+	if o == nil {
+		return
+	}
+	o.ObserveRevocation(outcome, seconds)
 }
 
 // Work implements river.Worker[UrgentJobArgs].
@@ -47,9 +69,23 @@ func (w *UrgentWorker) Work(ctx context.Context, job *river.Job[UrgentJobArgs]) 
 		msg := callErr.Error()
 		errStr = &msg
 	}
-	if err := s.CompleteProvisioningAudit(ctx, audit.AuditID, &outcome, errStr); err != nil {
+	latency, err := s.CompleteProvisioningAudit(ctx, audit.AuditID, &outcome, errStr)
+	if err != nil {
 		return fmt.Errorf("provisioning: urgent worker: completing audit %s: %w", audit.AuditID, err)
 	}
+	// Gate 2's measurement, taken where the revocation actually finishes
+	// and computed by the statement that wrote its second operand.
+	//
+	// The URGENT path only. reconcile.go's bulk pass deliberately does not
+	// observe, and that is not an omission: it stamps event_at with
+	// time.Now() at the top of its own loop, so its
+	// (completed_at − event_at) is the duration of the platform call and
+	// NOT the time since an originating event. §2.2 measures the latter.
+	// Mixing the two would put thousands of near-zero samples from a
+	// nightly reconcile into the p99 that is supposed to police
+	// revocations, which is 20.2's "operands describing different moments"
+	// lesson wearing a different hat — and it would flatter the number.
+	observe(w.Latency, outcome, latency)
 
 	now := time.Now()
 	updateParams := gen.UpdateProvisioningStateGroupsParams{

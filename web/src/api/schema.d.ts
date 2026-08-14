@@ -270,7 +270,8 @@ export interface paths {
     get: operations["admin-platform-rules"];
     /** Replace one platform's entitlement rule set (requires a matching preview token) */
     put: operations["admin-platform-rules-replace"];
-    post?: never;
+    /** Add one entitlement rule to a platform */
+    post: operations["admin-create-platform-rule"];
     delete?: never;
     options?: never;
     head?: never;
@@ -288,6 +289,40 @@ export interface paths {
     put?: never;
     /** Preview a hypothetical entitlement rule set */
     post: operations["admin-platform-rules-preview"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/platforms/{id}/rules/{rule_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Delete one entitlement rule and revoke what it granted */
+    delete: operations["admin-delete-platform-rule"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/platforms/{id}/teamspeak/redeem": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Bind an observed TeamSpeak client UID to the user who holds this challenge token */
+    post: operations["redeem-teamspeak-challenge"];
     delete?: never;
     options?: never;
     head?: never;
@@ -2560,6 +2595,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/me/teamspeak/challenge": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Issue a single-use TeamSpeak identity-linking token for the caller */
+    post: operations["issue-teamspeak-challenge"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/me/teamspeak/challenge/{token}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Status of one of the caller's TeamSpeak linking tokens */
+    get: operations["get-teamspeak-challenge"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/meta/esi-status": {
     parameters: {
       query?: never;
@@ -2999,6 +3068,23 @@ export interface components {
       description?: string;
       name: string;
     };
+    CreateRuleInBody: {
+      /**
+       * Format: uri
+       * @description A URL to the JSON Schema for this object.
+       * @example https://example.com/schemas/CreateRuleInBody.json
+       */
+      readonly $schema?: string;
+      /**
+       * @description deny always wins over grant (internal/provisioning/entitlement's precedence).
+       * @enum {string}
+       */
+      effect: "grant" | "deny";
+      /** Format: uuid */
+      group_id: string;
+      source_kind: string;
+      source_ref: string;
+    };
     CreateShareLinkInBody: {
       /**
        * Format: uri
@@ -3306,6 +3392,29 @@ export interface components {
       /** Format: date-time */
       next_due_at: string | null;
       stale: boolean;
+    };
+    TeamspeakChallengeOutBody: {
+      /**
+       * Format: uri
+       * @description A URL to the JSON Schema for this object.
+       * @example https://example.com/schemas/TeamspeakChallengeOutBody.json
+       */
+      readonly $schema?: string;
+      /** Format: date-time */
+      expires_at: string;
+      /** @description Present this in TeamSpeak — typically as your nickname — then have it redeemed. */
+      token: string;
+    };
+    TeamspeakRedeemInBody: {
+      /**
+       * Format: uri
+       * @description A URL to the JSON Schema for this object.
+       * @example https://example.com/schemas/TeamspeakRedeemInBody.json
+       */
+      readonly $schema?: string;
+      /** @description The base64 TS3 client UID observed in-client. */
+      client_unique_identifier: string;
+      token: string;
     };
     UpdateScopesInBody: {
       /**
@@ -3870,6 +3979,42 @@ export interface operations {
       };
     };
   };
+  "admin-create-platform-rule": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Platform id. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateRuleInBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ItemMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
   "admin-platform-rules-preview": {
     parameters: {
       query?: never;
@@ -3892,6 +4037,73 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["RulesPreviewOutBody"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-delete-platform-rule": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Platform id. */
+        id: string;
+        rule_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "redeem-teamspeak-challenge": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description TeamSpeak platform id. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TeamspeakRedeemInBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ItemMapStringInterface {}"];
         };
       };
       /** @description Error */
@@ -8312,6 +8524,66 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "issue-teamspeak-challenge": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TeamspeakChallengeOutBody"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "get-teamspeak-challenge": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        token: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ItemMapStringInterface {}"];
+        };
       };
       /** @description Error */
       default: {

@@ -71,14 +71,13 @@ func newClient(t *testing.T, base string, obs esi.Observer) (*esi.Client, *ratel
 func request(path string, token string, entityID int64, maxTokens int) esi.Request {
 	return esi.Request{
 		Method: http.MethodGet, UpstreamPath: path,
-		PathParams:       map[string]string{"character_id": "1"},
-		AccessToken:      token,
-		RateLimitGroup:   testGroup,
-		RateLimitMax:     maxTokens,
-		RateLimitRealMax: maxTokens,
-		RateLimitWindow:  time.Minute,
-		UserKey:          "hangar:" + token,
-		EntityID:         entityID,
+		PathParams:      map[string]string{"character_id": "1"},
+		AccessToken:     token,
+		RateLimitGroup:  testGroup,
+		RateLimitMax:    maxTokens,
+		RateLimitWindow: time.Minute,
+		UserKey:         "hangar:" + token,
+		EntityID:        entityID,
 	}
 }
 

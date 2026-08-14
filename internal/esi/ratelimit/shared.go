@@ -86,7 +86,22 @@ func (l *LedgerClustered) withTx(ctx context.Context, fn func(ctx context.Contex
 // AcquireLedgerEntry statement, kept as a hand-maintained const rather than
 // a sqlc query — see that file's comment for the full rationale (one
 // round-trip fused statement vs. sqlc's inability to infer nullability
-// through a scalar subquery). $1=group, $2=userKey, $3=requestTimeout.
+// through a scalar subquery).
+// $1=group, $2=userKey, $3=requestTimeout, $4=admission ceiling.
+//
+// PHASE 20.3 — WHY THE ADMISSION TEST TAKES A PARAMETER. The `ins` CTE used
+// to test `locked.max_tokens - used.total >= 5`, i.e. it admitted against
+// the STORED ceiling and nothing else. That made a per-caller ceiling
+// (§4.4's char-notification reserve) expressible only by storing it, which
+// turned the bucket's max_tokens into a fiction shared by every caller and
+// produced a permanent, structural esi_ledger_divergence of 5 — see
+// AcquireRequest.AdmissionMaxTokens for the whole mechanism.
+//
+// `least(locked.max_tokens, $4)` is the clamp, not a bare `$4`: the stored
+// ceiling is the truth, a caller may hold tokens BACK from itself but may
+// never grant itself more than the bucket actually has. It also keeps the
+// statement correct when the stored ceiling has been reconciled DOWN from
+// the server's own X-Ratelimit-Limit since the caller read the catalogue.
 const acquireLedgerEntrySQL = `
 WITH locked AS (
     SELECT b.max_tokens, b."window" FROM app.esi_ledger_bucket b
@@ -116,7 +131,7 @@ WITH locked AS (
     INSERT INTO app.esi_ledger_entry (rate_limit_group, user_key, cost, consumed_at, state, expires_at)
     SELECT $1, $2, 5, now(), 'reserved', now() + $3::interval
       FROM locked, used
-     WHERE locked.max_tokens - used.total >= 5
+     WHERE least(locked.max_tokens, $4::int) - used.total >= 5
     RETURNING entry_id, consumed_at, expires_at
 )
 SELECT
@@ -145,7 +160,7 @@ type acquireRow struct {
 
 func (l *LedgerClustered) queryAcquire(ctx context.Context, req AcquireRequest) (acquireRow, error) {
 	var row acquireRow
-	err := l.pool.QueryRow(ctx, acquireLedgerEntrySQL, req.Group, req.UserKey, req.RequestTimeout).Scan(
+	err := l.pool.QueryRow(ctx, acquireLedgerEntrySQL, req.Group, req.UserKey, req.RequestTimeout, req.admissionCeiling()).Scan(
 		&row.maxTokens, &row.window, &row.usedTotal, &row.oldestConsumedAt,
 		&row.entryID, &row.reservedAt, &row.reservedExpiresAt,
 	)
@@ -170,6 +185,14 @@ func (l *LedgerClustered) Acquire(ctx context.Context, req AcquireRequest) (*Res
 	// steady-state common case stays at exactly one round trip;
 	// UpsertLedgerBucket's own guard (WHERE ... IS DISTINCT FROM) makes a
 	// same-value call a cheap no-op besides.
+	//
+	// PHASE 20.3: "rare" is now true. req.MaxTokens is the route's REAL
+	// ceiling for every caller, so two callers with different POLICIES for
+	// the same bucket agree on what is stored and this branch stays cold.
+	// Before the AdmissionMaxTokens split it was the background poller's
+	// reduced ceiling that landed here, so an interactive caller and a
+	// background one flipped max_tokens back and forth — each flip a real
+	// write, on the hottest row in the system.
 	needsUpsert := row.maxTokens == nil ||
 		int(*row.maxTokens) != req.MaxTokens ||
 		row.window == nil || *row.window != req.Window

@@ -51,6 +51,49 @@ type Refresher struct {
 // refresh.
 var ErrTokenNotFound = errors.New("sso: refresh: no stored token for character")
 
+// ErrOwnerHashChanged is returned when a refreshed access token's `owner`
+// claim no longer matches what is stored: the character has been
+// transferred to a different EVE account. Like invalid_grant, the caller
+// must NOT retry — the stored token has been invalidated and only a fresh
+// SSO authorization by the new owner can produce a usable one.
+var ErrOwnerHashChanged = errors.New("sso: refresh: character transferred to a different EVE account; stored tokens invalidated")
+
+// invalidateForOwnerChange is 01_ARCHITECTURE.md §7.2's transfer edge case,
+// enforced on the refresh path: "A change means the character was
+// transferred to a different EVE account and every stored token for that
+// character must be invalidated immediately".
+//
+// ── PHASE 20.3, AND THIS IS A BEHAVIOUR CHANGE ──────────────────────────
+// Both refresh paths used to merely CALL OnOwnerHashChanged and then carry
+// straight on to UpsertCharacterToken — which sets `valid = true,
+// invalid_reason = NULL`. So on the one path where a transfer is actually
+// observable, the token was not invalidated at all; worse, if the hook had
+// invalidated it out of band, the upsert two statements later would have
+// resurrected it. §7.2 does not say "notify", it says "invalidated
+// immediately", because the new owner holds none of the old owner's
+// HANGAR-side authorization.
+//
+// The rotated refresh token is deliberately NOT persisted. EVE SSO has
+// already killed the old one, so declining to store the new one loses it —
+// which is the intended outcome: the character must re-authorise, and that
+// login stores a fresh token belonging to whoever now owns it.
+func (r *Refresher) invalidateForOwnerChange(ctx context.Context, tx pgx.Tx, q *gen.Queries, characterID int64) error {
+	reason := ReasonOwnerHashChanged
+	if err := q.InvalidateCharacterToken(ctx, characterID, &reason); err != nil {
+		return fmt.Errorf("sso: refresh: invalidating after owner hash change: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("sso: refresh: committing owner-change invalidation: %w", err)
+	}
+	// After commit, for the same reason the invalid_grant branch fires its
+	// hook after commit: the hook opens its own transaction to recompute
+	// entitlements and must not race the one that is still open here.
+	if r.OnOwnerHashChanged != nil {
+		r.OnOwnerHashChanged(ctx, characterID)
+	}
+	return ErrOwnerHashChanged
+}
+
 // RefreshCharacterToken refreshes characterID's stored refresh token. It
 // is safe to call concurrently for the same character from any number of
 // goroutines or replicas — pg_advisory_xact_lock serialises them, and the
@@ -104,7 +147,7 @@ func (r *Refresher) RefreshCharacterToken(ctx context.Context, characterID int64
 	tokenResp, err := r.OAuth.RefreshToken(ctx, string(plaintext))
 	if err != nil {
 		if IsInvalidGrant(err) {
-			reason := "invalid_grant"
+			reason := ReasonInvalidGrant
 			if invalidateErr := q.InvalidateCharacterToken(ctx, characterID, &reason); invalidateErr != nil {
 				return fmt.Errorf("sso: refresh: invalidating after invalid_grant: %w", invalidateErr)
 			}
@@ -122,8 +165,8 @@ func (r *Refresher) RefreshCharacterToken(ctx context.Context, characterID int64
 	ownerHash := token.OwnerHash
 	if r.Verifier != nil {
 		if claims, verr := r.Verifier.Verify(ctx, tokenResp.AccessToken); verr == nil {
-			if claims.Owner != ownerHash && r.OnOwnerHashChanged != nil {
-				r.OnOwnerHashChanged(ctx, characterID)
+			if claims.Owner != ownerHash {
+				return r.invalidateForOwnerChange(ctx, tx, q, characterID)
 			}
 			ownerHash = claims.Owner
 		}
@@ -228,7 +271,7 @@ func (r *Refresher) EnsureAccessToken(ctx context.Context, characterID int64) (A
 	tokenResp, err := r.OAuth.RefreshToken(ctx, string(plaintext))
 	if err != nil {
 		if IsInvalidGrant(err) {
-			reason := "invalid_grant"
+			reason := ReasonInvalidGrant
 			if invalidateErr := q.InvalidateCharacterToken(ctx, characterID, &reason); invalidateErr != nil {
 				return AccessToken{}, fmt.Errorf("sso: ensure access token: invalidating after invalid_grant: %w", invalidateErr)
 			}
@@ -246,8 +289,11 @@ func (r *Refresher) EnsureAccessToken(ctx context.Context, characterID int64) (A
 	ownerHash := token.OwnerHash
 	if r.Verifier != nil {
 		if claims, verr := r.Verifier.Verify(ctx, tokenResp.AccessToken); verr == nil {
-			if claims.Owner != ownerHash && r.OnOwnerHashChanged != nil {
-				r.OnOwnerHashChanged(ctx, characterID)
+			if claims.Owner != ownerHash {
+				// §7.2, same as RefreshCharacterToken's branch: the
+				// character has been transferred, so nothing is handed
+				// back and nothing is persisted.
+				return AccessToken{}, r.invalidateForOwnerChange(ctx, tx, q, characterID)
 			}
 			ownerHash = claims.Owner
 		}

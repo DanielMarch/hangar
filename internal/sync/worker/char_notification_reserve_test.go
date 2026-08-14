@@ -45,7 +45,30 @@ func (r *recordingLedger) Reconcile(ctx context.Context, group, userKey string, 
 	return r.inner.Reconcile(ctx, group, userKey, maxTokens, serverRemaining)
 }
 
-func (r *recordingLedger) maxRequested() int {
+// maxAdmissionRequested is the largest ceiling any recorded call was
+// actually ADMITTED against — AdmissionMaxTokens when the caller set one,
+// MaxTokens otherwise, mirroring AcquireRequest.admissionCeiling.
+func (r *recordingLedger) maxAdmissionRequested() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	max := 0
+	for _, req := range r.requests {
+		ceiling := req.MaxTokens
+		if req.AdmissionMaxTokens > 0 {
+			ceiling = req.AdmissionMaxTokens
+		}
+		if ceiling > max {
+			max = ceiling
+		}
+	}
+	return max
+}
+
+// maxStoredRequested is the largest ceiling any recorded call asked to have
+// PERSISTED as the bucket's max_tokens. Phase 20.3: this must always be the
+// route's real ceiling, never a reduced one, on every call including the
+// background poller's — the reserve lives in the admission field.
+func (r *recordingLedger) maxStoredRequested() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	max := 0
@@ -96,17 +119,21 @@ func TestCharNotificationPollingHoldsFiveTokenReserve(t *testing.T) {
 	}
 
 	// The background poll request, built exactly the way CharacterWorker's
-	// doSync builds it — including the RateLimitMax the reserve applies.
+	// doSync builds it — the route's REAL ceiling on RateLimitMax, and the
+	// reserve on RateLimitAdmissionMax.
 	pollRequest := esi.Request{
 		Method: http.MethodGet, UpstreamPath: routePath,
-		PathParams:      map[string]string{"character_id": "90000001"},
-		RateLimitGroup:  CharNotificationGroup,
-		RateLimitMax:    BackgroundRateLimitMax(CharNotificationGroup, routeMax),
-		RateLimitWindow: window,
-		UserKey:         userKey,
+		PathParams:            map[string]string{"character_id": "90000001"},
+		RateLimitGroup:        CharNotificationGroup,
+		RateLimitMax:          RouteRateLimitMax(routeMax),
+		RateLimitAdmissionMax: BackgroundRateLimitMax(CharNotificationGroup, routeMax),
+		RateLimitWindow:       window,
+		UserKey:               userKey,
 	}
-	require.Equal(t, 10, pollRequest.RateLimitMax,
-		"the background poller must ask for the route's 15 tokens minus the permanent 5-token reserve")
+	require.Equal(t, 15, pollRequest.RateLimitMax,
+		"the STORED ceiling must be the route's real 15 even for the background poller — Phase 20.3")
+	require.Equal(t, 10, pollRequest.RateLimitAdmissionMax,
+		"the background poller must be ADMITTED against the route's 15 tokens minus the permanent 5-token reserve")
 
 	ctx := context.Background()
 
@@ -125,13 +152,21 @@ func TestCharNotificationPollingHoldsFiveTokenReserve(t *testing.T) {
 	require.Greater(t, polls, 0, "the poller must be able to make progress at all")
 	require.Less(t, polls, 50, "the poller must eventually be refused — it must not be able to poll forever")
 
-	// Half one: the poll path never asked for more than the reduced max,
-	// on any call.
-	require.LessOrEqual(t, ledger.maxRequested(), 10,
-		"no background acquire may ever request more than (15 - 5) tokens")
+	// Half one: the poll path was never ADMITTED against more than the
+	// reduced max, on any call...
+	require.LessOrEqual(t, ledger.maxAdmissionRequested(), 10,
+		"no background acquire may ever be admitted against more than (15 - 5) tokens")
+
+	// ...and never asked for anything but the REAL ceiling to be stored.
+	// This is the Phase 20.3 half: the reserve is a per-call admission
+	// policy, and a bucket row shared by every caller must not carry it.
+	// Storing 10 is what made esi_ledger_divergence read a permanent 5 on
+	// char-notification against Gate 1.3's tolerance of 1.
+	require.Equal(t, 15, ledger.maxStoredRequested(),
+		"the background poller must persist the route's REAL ceiling, never its own reduced one")
 
 	// Half two: at the very moment the background poller is out of budget,
-	// an interactive caller asking against the REAL 15 still gets in — the
+	// an interactive caller applying no reduction still gets in — the
 	// reserved headroom is real, not notional.
 	interactive, err := ledger.Acquire(ctx, ratelimit.AcquireRequest{
 		Group: CharNotificationGroup, UserKey: userKey,
@@ -146,7 +181,9 @@ func TestCharNotificationPollingHoldsFiveTokenReserve(t *testing.T) {
 	// (it could just be that budget had freed up).
 	_, err = ledger.Acquire(ctx, ratelimit.AcquireRequest{
 		Group: CharNotificationGroup, UserKey: userKey,
-		MaxTokens: pollRequest.RateLimitMax, Window: window, RequestTimeout: 30 * time.Second,
+		MaxTokens:          pollRequest.RateLimitMax,
+		AdmissionMaxTokens: pollRequest.RateLimitAdmissionMax,
+		Window:             window, RequestTimeout: 30 * time.Second,
 	})
 	require.ErrorIs(t, err, ratelimit.ErrRateLimited,
 		"the background poller must remain refused while the interactive caller succeeds — that gap IS the reserve")
@@ -186,30 +223,47 @@ func TestCharNotificationReserveMatchesIngestedSpec(t *testing.T) {
 		"the background ceiling must be derived from the spec's own max-tokens, never hardcoded")
 
 	// The reserve applies to this group and to no other. A blanket
-	// reduction would quietly shrink every bucket in the catalogue.
-	require.Equal(t, 600, BackgroundRateLimitMax("char-detail", 600))
-	require.Equal(t, 300, BackgroundRateLimitMax("corp-structure", 300))
+	// reduction would quietly shrink every bucket in the catalogue — and
+	// zero, not the route's own max, is what "no reduction" now means, so
+	// every other group's admission ceiling falls through to the stored
+	// ceiling rather than being restated per call.
+	require.Equal(t, 0, BackgroundRateLimitMax("char-detail", 600))
+	require.Equal(t, 0, BackgroundRateLimitMax("corp-structure", 300))
 
-	// Reconcile must always see the REAL ceiling — feeding it the reduced
-	// one would desync the local ledger from ESI's server-reported truth.
-	require.Equal(t, 15, ReconcileRateLimitMax(15))
+	// A ceiling at or below the reserve degrades to no reduction rather
+	// than to a deadlock. Not reachable with today's spec (15 > 5).
+	require.Equal(t, 0, BackgroundRateLimitMax(CharNotificationGroup, 5))
+	require.Equal(t, 0, BackgroundRateLimitMax(CharNotificationGroup, 3))
+
+	// Everything that is STORED and everything Reconcile sees must be the
+	// REAL ceiling — feeding either the reduced one desyncs the local
+	// ledger from ESI's server-reported truth and, before Phase 20.3,
+	// showed up as a permanent esi_ledger_divergence of exactly 5.
+	require.Equal(t, 15, RouteRateLimitMax(15))
 }
 
 // TestNoWorkerBypassesTheBackgroundRateLimitHelper is the regression guard
-// that keeps the reserve from being undone by a future edit: no worker may
-// build an esi.Request with the route's raw rate_limit_max. Every call
-// site must go through BackgroundRateLimitMax, which is a no-op for every
-// group except char-notification.
+// that keeps the reserve from being undone — or misapplied — by a future
+// edit. Two source-level rules, one per field:
 //
-// A source-level check rather than a behavioural one because the failure
-// it guards against is a NEW call site somewhere else in the package — no
-// behavioural test can see code that has not been written yet, and this is
-// the same shape as the project's other invariant guards (`make
-// check-money`'s reflection proof, `check-identifiers`).
+//   - every esi.Request the package builds must set RateLimitAdmissionMax
+//     from BackgroundRateLimitMax, or a new call site silently spends the
+//     five tokens §4.4 reserves for interactive callers;
+//   - no esi.Request may set RateLimitMax from BackgroundRateLimitMax.
+//     That is the Phase 20.3 defect exactly: the reduced ceiling on the
+//     field the ledger PERSISTS, which put a fiction in a row every caller
+//     shares and made Gate 1.3 read a structural divergence of 5.
+//
+// Source-level rather than behavioural because what it guards against is a
+// NEW call site somewhere else in the package — no behavioural test can see
+// code that has not been written yet — and it is the same shape as the
+// project's other invariant guards (`make check-money`'s reflection proof,
+// `check-identifiers`).
 func TestNoWorkerBypassesTheBackgroundRateLimitHelper(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	require.NoError(t, err)
 
+	checked := 0
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
@@ -217,7 +271,29 @@ func TestNoWorkerBypassesTheBackgroundRateLimitHelper(t *testing.T) {
 		}
 		body, err := os.ReadFile(name)
 		require.NoError(t, err)
-		require.NotContains(t, string(body), "RateLimitMax:    int(derefInt32(route.RateLimitMax))",
-			"%s builds an esi.Request with the route's raw rate_limit_max — use BackgroundRateLimitMax so the char-notification reserve cannot be bypassed (see reserve.go)", name)
+		src := string(body)
+
+		require.NotContains(t, src, "RateLimitMax:          BackgroundRateLimitMax(",
+			"%s stores a REDUCED rate-limit ceiling as esi.Request.RateLimitMax. That field is persisted as "+
+				"the ledger bucket's max_tokens and is what Reconcile and esi_ledger_divergence measure "+
+				"against; a call-site reserve belongs in RateLimitAdmissionMax (see reserve.go)", name)
+		require.NotContains(t, src, "RateLimitMax: BackgroundRateLimitMax(",
+			"%s stores a REDUCED rate-limit ceiling as esi.Request.RateLimitMax — see reserve.go", name)
+
+		// Any file that builds a rate-limited request at all must set both
+		// halves of the pair. Counting them keeps a future edit from
+		// dropping the admission field and quietly losing the reserve.
+		stored := strings.Count(src, "RateLimitMax:")
+		// "RateLimitMax:" is a substring of "RateLimitAdmissionMax:" only
+		// in the reverse direction, so subtract nothing — the field names
+		// share no prefix.
+		admission := strings.Count(src, "RateLimitAdmissionMax:")
+		require.Equal(t, stored, admission,
+			"%s sets esi.Request.RateLimitMax %d time(s) but RateLimitAdmissionMax %d time(s) — every "+
+				"rate-limited call site must pass BOTH the route's real ceiling and its admission ceiling "+
+				"(BackgroundRateLimitMax returns 0, i.e. no reduction, for every group but char-notification)",
+			name, stored, admission)
+		checked++
 	}
+	require.Greater(t, checked, 0, "the guard must actually have read some source files")
 }

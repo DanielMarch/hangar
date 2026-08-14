@@ -135,12 +135,12 @@ func (w *GlobalWorker) doSync(ctx context.Context, s *store.Store, sub gen.AppSy
 
 	resp, doErr := w.Gateway.Do(ctx, esi.Request{
 		Method: route.Method, UpstreamPath: route.UpstreamPath,
-		CacheMode:        derefStr(route.CacheMode),
-		RateLimitGroup:   derefStr(route.RateLimitGroup),
-		RateLimitMax:     BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
-		RateLimitRealMax: ReconcileRateLimitMax(derefInt32(route.RateLimitMax)),
-		RateLimitWindow:  sync.IntervalToDuration(route.RateLimitWindow),
-		UserKey:          "hangar:global",
+		CacheMode:             derefStr(route.CacheMode),
+		RateLimitGroup:        derefStr(route.RateLimitGroup),
+		RateLimitMax:          RouteRateLimitMax(derefInt32(route.RateLimitMax)),
+		RateLimitAdmissionMax: BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
+		RateLimitWindow:       sync.IntervalToDuration(route.RateLimitWindow),
+		UserKey:               "hangar:global",
 		// EntityID stays 0: a global route has no owner, so §5.8's
 		// entity-scoped 403 breaker has nothing to key on. These routes are
 		// unauthenticated and cannot 403 for an authorisation reason.

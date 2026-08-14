@@ -12,6 +12,7 @@ import (
 
 	"github.com/hangar-project/hangar/internal/api/middleware"
 	"github.com/hangar-project/hangar/internal/api/v2shim"
+	"github.com/hangar-project/hangar/internal/provisioning"
 	"github.com/hangar-project/hangar/internal/sso"
 	"github.com/hangar-project/hangar/internal/store"
 )
@@ -33,6 +34,19 @@ type Deps struct {
 	// — the character-reauthorize handler degrades to an error rather than
 	// panicking when it is.
 	SSO *sso.Flow
+
+	// Urgent is the < 60s revocation path's enqueuer (§9.2), backed by an
+	// INSERT-ONLY River client: the API process produces provision-urgent
+	// jobs and never consumes them — cmd/hangar/work.go still owns the only
+	// worker pool.
+	//
+	// PHASE 20.3. Phase 18 recorded that "wiring the API process to River
+	// would be an architectural change well beyond this phase" and left
+	// DELETE-a-rule unmounted because of it; see cmd/hangar/revocation.go
+	// for why an insert-only client is not that change. It is nil in the
+	// spec-only build path (cmd/hangar/openapi.go) and in tests, and every
+	// handler that needs it says so with a 500 rather than panicking.
+	Urgent *provisioning.Urgent
 }
 
 // NewAPI builds the Huma API bound to mux, with SRS §6's session-resolving

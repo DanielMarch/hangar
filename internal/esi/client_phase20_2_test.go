@@ -43,10 +43,13 @@ func (l *recordingLedger) Reconcile(_ context.Context, group, userKey string, ma
 	return nil
 }
 
+// ledgerRequest is a background-shaped call: the route's real ceiling on
+// RateLimitMax and a call-site reserve on RateLimitAdmissionMax, exactly as
+// internal/sync/worker builds one for char-notification.
 func ledgerRequest() esi.Request {
 	return esi.Request{
 		Method: http.MethodGet, UpstreamPath: "/x",
-		RateLimitGroup: "g", RateLimitMax: 10, RateLimitRealMax: 15,
+		RateLimitGroup: "g", RateLimitMax: 15, RateLimitAdmissionMax: 10,
 		RateLimitWindow: time.Minute, UserKey: "hangar:1",
 	}
 }
@@ -79,10 +82,17 @@ func TestReconcileUsesTheServersOwnCeiling(t *testing.T) {
 }
 
 // TestReconcileFallsBackToTheUNREDUCEDCeiling is internal/sync/worker/
-// reserve.go's rule enforced at the gateway: RateLimitMax may carry a
-// call-site reserve (char-notification holds five tokens back for
-// interactive callers) and feeding that fiction to the reconciler would
-// desync the ledger from the truth it exists to import.
+// reserve.go's rule enforced at the gateway: a call-site reserve
+// (char-notification holds five tokens back for interactive callers) must
+// never reach the reconciler, because feeding it that fiction would desync
+// the ledger from the truth it exists to import.
+//
+// Phase 20.3 made the rule structural rather than conditional. The reserve
+// now lives on RateLimitAdmissionMax, which reconcile() cannot read even by
+// accident; RateLimitMax is the real ceiling on every call site, so there
+// is no longer a "fall back to the other field" branch to get wrong. The
+// test keeps its name and its assertion because the PROPERTY is unchanged
+// and is what matters.
 func TestReconcileFallsBackToTheUNREDUCEDCeiling(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-Ratelimit-Remaining", "7") // no X-Ratelimit-Limit
@@ -96,7 +106,8 @@ func TestReconcileFallsBackToTheUNREDUCEDCeiling(t *testing.T) {
 	_, err := client.Do(context.Background(), ledgerRequest())
 	require.NoError(t, err)
 	require.Equal(t, 15, ledger.maxTokens,
-		"with no server ceiling, RateLimitRealMax (15) is used, never the reduced RateLimitMax (10)")
+		"with no server ceiling, the route's real ceiling (RateLimitMax, 15) is used — never the "+
+			"call site's reduced admission ceiling (RateLimitAdmissionMax, 10)")
 }
 
 // TestAbsentRemainingHeaderIsNotAReadingOfZero is §5.5's headerless edge

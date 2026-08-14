@@ -109,6 +109,24 @@ func (b *bucket) available() int {
 	return b.maxTokens - b.liveCost()
 }
 
+// admissionAvailable is available() measured against a caller-supplied
+// admission ceiling — the solo counterpart of acquireLedgerEntrySQL's
+// `least(locked.max_tokens, $4)`, and it clamps for the same reason: a
+// caller may hold tokens back from itself, never grant itself more than the
+// bucket has. ceiling <= 0 means "no reduction".
+//
+// This is the ONLY place a per-caller ceiling may be applied. b.maxTokens
+// must stay the route's real ceiling, because settledAvailable() —
+// Reconcile's view — is measured against it, and a fiction there desyncs
+// the ledger from the server reading it exists to import. See
+// AcquireRequest.AdmissionMaxTokens.
+func (b *bucket) admissionAvailable(ceiling int) int {
+	if ceiling <= 0 || ceiling > b.maxTokens {
+		return b.available()
+	}
+	return ceiling - b.liveCost()
+}
+
 // settledCost sums only the live SETTLED/SYNTHETIC entries, excluding
 // in-flight reservations. It is the reconciliation view (§5.5's "the server
 // always wins"), never the acquire view: acquire must count reservations,

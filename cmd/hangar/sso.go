@@ -24,6 +24,7 @@ import (
 	"github.com/hangar-project/hangar/internal/config"
 	"github.com/hangar-project/hangar/internal/crypto"
 	"github.com/hangar-project/hangar/internal/esi/catalogue"
+	"github.com/hangar-project/hangar/internal/provisioning"
 	"github.com/hangar-project/hangar/internal/rbac"
 	"github.com/hangar-project/hangar/internal/scopes"
 	"github.com/hangar-project/hangar/internal/sso"
@@ -72,7 +73,16 @@ func (a jwksSettingStore) UpsertSetting(ctx context.Context, key string, value j
 // No jwks.Clock implementation is passed: jwks.NewCache already defaults
 // a nil clock to its own unexported systemClock (cache.go), so supplying
 // one here would add a type for no behavioural difference.
-func buildSSOFlow(ctx context.Context, cfg *config.Config, pool store.Pool, s *store.Store, keyring *crypto.Keyring, logger *slog.Logger) (*sso.Flow, error) {
+func buildSSOFlow(
+	ctx context.Context,
+	cfg *config.Config,
+	pool store.Pool,
+	s *store.Store,
+	keyring *crypto.Keyring,
+	lifecycle *sso.Lifecycle,
+	urgent *provisioning.Urgent,
+	logger *slog.Logger,
+) (*sso.Flow, error) {
 	cache := jwks.NewCache(cfg.SSO.JWKSURL, jwksSettingStore{store: s}, nil, nil)
 
 	loadErr := cache.Load(ctx)
@@ -98,6 +108,39 @@ func buildSSOFlow(ctx context.Context, cfg *config.Config, pool store.Pool, s *s
 		SessionTTL: cfg.Crypto.SessionTTL,
 		// Phase 20.2, defect B37.
 		LoginScopes: loginScopeResolver(s, cfg.SSO.Scopes, logger),
+		// Phase 20.3, defect B27. §7.2's transfer edge case, on the one
+		// path a transferred character actually takes.
+		//
+		// This hook has existed since Phase 5 and has never been set by any
+		// process. Its own doc comment claimed "lifecycle.go wires the real
+		// invalidation regardless of whether this hook is set" — which was
+		// true of nothing: internal/sso.Lifecycle had no production caller
+		// either, so a character transferred to another EVE account kept
+		// every HANGAR entitlement its previous owner had earned, forever,
+		// and logging in as the new owner did not disturb that.
+		//
+		// It fires from resolveUser, BEFORE persistToken writes the new
+		// owner's token — so the invalidation lands on the OLD token and
+		// the fresh authorization that follows is stored valid, which is
+		// exactly §7.2's intent. A failure is logged, never returned: the
+		// login has succeeded by then and refusing it would leave the new
+		// owner locked out of an account they legitimately hold.
+		OnOwnerHashChanged: func(ctx context.Context, characterID int64) {
+			logger.WarnContext(ctx,
+				"sso: this character's owner hash changed — it has been transferred to a different EVE "+
+					"account, so every stored token for it is being invalidated (§7.2)",
+				"character_id", characterID)
+			if err := lifecycle.InvalidateForOwnerHashChange(ctx, characterID); err != nil {
+				logger.ErrorContext(ctx,
+					"sso: invalidating tokens after an owner hash change FAILED — a transferred character "+
+						"may still hold its previous owner's entitlements",
+					"character_id", characterID, "error", err)
+			}
+		},
+		// Phase 20.3, defect B27 — Gate 2 trigger row 3. See
+		// internal/sso.Flow.OnScopesReduced for why this is its own event
+		// and not a token invalidation.
+		OnScopesReduced: notifyScopesReduced(urgent, pool, logger),
 		// Phase 20.2, defect B40: a freshly authenticated SSO user held ZERO
 		// permissions, and no route existed by which anyone could grant them
 		// any. BootstrapFirstAdmin promotes this user to the seeded `admin`

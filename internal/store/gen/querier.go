@@ -134,7 +134,31 @@ type Querier interface {
 	// first: the outbox must drain faster with more replicas, not the same.
 	ClaimUndispatchedOutboxEvents(ctx context.Context, claimSize int32) ([]AppOutboxEvent, error)
 	ClearWebhookEndpointFailures(ctx context.Context, endpointID uuid.UUID) error
-	CompleteProvisioningAudit(ctx context.Context, auditID uuid.UUID, outcome *string, error *string) error
+	// PHASE 20.3. Now RETURNS the revocation latency, because that number is
+	// what feeds provisioning_revocation_latency_seconds (Gate 2).
+	//
+	// The subtraction is done HERE, in the same statement that writes
+	// platform_call_completed_at, and not in Go. Two reasons, and the second
+	// is the one that matters:
+	//
+	//   - 04_RELEASE_GATES.md §2.2 defines the measurement as p99 of
+	//     (platform_call_completed_at - event_at) FROM THIS TABLE. Computing
+	//     it anywhere else risks the metric and the gate's own query
+	//     disagreeing about the same run.
+	//   - platform_call_completed_at is Postgres's now(); event_at was stamped
+	//     by time.Now() in whichever process observed the originating event.
+	//     Subtracting a Go instant from a Postgres instant in Go would add a
+	//     third clock to a two-clock problem. Reading back what was actually
+	//     STORED and differencing it in one place keeps the operands to the
+	//     two the gate itself names. (Their clock domains still differ — that
+	//     is inherent in §2.2's own definition, not introduced here.)
+	//
+	// Nullable because event_at is NOT NULL but a caller could complete an
+	// audit row twice; the second UPDATE still returns a real interval, so in
+	// practice this is never null. Typed as double precision seconds rather
+	// than an interval so the caller can hand it straight to a Prometheus
+	// histogram without a unit conversion nobody would remember to check.
+	CompleteProvisioningAudit(ctx context.Context, auditID uuid.UUID, outcome *string, error *string) (float64, error)
 	CompleteSdeImport(ctx context.Context, arg CompleteSdeImportParams) error
 	// Attaches the resolved user to a pre-auth session and clears
 	// pkce_verifier/state in the same statement: `state` is single-use
@@ -458,7 +482,11 @@ type Querier interface {
 	GetMoonReport(ctx context.Context, reportID uuid.UUID) (AppMoonReport, error)
 	// AcquireLedgerEntry (the primary clustered acquire path) is deliberately
 	// NOT a sqlc query — see shared.go's acquireLedgerEntrySQL const for both
-	// the statement and the full rationale. PHASE 4 PERFORMANCE FIX summary:
+	// the statement and the full rationale. Its admission test compares
+	// consumption against `least(locked.max_tokens, $4)` since Phase 20.3: the
+	// stored ceiling is the truth, $4 is the caller's own (never-stored)
+	// reduction, and a caller can hold tokens back from itself but can never
+	// grant itself more than the bucket has. PHASE 4 PERFORMANCE FIX summary:
 	// running the acquire sequence above as five separate round trips inside
 	// an explicit BEGIN/COMMIT (seven round trips total) fell well short of
 	// BenchmarkLedgerClusteredThroughput's >=2000 ops/s/replica-at-p99<10ms
@@ -1316,6 +1344,17 @@ type Querier interface {
 	// EvictAgedLedgerEntries (the original window-eviction, now scoped away
 	// from 'reserved' rows so a live, not-yet-expired reservation is never
 	// evicted just because its issue-time consumed_at looks old).
+	// PHASE 20.3. max_tokens here is the route's REAL, advertised ceiling and
+	// nothing else. It used to receive whatever ceiling the calling code asked
+	// to be admitted against, which meant §4.4's char-notification reserve
+	// (background poller: 15-5=10) was persisted into a row every caller
+	// shares. Two consequences, both real: ListLedgerDivergence below measured
+	// local_remaining against 10 while ESI reported against 15, so Gate 1.3 saw
+	// a permanent divergence of exactly 5 on a healthy installation; and an
+	// interactive caller passing the real 15 flipped the row back, with the
+	// IS DISTINCT FROM guard turning every flip into a real write. The
+	// admission ceiling is now a parameter of the acquire statement instead —
+	// see internal/esi/ratelimit's AcquireRequest.AdmissionMaxTokens.
 	UpsertLedgerBucket(ctx context.Context, arg UpsertLedgerBucketParams) error
 	UpsertLocation(ctx context.Context, arg UpsertLocationParams) (AppLocation, error)
 	UpsertMailBody(ctx context.Context, characterID int64, mailID int64, body string) (AppMailBody, error)

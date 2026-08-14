@@ -39,6 +39,13 @@ func (l *LedgerSolo) getBucket(sh *shard, req AcquireRequest) *bucket {
 	// Bucket config can drift when a route's advertised max-tokens/window
 	// changes (reconciled from X-Ratelimit-Limit); keep it current. This
 	// never touches the ledger/reserved contents.
+	//
+	// req.MaxTokens, never req.admissionCeiling(): what is STORED is the
+	// route's real ceiling, exactly as in the clustered ledger's bucket
+	// row. A per-caller reduction written here would be read back by
+	// settledAvailable() on the next Reconcile and by flush.go on the next
+	// mode transition, which is how the same fiction reached
+	// app.esi_ledger_bucket before 20.3.
 	b.maxTokens = req.MaxTokens
 	b.window = req.Window
 	return b
@@ -54,7 +61,7 @@ func (l *LedgerSolo) Acquire(ctx context.Context, req AcquireRequest) (*Reservat
 	now := l.clock.Now()
 	b.evict(now)
 
-	if b.available() < int(CostReserved) {
+	if b.admissionAvailable(req.admissionCeiling()) < int(CostReserved) {
 		retryAt := l.retryAt(b, now, req.Window)
 		return nil, &RetryAtError{RetryAt: retryAt}
 	}

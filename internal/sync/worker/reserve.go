@@ -23,36 +23,50 @@ package worker
 // "refresh now" — or a retry after a transient failure — finds no budget
 // and is told to come back in fifteen minutes.
 //
-// ── WHY THE RESERVE LIVES HERE AND NOT IN internal/esi/ratelimit ────────
-// ratelimit.AcquireRequest.MaxTokens is a PER-CALL, caller-supplied value:
-// internal/esi/client.go's Do passes req.RateLimitMax straight through,
-// and LedgerSolo.getBucket re-reads it on every acquire rather than fixing
-// it when the bucket is created. The ceiling is therefore whatever the
-// caller asks for, on that call, for that caller only.
+// ── WHERE THE RESERVE IS APPLIED, AND WHERE IT MUST NOT BE ──────────────
 //
-// That makes the reserve a pure call-site policy, and implementing it here
-// costs internal/esi/ratelimit — a foundational, heavily tested Phase 4
-// component — exactly zero changes for what is one route's policy. The
-// background poller asks for (real max - 5) and so can never consume the
-// last 5 tokens; any OTHER caller against the same bucket (an interactive
-// refresh from the UI, a manual retry) asks for the real 15 and can spend
-// the headroom the poller structurally cannot touch.
+// PHASE 20.3 CORRECTION. This header used to argue that the reserve could
+// live entirely at the call site, costing internal/esi/ratelimit zero
+// changes, because "AcquireRequest.MaxTokens is a PER-CALL, caller-supplied
+// value ... the ceiling is therefore whatever the caller asks for, on that
+// call, for that caller only". The first half was true; the conclusion was
+// not. BOTH ledgers implement admission by comparing consumption against
+// the ceiling they have STORED — acquireLedgerEntrySQL's test reads
+// `locked.max_tokens`, LedgerSolo's reads `b.maxTokens` — and both write
+// AcquireRequest.MaxTokens into that stored ceiling first. The reduced
+// number was therefore not per-call at all: it was persisted into
+// app.esi_ledger_bucket.max_tokens, a row every caller shares.
 //
-// ── THE ONE PLACE THIS MUST NOT BE APPLIED ──────────────────────────────
-// Ledger.Reconcile's maxTokens argument must always be the REAL value.
-// Reconcile exists to correct the local ledger against ESI's own
-// X-Ratelimit-Remaining — "the server always wins" (§5.5) — and feeding it
-// a fictional smaller ceiling would desync the ledger from the truth it is
-// there to import. ReconcileRateLimitMax below exists to make that
-// distinction impossible to get wrong by accident, and is the value any
-// future Reconcile call site must use.
+// That was measurable on a healthy installation. esi_ledger_divergence
+// computes local_remaining as max_tokens - consumed and compares it against
+// the server's X-Ratelimit-Remaining, which ESI reports against 15. With 10
+// stored, char-notification read a PERMANENT divergence of exactly 5
+// against Gate 1.3's tolerance of 1 — every other group reading 0 — with
+// nothing wrong with the installation. It also meant an interactive caller
+// asking for the real 15 flipped the stored ceiling back, and the next
+// background call flipped it to 10 again: two callers, one row, a real
+// write per flip.
 //
-// (As of this phase nothing in production calls Reconcile at all — it is
-// implemented and unit-tested in internal/esi/ratelimit, but internal/esi.
-// Client.Do never invokes it, so there is no live call site to get wrong
-// yet. Stated rather than assumed, because "the rule is already enforced
-// everywhere" and "there is nowhere it applies yet" look identical from
-// the outside.)
+// The split is now explicit in the ledger contract itself:
+//
+//   - AcquireRequest.MaxTokens          — the REAL ceiling. Stored. What
+//                                         Reconcile and the divergence
+//                                         metric measure against.
+//   - AcquireRequest.AdmissionMaxTokens — the ceiling THIS call may admit
+//                                         against. Never stored, never
+//                                         outlives the call.
+//
+// So the reserve really is a call-site policy now, and BackgroundRateLimitMax
+// still expresses it — it just feeds the admission field instead of the
+// stored one. The reserve holds cluster-wide for the same reason it always
+// did: every background caller computes the same reduced ceiling, and an
+// interactive caller passing no reduction can spend the headroom the poller
+// structurally cannot touch.
+//
+// Reconcile is unaffected and was always correct: it takes the real ceiling
+// (Request.RateLimitMax), because "the server always wins" (§5.5) and
+// feeding it a fictional smaller ceiling would desync the ledger from the
+// truth it is there to import.
 
 // CharNotificationGroup is the x-rate-limit group name of
 // GET /characters/{character_id}/notifications, verbatim from the spec.
@@ -61,33 +75,41 @@ const CharNotificationGroup = "char-notification"
 // CharNotificationReserve is §4.4's "permanent 5-token reserve".
 const CharNotificationReserve = 5
 
-// BackgroundRateLimitMax returns the max-tokens a BACKGROUND sync call
-// should acquire against for a route in the given rate-limit group: the
-// route's real ceiling everywhere except char-notification, where it is
-// the real ceiling minus the permanent reserve.
+// BackgroundRateLimitMax returns the ADMISSION ceiling a BACKGROUND sync
+// call should acquire against for a route in the given rate-limit group:
+// zero — meaning "no reduction, use the route's real ceiling" — everywhere
+// except char-notification, where it is the real ceiling minus the
+// permanent reserve.
 //
 // routeMax comes from app.esi_route.rate_limit_max — the ingested spec's
 // own value, never a constant here. If CCP raises char-notification to 30,
 // the reserve stays 5 tokens and the poller gets 25, with no code change;
 // hardcoding 10 would silently cap the poller forever.
 //
-// A routeMax at or below the reserve yields the real value unchanged
-// rather than zero or a negative: a ceiling smaller than the reserve means
-// the reserve cannot be honoured at all, and refusing every background
-// call would be a worse failure than not reserving. (Not reachable with
-// today's spec — 15 > 5 — but a spec change must degrade, not deadlock.)
+// A routeMax at or below the reserve yields zero (no reduction) rather than
+// zero-or-negative headroom: a ceiling smaller than the reserve means the
+// reserve cannot be honoured at all, and refusing every background call
+// would be a worse failure than not reserving. (Not reachable with today's
+// spec — 15 > 5 — but a spec change must degrade, not deadlock.)
 func BackgroundRateLimitMax(group string, routeMax int32) int {
-	max := int(routeMax)
 	if group != CharNotificationGroup {
-		return max
+		return 0
 	}
+	max := int(routeMax)
 	if max <= CharNotificationReserve {
-		return max
+		return 0
 	}
 	return max - CharNotificationReserve
 }
 
-// ReconcileRateLimitMax returns the REAL ceiling, unreduced — the value
-// every Ledger.Reconcile call must pass. See this file's header for why
-// the reserve must never reach Reconcile.
-func ReconcileRateLimitMax(routeMax int32) int { return int(routeMax) }
+// RouteRateLimitMax returns the route's REAL ceiling — the value
+// esi.Request.RateLimitMax must always carry, on every call site, because
+// it is what the ledger persists as the bucket's max_tokens and what
+// Reconcile and esi_ledger_divergence both measure against. It exists so
+// that a call site reads as a pair (real ceiling, admission ceiling) and
+// the two can never be transposed by accident.
+//
+// It was ReconcileRateLimitMax until Phase 20.3, when the value stopped
+// being reconciliation-specific: the reserve moved off the stored ceiling,
+// so the real ceiling is now simply what every caller passes.
+func RouteRateLimitMax(routeMax int32) int { return int(routeMax) }

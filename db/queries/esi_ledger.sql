@@ -24,6 +24,17 @@
 -- evicted just because its issue-time consumed_at looks old).
 
 -- name: UpsertLedgerBucket :exec
+-- PHASE 20.3. max_tokens here is the route's REAL, advertised ceiling and
+-- nothing else. It used to receive whatever ceiling the calling code asked
+-- to be admitted against, which meant §4.4's char-notification reserve
+-- (background poller: 15-5=10) was persisted into a row every caller
+-- shares. Two consequences, both real: ListLedgerDivergence below measured
+-- local_remaining against 10 while ESI reported against 15, so Gate 1.3 saw
+-- a permanent divergence of exactly 5 on a healthy installation; and an
+-- interactive caller passing the real 15 flipped the row back, with the
+-- IS DISTINCT FROM guard turning every flip into a real write. The
+-- admission ceiling is now a parameter of the acquire statement instead —
+-- see internal/esi/ratelimit's AcquireRequest.AdmissionMaxTokens.
 INSERT INTO app.esi_ledger_bucket (rate_limit_group, user_key, max_tokens, "window")
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (rate_limit_group, user_key) DO UPDATE
@@ -91,7 +102,11 @@ SELECT coalesce(sum(cost), 0)::bigint AS total_cost
 
 -- AcquireLedgerEntry (the primary clustered acquire path) is deliberately
 -- NOT a sqlc query — see shared.go's acquireLedgerEntrySQL const for both
--- the statement and the full rationale. PHASE 4 PERFORMANCE FIX summary:
+-- the statement and the full rationale. Its admission test compares
+-- consumption against `least(locked.max_tokens, $4)` since Phase 20.3: the
+-- stored ceiling is the truth, $4 is the caller's own (never-stored)
+-- reduction, and a caller can hold tokens back from itself but can never
+-- grant itself more than the bucket has. PHASE 4 PERFORMANCE FIX summary:
 -- running the acquire sequence above as five separate round trips inside
 -- an explicit BEGIN/COMMIT (seven round trips total) fell well short of
 -- BenchmarkLedgerClusteredThroughput's >=2000 ops/s/replica-at-p99<10ms

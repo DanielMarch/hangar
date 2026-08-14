@@ -329,19 +329,18 @@ func (w *CharacterWorker) doSync(ctx context.Context, s *store.Store, sub gen.Ap
 		AccessToken:    accessToken,
 		CacheMode:      derefStr(route.CacheMode),
 		RateLimitGroup: derefStr(route.RateLimitGroup),
+		// The route's REAL ceiling — stored as the bucket's max_tokens and
+		// measured against by both the B29 reconciler and
+		// esi_ledger_divergence. Never a reduced value (reserve.go).
+		RateLimitMax: RouteRateLimitMax(derefInt32(route.RateLimitMax)),
 		// Phase 14: a background sync is exactly the caller the
 		// char-notification reserve holds budget back from — see
-		// reserve.go. Every other group is unaffected (the helper returns
-		// the route's real ceiling).
-		RateLimitMax: BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
-		// ...and Phase 20.2's B29 reconciler must see the ceiling WITHOUT
-		// that reserve applied, which is the whole reason
-		// ReconcileRateLimitMax exists (reserve.go's header).
-		RateLimitRealMax: ReconcileRateLimitMax(derefInt32(route.RateLimitMax)),
-		RateLimitWindow:  sync.IntervalToDuration(route.RateLimitWindow),
-		UserKey:          fmt.Sprintf("hangar:%d", characterID),
-		EntityID:         characterID,
-		Validators:       validators,
+		// reserve.go. Zero for every other group, meaning no reduction.
+		RateLimitAdmissionMax: BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
+		RateLimitWindow:       sync.IntervalToDuration(route.RateLimitWindow),
+		UserKey:               fmt.Sprintf("hangar:%d", characterID),
+		EntityID:              characterID,
+		Validators:            validators,
 	}
 
 	var resp *esi.Response
@@ -466,14 +465,14 @@ func (w *CharacterWorker) doMailBodyFanout(ctx context.Context, s *store.Store, 
 				"character_id": strconv.FormatInt(characterID, 10),
 				"mail_id":      strconv.FormatInt(h.MailID, 10),
 			},
-			AccessToken:      accessToken,
-			CacheMode:        derefStr(route.CacheMode),
-			RateLimitGroup:   derefStr(route.RateLimitGroup),
-			RateLimitMax:     BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
-			RateLimitRealMax: ReconcileRateLimitMax(derefInt32(route.RateLimitMax)),
-			RateLimitWindow:  sync.IntervalToDuration(route.RateLimitWindow),
-			UserKey:          fmt.Sprintf("hangar:%d", characterID),
-			EntityID:         characterID,
+			AccessToken:           accessToken,
+			CacheMode:             derefStr(route.CacheMode),
+			RateLimitGroup:        derefStr(route.RateLimitGroup),
+			RateLimitMax:          RouteRateLimitMax(derefInt32(route.RateLimitMax)),
+			RateLimitAdmissionMax: BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
+			RateLimitWindow:       sync.IntervalToDuration(route.RateLimitWindow),
+			UserKey:               fmt.Sprintf("hangar:%d", characterID),
+			EntityID:              characterID,
 		})
 		if doErr != nil {
 			// A refusal part-way through the fanout keeps whatever bodies

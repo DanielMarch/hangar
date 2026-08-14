@@ -32,7 +32,24 @@ import (
 // gateway, and a process without one should still export its Go and
 // process collectors rather than refuse to serve metrics at all. counters
 // may likewise be nil — only the process that owns an ESI client has any.
-func buildMetricsRegistry(s *store.Store, gateway *ratelimit.Governor1, counters *telemetry.GatewayCounters, errorLimitMax int, logger *slog.Logger) *prometheus.Registry {
+//
+// revocations is nil in every process but `work`, and that is deliberate
+// rather than incidental. provisioning_revocation_latency_seconds is
+// observed where a revocation COMPLETES, which only ever happens in the
+// process running the provision-urgent worker pool. Registering an
+// always-empty histogram on `serve` would export `_count 0` from a process
+// that structurally cannot ever increment it — a reassuring zero from a
+// subsystem that is not there, which is precisely the reading 20.1's
+// lesson forbids. `serve` produces revocation TRIGGERS and reports none of
+// their latencies; `work` consumes them and reports all of them.
+func buildMetricsRegistry(
+	s *store.Store,
+	gateway *ratelimit.Governor1,
+	counters *telemetry.GatewayCounters,
+	revocations *telemetry.RevocationLatency,
+	errorLimitMax int,
+	logger *slog.Logger,
+) *prometheus.Registry {
 	reg := telemetry.NewRegistry()
 
 	var mode telemetry.ModeSource
@@ -44,6 +61,9 @@ func buildMetricsRegistry(s *store.Store, gateway *ratelimit.Governor1, counters
 	))
 	if counters != nil {
 		reg.MustRegister(counters)
+	}
+	if revocations != nil {
+		reg.MustRegister(revocations)
 	}
 	return reg
 }
