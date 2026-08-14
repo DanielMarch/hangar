@@ -73,6 +73,22 @@ type Flow struct {
 	// the real invalidation regardless of whether this hook is set.
 	OnOwnerHashChanged func(ctx context.Context, characterID int64)
 
+	// OnTokenPersisted is called (if set) once a character's refresh token
+	// and granted scope set are committed, with the scopes that were
+	// actually granted.
+	//
+	// PHASE 20.1.1, defect B42. cmd/hangar wires this to subscription
+	// reconciliation, so authorising a character schedules its routes
+	// immediately instead of at the next timer tick — logging in is the
+	// first thing an operator does, and an installation that then sits
+	// inert for minutes looks broken rather than merely unhurried.
+	//
+	// A hook rather than a direct call because reconciliation needs the
+	// worker's route partition, and internal/sso has no business importing
+	// the sync workers to complete a login. Same seam, same reasoning as
+	// OnOwnerHashChanged above.
+	OnTokenPersisted func(ctx context.Context, characterID int64, scopes []string)
+
 	// LoginScopes resolves the scope set every login and reauthorization
 	// requests (defect B37). Resolved per call rather than once at
 	// construction, because `serve` ingests the route catalogue in the
@@ -214,6 +230,19 @@ func (f *Flow) HandleCallback(ctx context.Context, sessionID uuid.UUID, code, st
 
 	if err := f.persistToken(ctx, characterID, tokenResp, claims); err != nil {
 		return nil, err
+	}
+
+	// Defect B42: schedule this character's routes now that its token and
+	// scope set exist. Deliberately AFTER persistToken — reconciliation
+	// gates every subscription on app.character_token_scope, so running it
+	// first would create nothing and silently look like it had worked.
+	//
+	// A failure here does NOT fail the login. The character is
+	// authenticated, the token is stored, and the periodic pass will pick
+	// the subscriptions up within its interval; refusing the login would
+	// turn a delayed sync into a locked-out user. The hook logs.
+	if f.OnTokenPersisted != nil {
+		f.OnTokenPersisted(ctx, characterID, []string(claims.Scopes))
 	}
 
 	expiresAt := time.Now().Add(f.sessionTTL())

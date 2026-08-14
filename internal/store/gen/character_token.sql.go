@@ -90,6 +90,38 @@ func (q *Queries) InvalidateCharacterToken(ctx context.Context, characterID int6
 	return err
 }
 
+const listCharacterIDsWithValidTokens = `-- name: ListCharacterIDsWithValidTokens :many
+SELECT c.character_id
+  FROM app.character c
+  JOIN app.character_token t ON t.character_id = c.character_id
+ WHERE t.valid
+   AND c.deleted_at IS NULL
+ ORDER BY c.character_id
+`
+
+// Every character reconciliation should consider (defect B42). Soft-deleted
+// characters and invalidated tokens are excluded here rather than in Go, so
+// a caller cannot forget either filter.
+func (q *Queries) ListCharacterIDsWithValidTokens(ctx context.Context) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listCharacterIDsWithValidTokens)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var character_id int64
+		if err := rows.Scan(&character_id); err != nil {
+			return nil, err
+		}
+		items = append(items, character_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCharacterTokenScopes = `-- name: ListCharacterTokenScopes :many
 SELECT scope FROM app.character_token_scope WHERE character_id = $1 ORDER BY scope
 `

@@ -126,3 +126,140 @@ SELECT * FROM app.sync_run
  WHERE subscription_id = $1
  ORDER BY started_at DESC
  LIMIT sqlc.arg(page_size);
+
+-- ── SUBSCRIPTION RECONCILIATION (defect B42, Phase 20.1.1) ────────────────
+-- Nothing in production ever created a subscription, so app.sync_subscription
+-- was permanently empty and the entire ESI sync engine had nothing to do.
+-- These four statements are the fix, and they are deliberately SET-BASED
+-- rather than a Go loop issuing one upsert per route: reconciliation runs on
+-- every replica, on a timer and on every login, so it has to be atomic and
+-- idempotent by construction rather than by careful sequencing.
+--
+-- SCOPE GATING is the NOT EXISTS clause, and it is not an optimisation. A
+-- subscription whose route needs a scope the token never granted produces a
+-- guaranteed 403 on every single attempt, and Governor 2 counts every 403
+-- against an installation-wide budget of 100 per minute (§5.7). Creating
+-- those rows would spend the error budget on requests that cannot succeed,
+-- and could pause the whole installation. Routes requiring no scope (the
+-- public ones) satisfy the clause trivially, which is correct.
+
+-- name: ReconcileCharacterSubscriptions :execrows
+-- One subscription per character-scoped route whose required scopes are all
+-- present in this character's granted set. The character is its own acting
+-- character. Existing rows are left completely alone — DO NOTHING, not DO
+-- UPDATE, because a row may carry live sync state (etag, cursor_after,
+-- consecutive_304) that reconciliation has no business resetting.
+INSERT INTO app.sync_subscription (entity_kind, entity_id, route_id, acting_character_id)
+SELECT 'character', c.character_id, r.route_id, c.character_id
+  FROM app.character c
+  JOIN app.character_token t ON t.character_id = c.character_id AND t.valid
+  JOIN app.esi_route r
+    ON r.method = 'GET'
+   AND r.retired_at IS NULL
+   AND NOT r.blocked_by_pin
+   AND r.upstream_path = ANY(sqlc.arg(paths)::text[])
+ WHERE c.character_id = sqlc.arg(character_id)
+   AND c.deleted_at IS NULL
+   AND NOT EXISTS (
+         SELECT 1
+           FROM app.esi_route_scope rs
+          WHERE rs.route_id = r.route_id
+            AND rs.scope NOT IN (
+                  SELECT s.scope FROM app.character_token_scope s
+                   WHERE s.character_id = c.character_id))
+ON CONFLICT (entity_kind, entity_id, route_id) DO NOTHING;
+
+-- name: ReconcileCorporationSubscriptions :execrows
+-- Corporation-scoped routes, gated on the ACTING character's scopes rather
+-- than the corporation's (a corporation has no token; §6.3 elects a
+-- character to act for it). acting_character_id is set to the character this
+-- row was justified by; internal/sync's elector may re-elect later, which is
+-- why ON CONFLICT leaves the existing choice alone rather than fighting it.
+--
+-- This can only run once app.character.corporation_id is populated, and that
+-- column is filled by /characters/{character_id} — a CHARACTER route. The
+-- bootstrap is therefore genuinely ordered: character subscriptions must
+-- exist and run before this produces anything at all. That is why
+-- reconciliation is periodic rather than a single pass at link time.
+INSERT INTO app.sync_subscription (entity_kind, entity_id, route_id, acting_character_id)
+SELECT 'corporation', c.corporation_id, r.route_id, c.character_id
+  FROM app.character c
+  JOIN app.character_token t ON t.character_id = c.character_id AND t.valid
+  JOIN app.esi_route r
+    ON r.method = 'GET'
+   AND r.retired_at IS NULL
+   AND NOT r.blocked_by_pin
+   AND r.upstream_path = ANY(sqlc.arg(paths)::text[])
+ WHERE c.corporation_id IS NOT NULL
+   AND c.deleted_at IS NULL
+   AND NOT EXISTS (
+         SELECT 1
+           FROM app.esi_route_scope rs
+          WHERE rs.route_id = r.route_id
+            AND rs.scope NOT IN (
+                  SELECT s.scope FROM app.character_token_scope s
+                   WHERE s.character_id = c.character_id))
+ON CONFLICT (entity_kind, entity_id, route_id) DO NOTHING;
+
+-- name: ReconcileGlobalSubscriptions :execrows
+-- Global routes (/status, sovereignty) belong to no owner: entity_id = 0 per
+-- internal/sync.EntityGlobal, and acting_character_id stays NULL because
+-- these routes are unauthenticated. They are created at boot rather than on
+-- login — an installation with no characters yet should still know whether
+-- Tranquility is up.
+INSERT INTO app.sync_subscription (entity_kind, entity_id, route_id, acting_character_id)
+SELECT 'global', 0, r.route_id, NULL
+  FROM app.esi_route r
+ WHERE r.method = 'GET'
+   AND r.retired_at IS NULL
+   AND NOT r.blocked_by_pin
+   AND r.upstream_path = ANY(sqlc.arg(paths)::text[])
+ON CONFLICT (entity_kind, entity_id, route_id) DO NOTHING;
+
+-- name: DisableUnscopedSubscriptions :execrows
+-- DISABLE, never delete, a subscription whose acting character no longer
+-- carries every scope its route needs — the case where a user re-authorises
+-- with a narrower grant, or a token is invalidated.
+--
+-- Disabling rather than deleting is deliberate and is what the `enabled`
+-- column is for: the row carries accumulated sync state (etag, last_modified,
+-- cursor_after) that is expensive to rebuild and still valid, so if the scope
+-- comes back the subscription resumes conditionally instead of re-fetching
+-- the whole collection. It also leaves evidence on the admin surface that the
+-- route WAS being polled and no longer is, which a delete would erase.
+--
+-- The mirror case — a subscription that is disabled but now has its scopes
+-- again — is handled by the three reconcile statements above only for rows
+-- that do not exist. So this re-enables them explicitly.
+WITH covered AS (
+  SELECT s.subscription_id,
+         (s.acting_character_id IS NULL
+          OR (EXISTS (SELECT 1 FROM app.character_token t
+                       WHERE t.character_id = s.acting_character_id AND t.valid)
+              AND NOT EXISTS (
+                    SELECT 1 FROM app.esi_route_scope rs
+                     WHERE rs.route_id = s.route_id
+                       AND rs.scope NOT IN (
+                             SELECT ts.scope FROM app.character_token_scope ts
+                              WHERE ts.character_id = s.acting_character_id))))
+           AS has_scopes
+    FROM app.sync_subscription s
+)
+UPDATE app.sync_subscription s
+   SET enabled = covered.has_scopes
+  FROM covered
+ WHERE covered.subscription_id = s.subscription_id
+   AND s.enabled IS DISTINCT FROM covered.has_scopes;
+
+-- name: SubscriptionEnabledForPath :one
+-- Whether this installation actually polls a given route (defect B42).
+-- "Never scheduled" and "scheduled but failing" are different problems with
+-- different operator actions, and before Phase 20.1.1 every surface
+-- conflated them — which is a large part of why an installation with ZERO
+-- subscriptions looked merely quiet for the whole life of the project.
+SELECT EXISTS (
+  SELECT 1
+    FROM app.sync_subscription s
+    JOIN app.esi_route r ON r.route_id = s.route_id
+   WHERE r.upstream_path = sqlc.arg(upstream_path)
+     AND s.enabled);

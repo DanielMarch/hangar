@@ -168,6 +168,13 @@ func runServe(ctx context.Context) error {
 		return err
 	}
 
+	// Phase 20.1.1 (defect B42): create the subscriptions that give the
+	// planner something to claim. Runs at boot and every reconcileInterval,
+	// on every replica — see runSubscriptionReconciler for why it is not
+	// behind the leader lock. Without this the planner claims due work,
+	// finds none, and does so forever.
+	go runSubscriptionReconciler(hbCtx, s, logger)
+
 	deps := api.Deps{Store: s, Pool: pool, SSO: flow}
 	api.Version = version
 	hapi := api.NewAPI(mux, deps)

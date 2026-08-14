@@ -367,6 +367,11 @@ func esiStatusHandler(deps api.Deps) func(context.Context, *EmptyIn) (*ItemOut, 
 	}
 }
 
+// serverStatusRoutePath is ESI's status route as app.esi_route stores it
+// (verbatim, Principle 5). Named here so the "is it scheduled?" check and
+// internal/sync/worker's globalDispatch key cannot drift apart silently.
+const serverStatusRoutePath = "/status"
+
 // serverStatusHandler answers /meta/server-status — Tranquility's own
 // status (players online, VIP mode, version, uptime), per SRS §6.7.
 //
@@ -386,8 +391,27 @@ func serverStatusHandler(deps api.Deps) func(context.Context, *EmptyIn) (*ItemOu
 	return func(ctx context.Context, _ *EmptyIn) (*ItemOut, error) {
 		row, err := deps.Store.GetSetting(ctx, handlers.ServerStatusSettingKey)
 		if err != nil {
+			// PHASE 20.1.1, defect B42. This used to say the route "is
+			// scheduled but has not completed a successful run" in BOTH
+			// cases, and for the entire life of the project the true state
+			// was the other one: app.sync_subscription was empty, so /status
+			// was not scheduled at all and never would be. The message
+			// actively misdirected — it sends an operator to look at ESI
+			// connectivity or at the worker, when the answer is that nothing
+			// had ever asked for the route.
+			//
+			// The two states need different actions, so they get different
+			// sentences. If the subscription lookup itself fails, say the
+			// weaker of the two rather than guess.
+			scheduled, schedErr := deps.Store.SubscriptionEnabledForPath(ctx, serverStatusRoutePath)
+			if schedErr != nil || scheduled {
+				return &ItemOut{Body: api.UnavailableItem[map[string]any](
+					"Tranquility status has not been synced yet — ESI's /status route is scheduled but has not completed a successful run on this installation",
+				)}, nil
+			}
 			return &ItemOut{Body: api.UnavailableItem[map[string]any](
-				"Tranquility status has not been synced yet — ESI's /status route is scheduled but has not completed a successful run on this installation",
+				"Tranquility status has never been synced — ESI's /status route is NOT scheduled on this installation. " +
+					"Run 'hangar admin sync reconcile' to create the missing subscriptions.",
 			)}, nil
 		}
 		var data map[string]any

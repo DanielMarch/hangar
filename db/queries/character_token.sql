@@ -103,3 +103,14 @@ ON CONFLICT DO NOTHING;
 
 -- name: ListCharacterTokenScopes :many
 SELECT scope FROM app.character_token_scope WHERE character_id = $1 ORDER BY scope;
+
+-- name: ListCharacterIDsWithValidTokens :many
+-- Every character reconciliation should consider (defect B42). Soft-deleted
+-- characters and invalidated tokens are excluded here rather than in Go, so
+-- a caller cannot forget either filter.
+SELECT c.character_id
+  FROM app.character c
+  JOIN app.character_token t ON t.character_id = c.character_id
+ WHERE t.valid
+   AND c.deleted_at IS NULL
+ ORDER BY c.character_id;

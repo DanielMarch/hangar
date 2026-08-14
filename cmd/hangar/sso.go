@@ -28,6 +28,7 @@ import (
 	"github.com/hangar-project/hangar/internal/sso"
 	"github.com/hangar-project/hangar/internal/sso/jwks"
 	"github.com/hangar-project/hangar/internal/store"
+	"github.com/hangar-project/hangar/internal/sync/subscribe"
 	"github.com/hangar-project/hangar/internal/sync/worker"
 )
 
@@ -96,6 +97,24 @@ func buildSSOFlow(ctx context.Context, cfg *config.Config, s *store.Store, keyri
 		SessionTTL: cfg.Crypto.SessionTTL,
 		// Phase 20.2, defect B37.
 		LoginScopes: loginScopeResolver(s, cfg.SSO.Scopes, logger),
+		// Phase 20.1.1, defect B42: authorising a character schedules its
+		// routes immediately rather than at the next reconcile tick.
+		//
+		// Failure is logged, never returned: the login has already
+		// succeeded by this point and the periodic pass will pick the
+		// subscriptions up regardless, so turning a delayed sync into a
+		// failed login would be a strictly worse trade.
+		OnTokenPersisted: func(ctx context.Context, characterID int64, scopes []string) {
+			result, err := subscribe.ForCharacter(ctx, s, characterID)
+			if err != nil {
+				logger.ErrorContext(ctx,
+					"sync: could not reconcile subscriptions for a newly authorised character — "+
+						"it will be picked up by the periodic pass",
+					"character_id", characterID, "scopes", len(scopes), "error", err)
+				return
+			}
+			result.Log(ctx, logger, "login")
+		},
 	}, nil
 }
 

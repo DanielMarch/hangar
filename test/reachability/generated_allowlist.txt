@@ -10,12 +10,17 @@
 # Same contract as allowlist.txt: a new uncalled query fails the guard, and
 # so does an entry here that has gained a caller. This file should SHRINK.
 
-# B42 — the sync engine has no subscription creator; NOTHING is ever scheduled
+# B42 — CLOSED in Phase 20.1.1: UpsertSyncSubscription now has a production
+# caller and has been removed from this group. What remains are subscription
+# MANAGEMENT surfaces that still have none — an operator cannot snooze,
+# disable, or opt a subscription out of caching except by SQL, and nothing
+# surfaces recent sync runs. Reconciliation sets `enabled` through
+# DisableUnscopedSubscriptions, which is why SetSyncSubscriptionEnabled is
+# still unused.
 ListRecentSyncRuns
 SetSyncNoCacheOptIn
 SetSyncSubscriptionEnabled
 SnoozeSyncSubscription
-UpsertSyncSubscription
 
 # B24 — §4.9 webhook endpoint configuration surface
 CreateWebhookEndpoint
