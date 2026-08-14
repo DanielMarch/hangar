@@ -114,3 +114,13 @@ UpsertKillmailItem
 UpsertLocation
 UpsertNotificationContact
 UpsertReplicaHeartbeat
+
+# B45 — reads app.corporation_role, which has NO production writer anywhere
+# and is therefore permanently empty. Phase 20.1.1 moved the acting-character
+# elector off it onto app.character_role, which is where ESI's
+# GET /characters/{character_id}/roles actually lands. This query is kept
+# because /corporations/{id}/roles is a real ESI route HANGAR syncs into that
+# table via SyncCorporationRoles — the reader has simply never had a
+# legitimate consumer. Its remaining caller is the admin surface that does
+# not exist yet.
+ListCorporationRoles
