@@ -103,6 +103,16 @@ func ParseCorporationMembers(body []byte) ([]int64, error) {
 
 func SyncCorporationMembers(ctx context.Context, s *store.Store, corporationID int64, memberIDs []int64) (SyncResult, error) {
 	for _, characterID := range memberIDs {
+		// DEFECT B48. This route returns bare character IDs for every member
+		// of the corporation, and almost none of them have ever logged into
+		// HANGAR — so app.character has no row and corporation_member's
+		// foreign key rejects the insert, killing the whole route on the
+		// first stranger. Undetected until Phase 20.1.1, because no
+		// corporation route had ever run: the elector's candidate pool was
+		// this very table (B44), so membership could never be synced.
+		if err := s.UpsertCharacterStub(ctx, characterID); err != nil {
+			return SyncResult{}, fmt.Errorf("handlers: stubbing character %d for corp %d membership: %w", characterID, corporationID, err)
+		}
 		if _, err := s.UpsertCorporationMember(ctx, corporationID, characterID); ignoreUnchanged(err) != nil {
 			return SyncResult{}, fmt.Errorf("handlers: upserting corporation member %d for corp %d: %w", characterID, corporationID, err)
 		}

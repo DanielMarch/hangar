@@ -91,8 +91,16 @@ func seedElectionFixture(t *testing.T, s *store.Store, corporationID int64) (rou
 	}
 
 	// A and C have the Director role; B does not.
+	//
+	// PHASE 20.1.1 (defect B45): seeded into app.character_role, which is
+	// where GET /characters/{character_id}/roles actually lands, rather than
+	// app.corporation_role. This fixture used the latter, and so did the
+	// elector — but NOTHING in production writes app.corporation_role, so
+	// both the test and the code agreed on a table that is permanently empty
+	// on every real installation. The test passed and the feature could
+	// never work, which is the same shape as B20 one layer down.
 	for _, id := range []int64{charA, charC} {
-		_, err := s.ReplaceCorporationRole(ctx, gen.ReplaceCorporationRoleParams{CorporationID: corporationID, CharacterID: id, Role: "Director"})
+		_, err := s.ReplaceCharacterRole(ctx, gen.ReplaceCharacterRoleParams{CharacterID: id, Role: sync.RoleDirector})
 		require.NoError(t, err)
 	}
 
@@ -170,4 +178,98 @@ func TestActingCharacterFallbackOn403(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, sub.Enabled, "electing/re-electing must never disable the subscription")
+}
+
+// TestCeoAndDirectorHoldEveryRoleImplicitly is defect B46's regression
+// cover, and it is a rule about EVE rather than about HANGAR.
+//
+// Corporation roles are hierarchical, and ESI reports them literally: the
+// CEO holds every role and cannot be stripped of any, and a Director
+// likewise holds all roles implicitly, so ESI never enumerates the
+// subordinate roles for either. A literal set-membership test against the
+// returned list therefore refuses the single most privileged character in
+// the corporation — usually the only one who can serve the route at all.
+//
+// Found against a real CEO's token: the character held Director and was
+// being refused all 32 corporation routes.
+func TestCeoAndDirectorHoldEveryRoleImplicitly(t *testing.T) {
+	pool := newMigratedPool(t)
+	s := store.New(pool)
+	ctx := context.Background()
+	elector := sync.DBElector{Store: s}
+
+	const corporationID = int64(98000050)
+	const ceo = int64(90000050)
+	const director = int64(90000051)
+	const accountant = int64(90000052)
+
+	_, err := s.UpsertCorporation(ctx, gen.UpsertCorporationParams{
+		CorporationID: corporationID, Name: "Hierarchy Corp", Ticker: "HIER",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, s.UpsertEsiScope(ctx, "esi-corporations.read_divisions.v1"))
+
+	for _, id := range []int64{ceo, director, accountant} {
+		_, err := s.UpsertCharacter(ctx, gen.UpsertCharacterParams{
+			CharacterID: id, Name: "Char", OwnerHash: "owner-" + uuid.NewString(),
+		})
+		require.NoError(t, err)
+		_, err = s.UpsertCorporationMember(ctx, corporationID, id)
+		require.NoError(t, err)
+		require.NoError(t, s.UpsertCharacterToken(ctx, gen.UpsertCharacterTokenParams{
+			CharacterID: id, KeyVersion: 1, WrappedDek: []byte("dek"), Nonce: []byte("nonce"),
+			Ciphertext: []byte("ct"), OwnerHash: "owner-" + uuid.NewString(),
+		}))
+		require.NoError(t, s.AddCharacterTokenScope(ctx, id, "esi-corporations.read_divisions.v1"))
+	}
+
+	// A route requiring Accountant, which is a SUBORDINATE role.
+	route, err := s.UpsertEsiRoute(ctx, gen.UpsertEsiRouteParams{
+		OperationID: "test-op-" + uuid.NewString(), Method: "GET",
+		UpstreamPath:      "/corporations/{corporation_id}/divisions",
+		CompatibilityDate: pgtype.Date{Time: time.Now(), Valid: true},
+		SpecFragment:      []byte(`{}`), IdentifierTypes: []byte(`{}`),
+	})
+	require.NoError(t, err)
+	require.NoError(t, s.AddEsiRouteScope(ctx, route.RouteID, "esi-corporations.read_divisions.v1"))
+	require.NoError(t, s.AddEsiRouteRole(ctx, route.RouteID, "Accountant"))
+
+	// The CEO is recorded ONLY as ceo_id — no role rows at all, which is
+	// exactly how a corporation sheet describes them.
+	_, err = pool.Exec(ctx, `UPDATE app.corporation SET ceo_id = $2 WHERE corporation_id = $1`, corporationID, ceo)
+	require.NoError(t, err)
+
+	// The Director holds only "Director"; ESI does not list Accountant.
+	_, err = s.ReplaceCharacterRole(ctx, gen.ReplaceCharacterRoleParams{CharacterID: director, Role: sync.RoleDirector})
+	require.NoError(t, err)
+
+	// The third character holds Accountant literally.
+	_, err = s.ReplaceCharacterRole(ctx, gen.ReplaceCharacterRoleParams{CharacterID: accountant, Role: "Accountant"})
+	require.NoError(t, err)
+
+	// All three must be eligible. The election's own ordering picks the
+	// lowest character id among equals, which is the CEO here — what
+	// matters for this test is that it succeeds at all, and that removing
+	// the literal Accountant holder does not change that.
+	elected, err := elector.Elect(ctx, sync.EntityCorporation, corporationID, route.RouteID)
+	require.NoError(t, err)
+	require.Contains(t, []int64{ceo, director, accountant}, elected)
+
+	// With the literal role-holder gone, a CEO or Director must still serve
+	// the route — this is the case that was failing in production.
+	_, err = pool.Exec(ctx, `DELETE FROM app.corporation_member WHERE character_id = $1`, accountant)
+	require.NoError(t, err)
+
+	elected, err = elector.Elect(ctx, sync.EntityCorporation, corporationID, route.RouteID)
+	require.NoError(t, err, "a CEO or Director must satisfy a subordinate role requirement")
+	require.Contains(t, []int64{ceo, director}, elected)
+
+	// And with ONLY the CEO left — no role rows whatsoever.
+	_, err = pool.Exec(ctx, `DELETE FROM app.corporation_member WHERE character_id = $1`, director)
+	require.NoError(t, err)
+
+	elected, err = elector.Elect(ctx, sync.EntityCorporation, corporationID, route.RouteID)
+	require.NoError(t, err, "the CEO holds every role implicitly and must be electable with no role rows at all")
+	require.Equal(t, ceo, elected)
 }

@@ -92,6 +92,37 @@ func TestGoldenFileParsesAllCharacterDomains(t *testing.T) {
 // deliberately not compared.
 func assertNoFieldLoss(t *testing.T, raw []byte, dto any) {
 	t.Helper()
+	assertNoFieldLossUnder(t, raw, dto, "")
+}
+
+// assertNoFieldLossUnder is assertNoFieldLoss for a parser that deliberately
+// UNWRAPS an envelope: envelopeField names the property whose contents the
+// parser returns, and the comparison is made against that subtree rather
+// than the whole document.
+//
+// Needed because ESI is not uniform. Nearly every corporation route returns
+// a bare JSON array, but a few return an object wrapping the array
+// alongside a pagination cursor — `/corporations/{id}/projects` returns
+// `CorporationsProjectsListing` = {cursor, projects}. Its parser returns the
+// projects, so a whole-document comparison sees an array where the fixture
+// has an object and fails on a type mismatch rather than on real field loss.
+//
+// Naming the unwrapped field here rather than skipping the check keeps the
+// guarantee where it matters — every field of every PROJECT is still
+// asserted — while stating plainly that `cursor` is dropped on purpose.
+// Following it is defect B31's work (§5.9's cursor mechanism has no live
+// implementation), so until then a corporation with more than one page of
+// projects syncs only the first.
+func assertNoFieldLossUnder(t *testing.T, raw []byte, dto any, envelopeField string) {
+	t.Helper()
+
+	if envelopeField != "" {
+		var envelope map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(raw, &envelope))
+		inner, ok := envelope[envelopeField]
+		require.Truef(t, ok, "fixture has no %q field to unwrap", envelopeField)
+		raw = inner
+	}
 
 	roundTripped, err := json.Marshal(dto)
 	require.NoError(t, err)

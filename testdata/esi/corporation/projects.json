@@ -1,7 +1,10 @@
-[
-  {
-    "contribution_type": "isk", "current_progress": 250.00, "expires_at": "2026-09-01T00:00:00Z",
-    "name": "Test Project", "project_id": "8e9f5a3c-1c9e-4c7a-9b7a-6f5e3a1b2c3d",
-    "reward_isk": 1000000.00, "state": "active", "target_progress": 1000.00
-  }
-]
+{
+  "cursor": { "after": null },
+  "projects": [
+    {
+      "contribution_type": "isk", "current_progress": 250.00, "expires_at": "2026-09-01T00:00:00Z",
+      "name": "Test Project", "project_id": "8e9f5a3c-1c9e-4c7a-9b7a-6f5e3a1b2c3d",
+      "reward_isk": 1000000.00, "state": "active", "target_progress": 1000.00
+    }
+  ]
+}

@@ -30,12 +30,39 @@ type CorporationProjectDTO struct {
 	TargetProgress   decimal.NullDecimal `json:"target_progress"`
 }
 
+// corporationProjectsListing is the ENVELOPE GET
+// /corporations/{corporation_id}/projects actually returns.
+//
+// ── DEFECT B49 ───────────────────────────────────────────────────────────
+// This was parsed as a bare JSON array and failed on the first real
+// response with "json: cannot unmarshal object into Go value of type
+// []handlers.CorporationProjectDTO". The spec is unambiguous — the
+// operation's 200 response is `#/components/schemas/
+// CorporationsProjectsListing`, an OBJECT with a required `projects` array
+// and an optional `cursor`. Nearly every other corporation route does
+// return a bare array, which is presumably how the assumption got made.
+//
+// It went undetected because no corporation route had ever executed: the
+// acting-character election could not succeed (B44, B45, B46), so this
+// parser had never once been handed a real body.
+//
+// The `cursor` field is captured but not yet followed — this route is
+// cursor-paginated (§5.9's second mechanism), and §5.9's cursor
+// implementation has no live caller at all. That is defect B31, and
+// walking the cursor belongs with it rather than here, so a corporation
+// with more than one page of projects currently syncs only the first.
+// Recorded rather than silently truncated.
+type corporationProjectsListing struct {
+	Cursor   *struct{ After *string } `json:"cursor,omitempty"`
+	Projects []CorporationProjectDTO  `json:"projects"`
+}
+
 func ParseCorporationProjects(body []byte) ([]CorporationProjectDTO, error) {
-	var dto []CorporationProjectDTO
-	if err := json.Unmarshal(body, &dto); err != nil {
+	var listing corporationProjectsListing
+	if err := json.Unmarshal(body, &listing); err != nil {
 		return nil, fmt.Errorf("handlers: parsing corporation projects: %w", err)
 	}
-	return dto, nil
+	return listing.Projects, nil
 }
 
 func SyncCorporationProjects(ctx context.Context, s *store.Store, corporationID int64, projects []CorporationProjectDTO) (SyncResult, error) {

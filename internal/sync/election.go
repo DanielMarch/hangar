@@ -103,21 +103,11 @@ func (e DBElector) Elect(ctx context.Context, entityKind EntityKind, entityID in
 			}
 			c.hasScopes = supersetOf(tokenScopes, requiredScopes)
 
-			roles, err := e.Store.ListCorporationRoles(ctx, entityID, m.CharacterID)
+			hasRoles, err := e.satisfiesRoles(ctx, entityID, m.CharacterID, requiredRoles)
 			if err != nil {
-				return 0, fmt.Errorf("sync: listing corporation roles for character %d: %w", m.CharacterID, err)
+				return 0, err
 			}
-			roleSet := make(map[string]struct{}, len(roles))
-			for _, r := range roles {
-				roleSet[r.Role] = struct{}{}
-			}
-			c.hasRoles = true
-			for _, req := range requiredRoles {
-				if _, ok := roleSet[req]; !ok {
-					c.hasRoles = false
-					break
-				}
-			}
+			c.hasRoles = hasRoles
 		}
 
 		candidates = append(candidates, c)
@@ -149,6 +139,77 @@ func (e DBElector) Elect(ctx context.Context, entityKind EntityKind, entityID in
 		return 0, fmt.Errorf("%w: corporation %d, route %s", ErrNoEligibleActingCharacter, entityID, routeID)
 	}
 	return winner.characterID, nil
+}
+
+// RoleDirector is EVE's highest corporation role. A Director holds every
+// other corporation role implicitly — the in-game role editor cannot even
+// express "Director without Accountant" — so ESI never enumerates the
+// subordinate roles for one, and a literal set-membership test against the
+// returned list wrongly finds them absent.
+const RoleDirector = "Director"
+
+// satisfiesRoles reports whether a character holds every role a route
+// requires.
+//
+// ── DEFECTS B45 AND B46, BOTH FOUND BY A REAL CEO'S TOKEN ────────────────
+//
+// B45, THE SOURCE. This read app.corporation_role, which has NO PRODUCTION
+// WRITER anywhere in the codebase — it is permanently empty, so hasRoles
+// was false for every candidate on every route, and no election could ever
+// succeed even with a populated candidate pool. The roles ESI actually
+// returns arrive through GET /characters/{character_id}/roles, a
+// CHARACTER-scoped route that does run, and land in app.character_role
+// (216 rows for the first real character authorised against this build).
+// That is the authoritative answer to "what corporation roles does this
+// character hold", and it is what this now reads.
+//
+// B46, THE HIERARCHY. Membership in the returned list is not the whole
+// test, because EVE's corporation roles are hierarchical and ESI reports
+// them literally:
+//
+//   - the CEO holds every role, always, and cannot be stripped of any;
+//   - a Director likewise holds every role implicitly.
+//
+// So a route requiring "Accountant" must accept a CEO or a Director whose
+// role list does not contain the string "Accountant", because in the game
+// they can perform the action. Treating the list literally locks the single
+// most privileged character in a corporation out of the routes they are
+// most likely to be the only one able to serve.
+//
+// The CEO check is by app.corporation.ceo_id rather than by role, because
+// that is the only place the relationship is recorded. It is nil-tolerant:
+// ceo_id is populated by a corporation-scoped route, so on a fresh
+// installation it is still NULL at the moment of the first election, and a
+// CEO who has been granted the Director role explicitly (as EVE does) is
+// caught by the Director branch regardless.
+func (e DBElector) satisfiesRoles(ctx context.Context, corporationID, characterID int64, requiredRoles []string) (bool, error) {
+	if len(requiredRoles) == 0 {
+		return true, nil
+	}
+
+	corp, err := e.Store.GetCorporation(ctx, corporationID)
+	if err == nil && corp.CeoID != nil && *corp.CeoID == characterID {
+		return true, nil
+	} // no corporation row yet is not fatal — fall through to the role list
+
+	roles, err := e.Store.ListCharacterRoles(ctx, characterID)
+	if err != nil {
+		return false, fmt.Errorf("sync: listing corporation roles for character %d: %w", characterID, err)
+	}
+	roleSet := make(map[string]struct{}, len(roles))
+	for _, r := range roles {
+		roleSet[r.Role] = struct{}{}
+		if r.Role == RoleDirector {
+			return true, nil
+		}
+	}
+
+	for _, req := range requiredRoles {
+		if _, ok := roleSet[req]; !ok {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // supersetOf reports whether have contains every element of want.

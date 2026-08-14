@@ -64,6 +64,10 @@ const corporationTestdataDir = "../../../testdata/esi/corporation"
 // analogous to Phase 7's TestGoldenFileParsesAllCharacterDomains): every
 // recorded ESI response under testdata/esi/corporation parses into its DTO
 // with no field loss, and every registered parser has a fixture.
+// corporationEnvelopeField names, per fixture, the property a parser
+// unwraps. Absent means "the parser returns the whole document".
+var corporationEnvelopeField = map[string]string{"projects": "projects"}
+
 func TestGoldenFileParsesAllCorporationDomains(t *testing.T) {
 	entries, err := os.ReadDir(corporationTestdataDir)
 	require.NoError(t, err)
@@ -85,7 +89,10 @@ func TestGoldenFileParsesAllCorporationDomains(t *testing.T) {
 			dto, err := parse(raw)
 			require.NoErrorf(t, err, "parsing %s", entry.Name())
 
-			assertNoFieldLoss(t, raw, dto)
+			// `projects` is the one corporation route whose 200 response is
+			// an OBJECT wrapping the array (CorporationsProjectsListing),
+			// not a bare array — see assertNoFieldLossUnder.
+			assertNoFieldLossUnder(t, raw, dto, corporationEnvelopeField[key])
 		})
 		tested++
 	}

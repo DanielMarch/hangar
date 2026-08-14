@@ -4,6 +4,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hangar-project/hangar/internal/sync"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 )
 
 // QueueSync is the River queue Phase 6 enqueues onto. It maps onto
@@ -49,6 +50,45 @@ func (SyncJobArgs) InsertOpts() river.InsertOpts {
 		Queue: QueueSync,
 		UniqueOpts: river.UniqueOpts{
 			ByArgs: true,
+			// ── DEFECT B47: ByState IS NOT OPTIONAL HERE ─────────────────
+			// This was omitted, and River's default for ByState INCLUDES
+			// JobStateCompleted. River's own documentation is explicit about
+			// what that means: "if a unique job has `completed`, you still
+			// can't insert a duplicate, at least not until the job cleaner
+			// maintenance process eventually removes the completed job from
+			// the river_job table" — and CompletedJobRetentionPeriodDefault
+			// is 24 HOURS.
+			//
+			// So every route synced exactly once and then could not be
+			// re-enqueued for a day, no matter what next_due_at said. The
+			// whole of §6.2's scheduling policy — x-cache-age, the TTL
+			// floor, the adaptive 1.5^n backoff, PlanNextDueAt in its
+			// entirety — was silently overridden by a job-cleaner interval.
+			// A route declaring a 300-second cache age was polled once per
+			// 24 hours.
+			//
+			// Measured before the fix on a live installation: the planner
+			// claimed 70 due subscriptions and River inserted ZERO jobs,
+			// because all 70 already had a completed job with the same
+			// (kind, route_id, entity_kind, entity_id) hash.
+			//
+			// The four states below are the ones River REQUIRES when
+			// ByState is set at all (Available, Pending, Running,
+			// Scheduled); Retryable is kept deliberately, because a job
+			// waiting to retry is still in flight and must not be
+			// duplicated. Completed, Cancelled and Discarded are excluded —
+			// a finished attempt must never block the next scheduled one.
+			//
+			// This preserves the actual intent recorded above (§6.1's
+			// second line of defence against concurrent duplicate work) and
+			// drops the accidental behaviour of preventing all future work.
+			ByState: []rivertype.JobState{
+				rivertype.JobStateAvailable,
+				rivertype.JobStatePending,
+				rivertype.JobStateRunning,
+				rivertype.JobStateScheduled,
+				rivertype.JobStateRetryable,
+			},
 		},
 	}
 }

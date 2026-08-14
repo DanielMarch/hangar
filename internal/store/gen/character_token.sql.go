@@ -357,6 +357,34 @@ func (q *Queries) UpsertCharacter(ctx context.Context, arg UpsertCharacterParams
 	return i, err
 }
 
+const upsertCharacterStub = `-- name: UpsertCharacterStub :exec
+INSERT INTO app.character (character_id, name, owner_hash)
+VALUES ($1, '', '')
+ON CONFLICT (character_id) DO NOTHING
+`
+
+// Minimal character row so app.corporation_member's FK has something to
+// point at (defect B48).
+//
+// GET /corporations/{id}/members returns bare character IDS — no names —
+// for every member of the corporation, and almost none of them have ever
+// logged into HANGAR, so app.character has no row for them. Before this,
+// SyncCorporationMembers upserted membership directly and the whole route
+// died on the first stranger with
+//
+//	insert or update on table "corporation_member" violates foreign key
+//	constraint "corporation_member_character_id_fkey" (SQLSTATE 23503).
+//
+// The name is deliberately left empty rather than invented: ESI did not
+// supply one on this route, and a placeholder like "Unknown" would be
+// indistinguishable from a real name downstream. The character sheet route
+// fills it in if and when that character is ever synced. Exactly the same
+// shape, and the same reasoning, as UpsertCorporationStub above.
+func (q *Queries) UpsertCharacterStub(ctx context.Context, characterID int64) error {
+	_, err := q.db.Exec(ctx, upsertCharacterStub, characterID)
+	return err
+}
+
 const upsertCharacterToken = `-- name: UpsertCharacterToken :exec
 
 INSERT INTO app.character_token (

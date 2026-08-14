@@ -69,6 +69,27 @@ func SyncCharacterSheet(ctx context.Context, s *store.Store, characterID int64, 
 	if err := s.UpsertCorporationStub(ctx, dto.CorporationID, "", ""); err != nil {
 		return SyncResult{}, fmt.Errorf("handlers: stubbing corporation %d for character %d: %w", dto.CorporationID, characterID, err)
 	}
+
+	// ── DEFECT B44: THE ACTING-CHARACTER BOOTSTRAP DEADLOCK ──────────────
+	// app.corporation_member is the ONLY candidate pool internal/sync's
+	// DBElector considers, and until now its only writer was
+	// SyncCorporationMembers — a CORPORATION-scoped route, which cannot run
+	// until an acting character has been elected, which cannot happen until
+	// the pool is non-empty. Election needed members; members needed
+	// election. No corporation route could ever run on any installation,
+	// which is why all 32 corporation subscriptions completed silently and
+	// wrote nothing.
+	//
+	// The character sheet breaks it, and is entitled to: ESI has just told
+	// us, authoritatively, which corporation THIS character belongs to. That
+	// is a membership fact, and recording one member is all the elector
+	// needs to have a candidate. SyncCorporationMembers still owns the full
+	// roster once a corporation route can run — this only guarantees the
+	// pool is never empty for a corporation HANGAR has a token in.
+	if _, err := s.UpsertCorporationMember(ctx, dto.CorporationID, characterID); ignoreUnchanged(err) != nil {
+		return SyncResult{}, fmt.Errorf("handlers: recording character %d as a member of corporation %d: %w",
+			characterID, dto.CorporationID, err)
+	}
 	if dto.AllianceID != nil {
 		if err := s.UpsertAllianceStub(ctx, *dto.AllianceID, ""); err != nil {
 			return SyncResult{}, fmt.Errorf("handlers: stubbing alliance %d for character %d: %w", *dto.AllianceID, characterID, err)
