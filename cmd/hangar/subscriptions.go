@@ -123,6 +123,17 @@ func runSubscriptionReconciler(ctx context.Context, s *store.Store, logger *slog
 	// Immediately at boot, so an installation restored from a backup, or one
 	// upgrading from a build that predates B42's fix, schedules its routes
 	// without waiting a full interval.
+	//
+	// On a genuinely FRESH installation this first pass creates nothing, and
+	// that is expected rather than a bug: serve ingests the route catalogue
+	// in the background (see runServe), so app.esi_route is still empty when
+	// this runs and there is nothing to subscribe to. Measured on the
+	// release image — the startup pass created 0, the catalogue then landed
+	// 225 routes, and the next pass created the global subscriptions. The
+	// visible consequence is that a brand-new installation begins polling
+	// within one reconcileInterval rather than instantly; `hangar admin sync
+	// reconcile` closes that gap immediately for an operator who does not
+	// want to wait.
 	reconcile("startup")
 
 	ticker := time.NewTicker(reconcileInterval)
