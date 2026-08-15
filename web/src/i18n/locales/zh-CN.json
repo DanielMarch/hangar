@@ -294,15 +294,19 @@
       "localRemaining": "本地剩余",
       "localAtReading": "读数时本地值",
       "serverRemaining": "服务端剩余",
+      "localAfterReading": "读数后本地值",
+      "predictionError": "预测误差",
       "divergence": "偏差",
       "serverObservedAt": "服务端观测时间",
       "worstDivergence": "最大偏差",
+      "worstPredictionError": "最大预测误差",
       "notObserved": "未观测",
-      "gateHint": "Gate 1 每组最多允许 {{tolerance}} 个请求的偏差。",
+      "gateHint": "Gate 1 要求对账后每组的偏差为 {{tolerance}} 个令牌。",
       "bucketsBreaching": "超出容差的桶",
       "bucketsBreachingHint": "持续偏差是 Gate 1 失败的先兆。",
       "bucketsUnobserved": "从未观测的桶",
-      "bucketsUnobservedHint": "尚未收到这些桶的速率限制响应头。"
+      "bucketsUnobservedHint": "尚未收到这些桶的速率限制响应头。",
+      "predictionErrorHint": "对账已修正的漂移。仅记录，不设上限。"
     },
     "errorLimit": {
       "heading": "ESI 错误预算",

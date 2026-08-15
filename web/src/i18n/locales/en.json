@@ -294,15 +294,19 @@
       "localRemaining": "Local remaining",
       "localAtReading": "Local at reading",
       "serverRemaining": "Server remaining",
+      "localAfterReading": "Local after reading",
+      "predictionError": "Prediction error",
       "divergence": "Divergence",
       "serverObservedAt": "Server observed",
       "worstDivergence": "Worst divergence",
+      "worstPredictionError": "Worst prediction error",
       "notObserved": "Not observed",
-      "gateHint": "Gate 1 requires at most {{tolerance}} request of divergence per group.",
+      "gateHint": "Gate 1 requires divergence of {{tolerance}} tokens per group after reconciliation.",
       "bucketsBreaching": "Buckets out of tolerance",
       "bucketsBreachingHint": "Sustained divergence is an early Gate 1 failure.",
       "bucketsUnobserved": "Buckets never observed",
-      "bucketsUnobservedHint": "No rate-limit header has been seen for these yet."
+      "bucketsUnobservedHint": "No rate-limit header has been seen for these yet.",
+      "predictionErrorHint": "Drift the reconciler corrected. Recorded, not bounded."
     },
     "errorLimit": {
       "heading": "ESI error budget",

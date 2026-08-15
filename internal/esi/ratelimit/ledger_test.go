@@ -340,3 +340,101 @@ func TestReconcileStillConvergesOnRealDisagreement(t *testing.T) {
 	require.LessOrEqual(t, settledAvailable(), maxTokens, "never above max_tokens (§5.5)")
 	require.Equal(t, maxTokens, settledAvailable())
 }
+
+// ── PHASE 20.4.1 ─────────────────────────────────────────────────────────
+
+// TestEvictionForgivesExactlyWhatTheServerForgave is a correctness test
+// wearing a metric's clothes.
+//
+// Eviction used to delete whole entries until availability REACHED the
+// server's figure, so closing a 1-token gap by deleting a cost-5 entry
+// forgave 4 tokens the server had not forgiven. That is over-forgiveness in
+// the direction that causes a Governor 1 BREACH — HANGAR then believes it
+// holds headroom ESI has not granted — and it is also what would put a
+// floor of up to 4 under esi_ledger_divergence, whose bound Gate 1.3 now
+// states as 0.
+//
+// One cost-5 entry, a server reading one token more generous than the
+// ledger: the entry must survive with cost 4, not vanish.
+func TestEvictionForgivesExactlyWhatTheServerForgave(t *testing.T) {
+	ctx := context.Background()
+	clock := &fakeClock{now: time.Now()}
+	l := NewLedgerSolo(clock)
+
+	const maxTokens = 100
+	req := AcquireRequest{Group: "g", UserKey: "u", MaxTokens: maxTokens, Window: time.Minute, RequestTimeout: time.Minute}
+	res, err := l.Acquire(ctx, req)
+	require.NoError(t, err)
+	require.NoError(t, l.Settle(ctx, res, Cost4XXOther, clock.Now())) // one entry, cost 5
+
+	b := func() *bucket {
+		sh := shardFor(l.shards, bucketKey("g", "u"))
+		sh.mu.Lock()
+		defer sh.mu.Unlock()
+		return sh.buckets[bucketKey("g", "u")]
+	}
+	require.Equal(t, 95, b().settledAvailable())
+
+	require.NoError(t, l.Reconcile(ctx, "g", "u", maxTokens, 96))
+	require.Equal(t, 96, b().settledAvailable(),
+		"convergence must be exact: deleting the whole cost-5 entry would land on 100 and forgive 4 tokens ESI still charges for")
+	require.Equal(t, 1, b().ledger.Len(), "the entry is reduced, not deleted — it must still age out of the window on its own schedule")
+	require.Equal(t, int16(4), b().ledger[0].cost)
+}
+
+// TestSoloReconcileIsVisibleToTheMetricsCollector closes the hole that made
+// Gate 1.3 unmeasurable at N=1.
+//
+// Both readers of esi_ledger_divergence read app.esi_ledger_bucket, and
+// nothing on the solo path has ever written it. At exactly one live replica
+// — the mode §1.4 requires for half the gate — the metric emitted no
+// samples, and test/load/gate1_esi.go's maximum over zero samples is 0,
+// which reads as a pass.
+func TestSoloReconcileIsVisibleToTheMetricsCollector(t *testing.T) {
+	ctx := context.Background()
+	clock := &fakeClock{now: time.Now()}
+	l := NewLedgerSolo(clock)
+
+	require.Empty(t, l.Readings(), "a ledger that has reconciled nothing must report nothing, not a zero")
+
+	const maxTokens = 100
+	req := AcquireRequest{Group: "g", UserKey: "u", MaxTokens: maxTokens, Window: time.Minute, RequestTimeout: time.Minute}
+	res, err := l.Acquire(ctx, req)
+	require.NoError(t, err)
+	require.NoError(t, l.Settle(ctx, res, Cost2XX, clock.Now()))
+
+	// The server has counted three sibling requests HANGAR has not settled.
+	require.NoError(t, l.Reconcile(ctx, "g", "u", maxTokens, 92))
+
+	readings := l.Readings()
+	require.Len(t, readings, 1)
+	r := readings[0]
+	require.Equal(t, "g", r.Group)
+	require.Equal(t, "u", r.UserKey)
+	require.Equal(t, maxTokens, r.MaxTokens)
+	require.Equal(t, 92, r.ServerRemaining)
+	require.Equal(t, 98, r.LocalAtReading, "the pre-correction gap is the prediction error: 98 vs 92")
+	require.Equal(t, 92, r.LocalAfter, "and the post-correction residual is 0, because the reconciler converged")
+}
+
+// TestSoloReadingsAreOnlyOfferedInSoloMode pins the source-selection rule.
+// A union of the in-memory and stored views would report one bucket twice
+// with two different histories; exactly one ledger is authoritative at any
+// instant, and the governor says which.
+func TestSoloReadingsAreOnlyOfferedInSoloMode(t *testing.T) {
+	ctx := context.Background()
+	replicas := &fakeReplicaCounter{count: 1}
+	g := newGovernor1ForTest(newFakeStore(), replicas, newFakeClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)))
+	require.NoError(t, g.forceModeCheck(ctx))
+	require.Equal(t, ModeSolo, g.Mode())
+
+	_, ok := g.SoloReadings()
+	require.True(t, ok, "in solo mode the in-process ledger is the only source there is")
+
+	replicas.set(3)
+	require.NoError(t, g.forceModeCheck(ctx))
+	require.Equal(t, ModeClustered, g.Mode())
+
+	_, ok = g.SoloReadings()
+	require.False(t, ok, "in clustered mode the governor must defer to app.esi_ledger_bucket")
+}

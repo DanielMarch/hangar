@@ -362,10 +362,51 @@ is reconciled:
 * `serverRemaining < localAvailable` → push a synthetic entry of cost
   `localAvailable − serverRemaining` at `consumedAt = now`. Pessimistic by construction:
   it expires a full window from now.
-* `serverRemaining > localAvailable` → pop the oldest entries until they agree, never
-  exceeding `max_tokens`.
+* `serverRemaining > localAvailable` → forgive the oldest consumption until they agree,
+  never exceeding `max_tokens`. **Exactly**, not to the nearest whole entry *(Phase
+  20.4.1)*: the boundary entry has its cost reduced by the remainder and keeps its
+  `consumedAt`, so it still ages out on its own schedule. Popping it whole would forgive up
+  to 4 tokens the server has **not** forgiven, which leaves HANGAR believing it holds
+  headroom ESI has not granted — the direction that causes a breach.
 
-Gate 1's "zero divergence beyond one-request tolerance" is this reconciler's acceptance test.
+Gate 1's "zero divergence beyond one-request tolerance" is this reconciler's acceptance test,
+and **§16 is where the two readings that sentence turned out to conflate are named**: the gap
+this correction closes (`esi_ledger_prediction_error`, structurally non-zero under fan-out) and
+what it leaves behind (`esi_ledger_divergence`, bound 0). `04_RELEASE_GATES.md` §1.2 carries the
+amendment and the measurement that forced it.
+
+**HANGAR's window and ESI's are the same LENGTH and not the same SHAPE** *(measured in Phase
+20.4.1 against real ESI; the readings are in `PRODUCTION_CALLER_AUDIT.md`)*. The 900 s is not a
+HANGAR default — it is the spec's own `x-rate-limit.window-size` (`"15m"`, identical on all 225
+ingested routes) and live ESI's `X-Ratelimit-Limit` says `<max>/15m` too. The cost table above is
+CCP's as well: `X-Ratelimit-Used` reports 2 for a 200 and 1 for a 304, exactly as priced here.
+
+What differs is *when* a request's cost stops being charged:
+
+* **HANGAR** returns each request's cost exactly one window after *that request* — the model
+  this section requires.
+* **ESI** was measured behaving as a **sliding-window counter over fixed 15-minute wall-clock
+  windows**. A 40-token burst returned *nothing at all* at t = 120 s, 300 s, 600 s or 780 s, and
+  nothing resembling a step at t = 900 s either; recovery began at the next `:00/:15/:30/:45`
+  boundary and then proceeded **linearly**, at 48 tokens per 900 s — the previous window's whole
+  count decaying away while the current one accumulates. Two independent bursts on two groups
+  both began recovering at a wall-clock boundary rather than at their own 900 s anniversary.
+
+So a request's cost is charged in full until the boundary (0–900 s), then decays over the
+following 900 s. Both windows retain roughly 900 s of consumption on average, but ESI's **tail is
+longer**: between 900 s and 1800 s after a request, ESI is still charging a fraction of it and
+HANGAR has forgotten it entirely. That is why local availability drifts *above* the server's
+figure on a busy bucket, and why reconciliation answers with a synthetic entry — the behaviour
+observed as an 18-token gap on `corp-contract` in Phase 20.4. Immediately after a boundary the
+sign reverses and HANGAR is the stricter of the two.
+
+**HANGAR's shape is deliberately not changed to match.** Adopting a windowed counter would mean
+adopting its boundary, which discards a whole window's consumption at one instant — more
+optimistic than the floating window at exactly the moment it matters, and the thing this
+section's prohibition on continuous refill exists to refuse. The floating window plus reactive
+reconciliation converges from both sides within one response; a matching-but-optimistic window
+would not. Both directions of that drift are visible as `esi_ledger_prediction_error`, which is
+why that metric is recorded and not bounded.
 
 **Headerless 429s.** CCP's in-monolith limiters emit 429 without `X-Ratelimit-*`. The
 reconciler must not treat missing headers as `remaining = 0` (that stalls the installation)
@@ -885,7 +926,8 @@ provisioning driver call. Prometheus metrics, with these as the non-negotiable s
 esi_request_total{route,status}
 esi_request_duration_seconds{route}
 esi_ledger_available_tokens{group}
-esi_ledger_divergence{group}              # local vs X-Ratelimit-Remaining — Gate 1
+esi_ledger_divergence{group}              # local AFTER reconciliation vs X-Ratelimit-Remaining — Gate 1
+esi_ledger_prediction_error{group}        # local BEFORE reconciliation vs the same — recorded, not bounded
 esi_ledger_mode                           # 0 = solo, 1 = clustered
 esi_ledger_acquire_duration_seconds{mode} # clustered path p99 must stay under 10ms
 esi_replica_live_count                    # drives the mode above; alert on unexpected changes
@@ -900,6 +942,25 @@ alert_dead_letter_depth                   # Gate 3
 
 `esi_ledger_divergence` and `provisioning_revocation_latency_seconds` exist specifically so
 Gates 1 and 2 are measured, not asserted.
+
+**`esi_ledger_divergence` measures what §5.5's reconciliation LEAVES, not what it corrects**
+*(Phase 20.4.1)*. The two are different quantities and were reported under one name for three
+phases. Reconciliation reads the server's `X-Ratelimit-Remaining`, compares it with the ledger's
+own settled availability, and closes the gap — injecting a synthetic entry when the server has
+seen more consumption than HANGAR has, forgiving the oldest consumption when it has seen less.
+So there are two readings to be had, and the bucket row stores both operands of each:
+
+* **before** the correction — `esi_ledger_prediction_error`, how far HANGAR's independent
+  accounting had drifted. Structurally non-zero, because reconciliation excludes in-flight
+  reservations by design: every sibling request the server has counted and HANGAR has not yet
+  settled appears here. Recorded, never bounded.
+* **after** the correction — `esi_ledger_divergence`, whether the ledger and the server now
+  agree. Bound 0: convergence is exact in both directions, so a non-zero reading means the
+  reconciler could not converge. This is the quantity Gate 1.3 reads.
+
+Both are clamped to `max_tokens` first, because §5.5 converges to `min(server, max_tokens)` and
+never above it; measuring against a raw reading above the ceiling would report a divergence for
+obeying the rule.
 
 ---
 

@@ -131,13 +131,87 @@ func (l *LedgerSolo) Reconcile(ctx context.Context, group, userKey string, maxTo
 	// and drives the reconciler to evict real consumption. See
 	// db/queries/esi_ledger.sql's SumSettledLedgerEntryCost for the
 	// oscillation this produced against real ESI.
-	inject, evictTarget, needsEvict := reconcileAction(maxTokens, b.settledAvailable(), serverRemaining)
-	if needsEvict {
-		b.evictOldestUntil(evictTarget)
-		return nil
+	localAtReading := b.settledAvailable()
+	inject, evictTarget, needsEvict := reconcileAction(maxTokens, localAtReading, serverRemaining)
+
+	// PHASE 20.4.1: solo mode was INVISIBLE to esi_ledger_divergence.
+	//
+	// Both readers of that gauge (internal/telemetry's collector and the
+	// admin rate-limit board) read app.esi_ledger_bucket, and nothing on
+	// the solo path has ever written it: UpsertLedgerBucket is called by
+	// the CLUSTERED acquire and by a mode-transition flush, and
+	// RecordServerLedgerReading by the CLUSTERED reconcile. So at exactly
+	// one live replica — the mode Gate 1's own N=1 run requires (§1.4,
+	// condition 1.8) — the gate's metric emitted no samples at all, and
+	// test/load/gate1_esi.go's maxDivergence over zero samples is 0, which
+	// is a PASS. §3.1's warning about "zero dropped on an empty run" is the
+	// same failure, one gate over.
+	//
+	// The fix is not to write the row from here — that would put a database
+	// round-trip per response into the path whose entire purpose is not
+	// having one. The reading is kept in memory and read at SCRAPE time,
+	// which is how the collector reads every other gauge it owns.
+	localAfter := localAtReading
+	switch {
+	case needsEvict:
+		localAfter = b.evictOldestUntil(evictTarget)
+	case inject > 0:
+		b.injectSynthetic(int16(inject), now)
+		localAfter -= inject
 	}
-	b.injectSynthetic(int16(inject), now)
+	b.recordReading(reading{
+		serverRemaining: serverRemaining,
+		localAtReading:  localAtReading,
+		localAfter:      localAfter,
+		observedAt:      now,
+		window:          b.window,
+		maxTokens:       b.maxTokens,
+	})
 	return nil
+}
+
+// Readings snapshots every bucket's last reconcile pair, for the metrics
+// collector. Locks each shard in turn to copy, never all at once — the same
+// discipline Keys() follows.
+func (l *LedgerSolo) Readings() []BucketReading {
+	var out []BucketReading
+	for _, sh := range l.shards {
+		sh.mu.Lock()
+		for key, b := range sh.buckets {
+			if !b.hasReading {
+				continue // never reconciled: no reading is not a reading of zero
+			}
+			group, userKey, _ := splitBucketKey(key)
+			r := b.lastReading
+			out = append(out, BucketReading{
+				Group: group, UserKey: userKey,
+				MaxTokens:       r.maxTokens,
+				Window:          r.window,
+				ServerRemaining: r.serverRemaining,
+				LocalAtReading:  r.localAtReading,
+				LocalAfter:      r.localAfter,
+				ObservedAt:      r.observedAt,
+			})
+		}
+		sh.mu.Unlock()
+	}
+	return out
+}
+
+// BucketReading is one bucket's last reconciliation, in the shape both
+// ledger modes can report it: the clustered ledger persists these as
+// app.esi_ledger_bucket columns, the solo ledger holds them in memory, and
+// cmd/hangar's metrics wiring reads whichever the active mode owns.
+type BucketReading struct {
+	Group     string
+	UserKey   string
+	MaxTokens int
+	Window    time.Duration
+
+	ServerRemaining int
+	LocalAtReading  int
+	LocalAfter      int
+	ObservedAt      time.Time
 }
 
 // BucketKey identifies one (group, userID) bucket.

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	hangardb "github.com/hangar-project/hangar/db"
 	"github.com/hangar-project/hangar/internal/esi/catalogue"
 	"github.com/hangar-project/hangar/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -101,5 +102,68 @@ func ingestCatalogue(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logge
 		"pin", catalogue.FormatDate(result.Pin),
 		"d_max_recorded", result.DMaxRecorded,
 	)
+
+	// ── PHASE 20.4.1: THE SEEDS THAT COULD NOT RUN YET NOW RUN ───────────
+	// db/seed/alert_types.sql inserts its four THRESHOLD rows through a JOIN
+	// against app.esi_route, because app.alert_type.source_route_id is NOT
+	// NULL and the threshold_declares_source CHECK enforces it. `migrate up`
+	// applies seeds BEFORE anything has ingested the spec, so on a FRESH
+	// installation that JOIN matches nothing and the four rows are silently
+	// skipped. Verified on the 20.4 release image against a throwaway
+	// Postgres: the first `migrate up` produced 50 alert types and 0
+	// thresholds; a second, after the ingest had landed 225 routes, produced
+	// 54 and 4.
+	//
+	// The consequence is not a crash, which is exactly what makes it worth
+	// closing here rather than documenting. app.alert_routing_rule has a
+	// foreign key to app.alert_type, so an operator on a fresh installation
+	// cannot create a routing rule for a threshold alert AT ALL — and the
+	// evaluator then reports it as unrouted, skips it, and looks completely
+	// healthy while being structurally incapable of ever firing. SRS §4.4's
+	// own sentence about a threshold alert that "silently generates zero
+	// alerts" describes this exactly.
+	//
+	// Re-applying the whole seed set is deliberate, rather than singling out
+	// the one file: every seed file is idempotent by construction (see
+	// db.ApplySeeds), `migrate up` already re-applies them all on every run,
+	// and doing it by name here would leave the NEXT catalogue-dependent
+	// seed to rediscover this. A failure is logged and not returned — the
+	// catalogue ingest itself succeeded, and refusing to report that because
+	// a follow-up upsert failed would lose the more important fact.
+	if err := hangardb.ApplySeeds(ctx, pool); err != nil {
+		logger.ErrorContext(ctx, "hangar: re-applying seed data after catalogue ingest failed — "+
+			"threshold alert types may still be missing; run 'hangar migrate up' once more",
+			"error", err)
+		return result, nil
+	}
+	logDeferredAlertTypes(ctx, pool, logger)
 	return result, nil
+}
+
+// logDeferredAlertTypes tells the operator, in the log, whether the four
+// threshold alert types are present — because "four of your alert types do
+// not exist" is not something anybody discovers by reading a table they
+// have never heard of.
+//
+// It runs after every ingest, not only the first, so the answer is on the
+// most recent boot's output rather than buried in whichever boot happened
+// to be the one that fixed it.
+func logDeferredAlertTypes(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) {
+	var thresholds, total int64
+	err := pool.QueryRow(ctx, `
+		SELECT count(*) FILTER (WHERE category = 'threshold'), count(*) FROM app.alert_type`).
+		Scan(&thresholds, &total)
+	if err != nil {
+		logger.WarnContext(ctx, "hangar: could not count alert types after seeding", "error", err)
+		return
+	}
+	if thresholds == 0 {
+		logger.WarnContext(ctx, "hangar: NO threshold alert types are seeded — "+
+			"structure and starbase fuel, member inactivity and contract expiry alerts cannot be routed or fired on this installation. "+
+			"They are seeded through a join against the ESI route catalogue; run 'hangar admin ingest-catalogue' and they will complete",
+			"alert_types", total)
+		return
+	}
+	logger.InfoContext(ctx, "hangar: alert type catalogue complete",
+		"alert_types", total, "threshold_types", thresholds)
 }

@@ -45,6 +45,29 @@
 -- on the first run after ingest; nothing is lost, and a fabricated route_id
 -- is never written.
 --
+-- ── PHASE 20.4.1: "ON THE FIRST RUN AFTER INGEST" WAS DOING REAL DAMAGE ──
+-- Measured on the 20.4 release image against a throwaway Postgres: the
+-- first `migrate up` produced 50 alert types and 0 thresholds; a second one,
+-- after the ingest had landed 225 routes, produced 54 and 4. So a fresh
+-- installation ran with four alert types MISSING until somebody happened to
+-- migrate again.
+--
+-- The consequence is not a crash, which is what made it survive four
+-- phases. app.alert_routing_rule has a foreign key to app.alert_type, so an
+-- operator on a fresh installation cannot create a routing rule for a
+-- threshold alert at all — and the evaluator then reports it as unrouted,
+-- skips it, and looks completely healthy while being structurally incapable
+-- of ever firing. SRS §4.4's own sentence about a threshold alert that
+-- "silently generates zero alerts" describes this exactly.
+--
+-- Closed by making the ingest complete its own dependency: cmd/hangar's
+-- ingestCatalogue re-applies the seed set after a successful ingest (every
+-- file here is idempotent by construction, which is what makes that safe),
+-- and both `migrate up` and the ingest now SAY how many threshold types
+-- exist — naming the four by name when there are none, because "four of
+-- your alert types do not exist" is not a thing an operator discovers by
+-- reading a table they have never heard of.
+--
 -- The Go catalogue (internal/alerting/catalogue) is the build-time source
 -- of truth; TestSeedSQLMatchesGoCatalogue asserts this file and it contain
 -- exactly the same alert types, so the two cannot drift.

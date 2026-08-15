@@ -204,6 +204,26 @@ func (g *Governor1) Reconcile(ctx context.Context, group, userKey string, maxTok
 	return active.Reconcile(ctx, group, userKey, maxTokens, serverRemaining)
 }
 
+// SoloReadings returns the in-process ledger's last reconcile pair per
+// bucket when solo mode is ACTIVE, and ok=false otherwise.
+//
+// PHASE 20.4.1. The two readers of esi_ledger_divergence read
+// app.esi_ledger_bucket, which only the clustered path writes — so in solo
+// mode the gate's own metric had no source. ok=false means "ask the
+// database", which is correct in clustered mode and correct for a process
+// that builds no gateway at all; ok=true with an empty slice means "solo,
+// and nothing has been reconciled yet", which is a real answer and not the
+// same thing.
+func (g *Governor1) SoloReadings() ([]BucketReading, bool) {
+	g.mu.Lock()
+	mode, solo := g.mode, g.solo
+	g.mu.Unlock()
+	if mode != ModeSolo || solo == nil {
+		return nil, false
+	}
+	return solo.Readings(), true
+}
+
 func (g *Governor1) activeLedger() Ledger {
 	if g.mode == ModeClustered && g.clustered != nil {
 		return g.clustered

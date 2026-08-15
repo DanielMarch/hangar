@@ -294,15 +294,19 @@
       "localRemaining": "로컬 잔량",
       "localAtReading": "측정 시 로컬",
       "serverRemaining": "서버 잔량",
+      "localAfterReading": "판독 후 로컬",
+      "predictionError": "예측 오차",
       "divergence": "편차",
       "serverObservedAt": "서버 관측",
       "worstDivergence": "최대 편차",
+      "worstPredictionError": "최대 예측 오차",
       "notObserved": "관측 안 됨",
-      "gateHint": "Gate 1은 그룹당 최대 {{tolerance}}건의 편차만 허용합니다.",
+      "gateHint": "Gate 1 은 조정 후 그룹당 {{tolerance}} 토큰의 편차를 요구합니다.",
       "bucketsBreaching": "허용치 초과 버킷",
       "bucketsBreachingHint": "지속적인 편차는 Gate 1 실패의 전조입니다.",
       "bucketsUnobserved": "관측된 적 없는 버킷",
-      "bucketsUnobservedHint": "아직 속도 제한 헤더를 받지 못했습니다."
+      "bucketsUnobservedHint": "아직 속도 제한 헤더를 받지 못했습니다.",
+      "predictionErrorHint": "조정으로 보정된 편차입니다. 기록만 하며 한계는 없습니다."
     },
     "errorLimit": {
       "heading": "ESI 오류 예산",

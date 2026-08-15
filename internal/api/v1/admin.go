@@ -38,6 +38,7 @@ import (
 	apimw "github.com/hangar-project/hangar/internal/api/middleware"
 	"github.com/hangar-project/hangar/internal/domain"
 	"github.com/hangar-project/hangar/internal/esi/catalogue"
+	"github.com/hangar-project/hangar/internal/esi/ratelimit"
 	"github.com/hangar-project/hangar/internal/provisioning/entitlement"
 	"github.com/hangar-project/hangar/internal/rbac"
 	"github.com/hangar-project/hangar/internal/store/gen"
@@ -710,22 +711,37 @@ func auditAdminAction(ctx context.Context, deps api.Deps, action, target string)
 // stopped arriving behind a wall of reassuring zeroes.
 //
 // ── PHASE 20.4: THE SUBTRACTION'S OPERANDS ───────────────────────────────
-// `divergence` is (local_remaining_at_reading − server_remaining): the pair
-// the reconciler wrote together under the bucket lock. It is NOT computed
-// from `local_remaining`, which this row also carries and which is summed
-// live at request time — subtracting a live count from a stored snapshot
-// measures how much has been consumed since the last reconcile, which on
-// this installation read 40-55 on healthy buckets against a Gate 1.3
-// tolerance of 1 (migration 00042 has the readings).
+// `divergence` is computed from the pair the reconciler wrote together
+// under the bucket lock. It is NOT computed from `local_remaining`, which
+// this row also carries and which is summed live at request time —
+// subtracting a live count from a stored snapshot measures how much has
+// been consumed since the last reconcile, which on this installation read
+// 40-55 on healthy buckets against a Gate 1.3 tolerance of 1 (migration
+// 00042 has the readings).
 //
-// Both numbers stay on the row on purpose. `local_remaining` answers "how
-// much headroom is there right now", `divergence` answers "how far apart
-// were we and CCP the last time both were known", and an operator watching
-// a rate-limit dashboard needs both. The board is also the ONE reader that
-// deliberately does not apply the telemetry collector's freshness rule: a
-// stale reading is shown with `server_observed_at` beside it, because
-// "nothing has been heard from this bucket in 90 seconds" is a thing an
-// operator must be able to see and a gauge cannot say.
+// ── PHASE 20.4.1: THE BOARD SHOWS BOTH QUANTITIES AND THE WHOLE SUM ──────
+// `divergence` is now the POST-correction residual — Gate 1.3's quantity as
+// amended, bound 0 — and `prediction_error` is 20.4's pre-correction gap,
+// which is real, useful and structurally non-zero under fan-out. Both are
+// measured against `least(server_remaining, max_tokens)`, the figure §5.5
+// actually converges to (ratelimit.ConvergenceTarget), so the board's
+// arithmetic and the gauge's agree by construction rather than by
+// coincidence.
+//
+// Every operand stays on the row on purpose. `local_remaining` answers "how
+// much headroom is there right now"; `local_remaining_at_reading`,
+// `server_remaining` and `local_remaining_after_reading` are the
+// reconciler's before/what-the-server-said/after, in that order, so an
+// operator can read the correction rather than take the two derived numbers
+// on trust. That legibility is a requirement, not a nicety: it is what
+// caught the 20.4 defect, when a board showing local == server beside a
+// divergence of 9 could not have been telling the truth about both.
+//
+// The board is also the ONE reader that deliberately does not apply the
+// telemetry collector's freshness rule: a stale reading is shown with
+// `server_observed_at` beside it, because "nothing has been heard from this
+// bucket in 90 seconds" is a thing an operator must be able to see and a
+// gauge cannot say.
 func ledgerDivergenceHandler(deps api.Deps) func(context.Context, *EmptyIn) (*CollectionOut, error) {
 	return func(ctx context.Context, _ *EmptyIn) (*CollectionOut, error) {
 		rows, err := deps.Store.ListLedgerDivergence(ctx)
@@ -734,18 +750,31 @@ func ledgerDivergenceHandler(deps api.Deps) func(context.Context, *EmptyIn) (*Co
 		}
 		data := rowSliceOf(rows)
 		for i, r := range rows {
-			if r.ServerRemaining == nil || r.LocalRemainingAtReading == nil {
-				data[i]["divergence"] = nil
+			if r.ServerRemaining == nil {
+				data[i]["divergence"], data[i]["prediction_error"] = nil, nil
 				continue
 			}
-			d := int64(*r.LocalRemainingAtReading) - int64(*r.ServerRemaining)
-			if d < 0 {
-				d = -d
-			}
-			data[i]["divergence"] = d
+			target := int64(ratelimit.ConvergenceTarget(int(r.MaxTokens), int(*r.ServerRemaining)))
+			data[i]["prediction_error"] = absDiff(r.LocalRemainingAtReading, target)
+			data[i]["divergence"] = absDiff(r.LocalRemainingAfterReading, target)
 		}
 		return &CollectionOut{Body: api.Collection[map[string]any]{Data: data, Page: api.EmptyPage(int32(len(data))), Sync: api.Sync{}}}, nil
 	}
+}
+
+// absDiff is |local − target| for a nullable local reading, and nil when
+// there is none. A missing operand is not a difference of zero — the same
+// rule telemetry.DivergenceRow states at length, applied here so the board
+// and the gauge cannot disagree about what "no reading" looks like.
+func absDiff(local *int32, target int64) any {
+	if local == nil {
+		return nil
+	}
+	d := int64(*local) - target
+	if d < 0 {
+		d = -d
+	}
+	return d
 }
 
 func exposuresHandler(deps api.Deps) func(context.Context, *ExposuresIn) (*CollectionOut, error) {

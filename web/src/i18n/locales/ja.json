@@ -294,15 +294,19 @@
       "localRemaining": "ローカル残量",
       "localAtReading": "計測時ローカル",
       "serverRemaining": "サーバー残量",
+      "localAfterReading": "読み取り後のローカル",
+      "predictionError": "予測誤差",
       "divergence": "乖離",
       "serverObservedAt": "サーバー観測時刻",
       "worstDivergence": "最大乖離",
+      "worstPredictionError": "最大予測誤差",
       "notObserved": "未観測",
-      "gateHint": "Gate 1 はグループごとに最大 {{tolerance}} リクエストの乖離しか許容しません。",
+      "gateHint": "Gate 1 は照合後にグループごとの乖離 {{tolerance}} トークンを要求します。",
       "bucketsBreaching": "許容超過のバケット",
       "bucketsBreachingHint": "継続的な乖離は Gate 1 失敗の予兆です。",
       "bucketsUnobserved": "未観測のバケット",
-      "bucketsUnobservedHint": "これらにはまだレート制限ヘッダーが届いていません。"
+      "bucketsUnobservedHint": "これらにはまだレート制限ヘッダーが届いていません。",
+      "predictionErrorHint": "照合で補正されたずれ。記録のみで上限はありません。"
     },
     "errorLimit": {
       "heading": "ESI エラーバジェット",

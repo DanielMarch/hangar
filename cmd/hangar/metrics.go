@@ -67,7 +67,7 @@ func buildMetricsRegistry(
 		mode = governorMode{gateway}
 	}
 	gatewayCollector := telemetry.NewGatewayCollector(
-		s, mode, ledgerDivergence{s}, errorBudget{s: s, max: errorLimitMax}, telemetry.LiveThreshold, logger,
+		s, mode, ledgerDivergence{s: s, g: gateway}, errorBudget{s: s, max: errorLimitMax}, telemetry.LiveThreshold, logger,
 	)
 	reg.MustRegister(gatewayCollector)
 	if counters != nil {
@@ -122,6 +122,26 @@ func metricsHandler(reg *prometheus.Registry) http.Handler {
 // observability is bad and losing the application is worse. The log line
 // says so explicitly rather than leaving a silent gap — a monitoring
 // endpoint that quietly is not there is exactly the failure mode B36 was.
+//
+// ── PHASE 20.4.1: THE FAILURE NAMES THE OTHER PROCESS ────────────────────
+// HANGAR_METRICS_ADDR defaults to 0.0.0.0:9090 for every role, which is
+// right for the topology HANGAR SHIPS — one role per container, each with
+// its own network namespace, so all three can hold 9090 and a scraper needs
+// one port number. It is wrong for a single box running two roles as
+// processes, where the second to start loses the bind.
+//
+// That is not a symmetric loss, which is why a bare "address in use" was
+// not good enough. `work` is the only process that builds an ESI gateway
+// and the only one that runs the alert dispatcher, so esi_ledger_mode,
+// esi_ledger_divergence's solo source and the whole of Gate 3's metric set
+// exist THERE and nowhere else — and whether `work` is the loser is decided
+// by a startup race. 20.4 hit this and worked around it by hand.
+//
+// The default is deliberately NOT changed to a per-role port: that would
+// fix the development topology by breaking the shipped one, giving the
+// compose stack three ports to scrape instead of one. Naming the cause is
+// the fix, and .env.example carries the same note where an operator
+// configuring a single box will read it.
 func startMetricsListener(ctx context.Context, addr string, reg *prometheus.Registry, logger *slog.Logger) func() {
 	if addr == "" {
 		logger.Info("hangar: metrics listener disabled (HANGAR_METRICS_ADDR is empty)")
@@ -136,7 +156,12 @@ func startMetricsListener(ctx context.Context, addr string, reg *prometheus.Regi
 		logger.Info("hangar: metrics listening", "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("hangar: metrics listener stopped — /metrics is NOT being served; "+
-				"gate evidence and dashboards will have a gap for this process",
+				"gate evidence and dashboards will have a gap for this process. "+
+				"If another HANGAR role (serve/work/schedule) is running on this host it already holds "+
+				"this address: HANGAR_METRICS_ADDR defaults to the same port for every role, which is "+
+				"correct one-role-per-container and wrong on a single box. Give each role its own port. "+
+				"This matters asymmetrically: esi_ledger_mode, esi_ledger_divergence's solo source and "+
+				"every alert-delivery metric exist only in `work`",
 				"addr", addr, "error", err)
 		}
 	}()
@@ -167,9 +192,30 @@ func (m governorMode) Mode() string { return string(m.g.Mode()) }
 // field is deliberately left unread here: the gauge's operands must both
 // come from the reconciler's own instant, and reading the live one is the
 // exact defect this phase fixed.
-type ledgerDivergence struct{ s *store.Store }
+//
+// ── PHASE 20.4.1: TWO SOURCES, BECAUSE THERE ARE TWO LEDGERS ─────────────
+// app.esi_ledger_bucket is written by the CLUSTERED ledger only. At exactly
+// one live replica the governor runs the in-process ledger, nothing writes
+// that table, and both Gate 1 metrics emitted no samples at all — while
+// test/load/gate1_esi.go's maximum over zero samples is 0, which reads as a
+// pass. That is the N=1 half of a gate whose §1.4 requires N=1 AND N=3.
+//
+// So the governor is asked first. In solo mode it answers from memory; in
+// clustered mode, or in a process with no gateway at all (`serve`,
+// `schedule`), it declines and the store answers. There is deliberately no
+// merging of the two: at any instant exactly one ledger is authoritative,
+// and a union would report a bucket twice with two different histories.
+type ledgerDivergence struct {
+	s *store.Store
+	g *ratelimit.Governor1 // nil in process roles that build no ESI gateway
+}
 
 func (d ledgerDivergence) LedgerDivergence(ctx context.Context) ([]telemetry.DivergenceRow, error) {
+	if d.g != nil {
+		if readings, ok := d.g.SoloReadings(); ok {
+			return soloDivergenceRows(readings), nil
+		}
+	}
 	rows, err := d.s.ListLedgerDivergence(ctx)
 	if err != nil {
 		return nil, err
@@ -185,6 +231,7 @@ func (d ledgerDivergence) LedgerDivergence(ctx context.Context) ([]telemetry.Div
 			// this phase's own verification.
 			ObservedAt: row.ServerObservedAt,
 			Window:     row.Window,
+			MaxTokens:  int64(row.MaxTokens),
 		}
 		if row.ServerRemaining != nil {
 			server := int64(*row.ServerRemaining)
@@ -194,9 +241,38 @@ func (d ledgerDivergence) LedgerDivergence(ctx context.Context) ([]telemetry.Div
 			local := int64(*row.LocalRemainingAtReading)
 			converted.LocalAtReading = &local
 		}
+		if row.LocalRemainingAfterReading != nil {
+			after := int64(*row.LocalRemainingAfterReading)
+			converted.LocalAfter = &after
+		}
 		out = append(out, converted)
 	}
 	return out, nil
+}
+
+// soloDivergenceRows converts the in-process ledger's snapshot into the
+// collector's row shape. Every operand is present by construction — the
+// solo ledger records a reading only from inside Reconcile, which has all
+// three — so unlike the stored path there is no nil case to preserve here;
+// a bucket that has never been reconciled is simply absent from the
+// snapshot, which is the same "no reading is not a reading of zero" rule
+// expressed by omission rather than by a nil pointer.
+func soloDivergenceRows(readings []ratelimit.BucketReading) []telemetry.DivergenceRow {
+	out := make([]telemetry.DivergenceRow, 0, len(readings))
+	for _, r := range readings {
+		server, atReading, after := int64(r.ServerRemaining), int64(r.LocalAtReading), int64(r.LocalAfter)
+		observedAt := r.ObservedAt
+		out = append(out, telemetry.DivergenceRow{
+			Group:           r.Group,
+			ServerRemaining: &server,
+			LocalAtReading:  &atReading,
+			LocalAfter:      &after,
+			MaxTokens:       int64(r.MaxTokens),
+			ObservedAt:      &observedAt,
+			Window:          r.Window,
+		})
+	}
+	return out
 }
 
 // deadLetterDepth adapts internal/alerting's dead-letter count to

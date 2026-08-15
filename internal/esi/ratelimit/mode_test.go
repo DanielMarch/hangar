@@ -107,6 +107,14 @@ func (s *fakeStore) RecordServerLedgerReading(ctx context.Context, arg gen.Recor
 	return nil
 }
 
+func (s *fakeStore) RecordReconciledLedgerLocal(ctx context.Context, group, userKey string, localRemainingAfter *int32) error {
+	return nil
+}
+
+func (s *fakeStore) ReduceLedgerEntryCost(ctx context.Context, entryID uuid.UUID, reduceBy int16) error {
+	return nil
+}
+
 func (s *fakeStore) FlushLedgerEntriesForBucket(ctx context.Context, group, userKey string) ([]gen.AppEsiLedgerEntry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

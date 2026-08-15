@@ -101,7 +101,42 @@ func runMigrateUp(ctx context.Context) error {
 		return fmt.Errorf("migrate: applying seed data: %w", err)
 	}
 	fmt.Println("migrate up: seed data applied")
+
+	// PHASE 20.4.1. On a FRESH installation four of the 54 alert types
+	// cannot be seeded here: they are THRESHOLD types, whose NOT NULL
+	// source_route_id is resolved by a join against app.esi_route, and
+	// nothing has ingested the spec yet. They complete themselves on the
+	// first catalogue ingest (see cmd/hangar's ingestCatalogue), so this is
+	// not an operator step — but "four alert types do not exist yet" is not
+	// something anybody discovers on their own, and until they do exist no
+	// routing rule can even be created for them, because
+	// app.alert_routing_rule has a foreign key to app.alert_type.
+	//
+	// Printed rather than logged: `migrate up` is a foreground command whose
+	// output an operator is reading right now.
+	reportDeferredAlertTypes(ctx, pool)
 	return nil
+}
+
+func reportDeferredAlertTypes(ctx context.Context, pool *pgxpool.Pool) {
+	var thresholds, total int64
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FILTER (WHERE category = 'threshold'), count(*) FROM app.alert_type`).
+		Scan(&thresholds, &total); err != nil {
+		fmt.Printf("migrate up: could not count alert types (%v)\n", err)
+		return
+	}
+	if thresholds > 0 {
+		fmt.Printf("migrate up: %d alert types seeded, %d of them threshold types\n", total, thresholds)
+		return
+	}
+	fmt.Printf("migrate up: %d alert types seeded, and 4 THRESHOLD types are DEFERRED.\n", total)
+	fmt.Println("migrate up:   corporation.structure.fuel_low, corporation.starbase.fuel_low,")
+	fmt.Println("migrate up:   corporation.member.inactive, corporation.contract.expiring")
+	fmt.Println("migrate up: each declares an ESI source route, and app.esi_route is empty until the")
+	fmt.Println("migrate up: catalogue is ingested. They complete automatically on the first ingest —")
+	fmt.Println("migrate up: `serve` does one at startup, or run `hangar admin ingest-catalogue`.")
+	fmt.Println("migrate up: Until then no routing rule can be created for them and they cannot fire.")
 }
 
 func runMigrateDown(ctx context.Context) error {

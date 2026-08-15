@@ -15,9 +15,7 @@ package ratelimit
 //     serverRemaining is already clamped against by the caller).
 //   - Equal: no action.
 func reconcileAction(maxTokens, localAvailable, serverRemaining int) (injectCost int, evictTarget int, needsEvict bool) {
-	if serverRemaining > maxTokens {
-		serverRemaining = maxTokens // never exceed max_tokens, per §5.5
-	}
+	serverRemaining = ConvergenceTarget(maxTokens, serverRemaining)
 	switch {
 	case serverRemaining < localAvailable:
 		return localAvailable - serverRemaining, 0, false
@@ -26,4 +24,25 @@ func reconcileAction(maxTokens, localAvailable, serverRemaining int) (injectCost
 	default:
 		return 0, 0, false
 	}
+}
+
+// ConvergenceTarget is the availability §5.5's reconciliation actually aims
+// at: the server's reading, clamped to the bucket's own ceiling, because
+// "local converges upward, NEVER above max_tokens" (04_RELEASE_GATES.md
+// §1.3's adversarial table).
+//
+// PHASE 20.4.1: exported because the reconciler is no longer its only user.
+// esi_ledger_divergence is now the residual AFTER convergence, so whatever
+// reads that residual — internal/telemetry's collector, the admin
+// rate-limit board — must subtract against the same clamped figure the
+// reconciler aimed at. Measuring against a raw server reading above the
+// ceiling would report a divergence for obeying §5.5, i.e. would fail the
+// gate for passing its own adversarial condition. One definition, three
+// callers, so the clamp cannot drift between the correction and the
+// measurement of it.
+func ConvergenceTarget(maxTokens, serverRemaining int) int {
+	if serverRemaining > maxTokens {
+		return maxTokens
+	}
+	return serverRemaining
 }

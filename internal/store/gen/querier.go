@@ -806,11 +806,32 @@ type Querier interface {
 	//
 	// b.local_remaining_at_reading is the fix: the local half as it stood at
 	// the instant server_remaining was written, under the same lock (see
-	// RecordServerLedgerReading). §1.3's divergence is that pair's difference
-	// and nothing else. The live columns stay in the result because the ADMIN
-	// BOARD wants them — "the ledger holds 47 right now, and the last time we
-	// compared, we and the server agreed" are two different operator
+	// RecordServerLedgerReading). The live columns stay in the result because
+	// the ADMIN BOARD wants them — "the ledger holds 47 right now, and the last
+	// time we compared, we and the server agreed" are two different operator
 	// questions, and answering only the second would hide current headroom.
+	//
+	// ── PHASE 20.4.1: THREE READINGS, TWO METRICS ────────────────────────────
+	// The row now carries the reconciler's whole arithmetic, in order:
+	//
+	//   local_remaining_at_reading      what HANGAR believed, before
+	//   server_remaining                what the server said
+	//   local_remaining_after_reading   what HANGAR believed, after converging
+	//
+	//   esi_ledger_prediction_error = |at_reading    − least(server, max)|
+	//   esi_ledger_divergence       = |after_reading − least(server, max)|
+	//
+	// The `least(..., max_tokens)` is not decoration. §5.5 forbids converging
+	// ABOVE max_tokens, and §1.3's own adversarial table expects exactly that
+	// ("Server reports higher | local converges upward, NEVER above
+	// max_tokens"). Measuring the residual against a raw server reading that
+	// exceeds the ceiling would fail the gate for obeying the gate.
+	//
+	// Both stay on the admin board so the arithmetic is legible in one place:
+	// an operator seeing prediction_error 18 and divergence 0 knows the ledger
+	// drifted and the reconciler caught it, which is the system working; one
+	// seeing divergence 6 knows it did NOT catch it, which is the only reading
+	// of the two that means something is wrong.
 	//
 	// The subtraction itself is deliberately NOT done here. Both stored
 	// operands are nullable — the server has said nothing about this bucket
@@ -1131,6 +1152,25 @@ type Querier interface {
 	// vocabulary, lands here. Never rejected, whatever it is.
 	RecordOpenVocabularyValue(ctx context.Context, vocabulary string, value string) error
 	RecordProvisioningAudit(ctx context.Context, arg RecordProvisioningAuditParams) (AppProvisioningAudit, error)
+	// PHASE 20.4.1. The other half: HANGAR's availability immediately AFTER the
+	// evict/inject that §5.5's "the server always wins" performs, written in
+	// the same transaction, under the same bucket lock, one statement after the
+	// correction.
+	//
+	// |this − least(server_remaining, max_tokens)| is esi_ledger_divergence as
+	// Gate 1.3 now reads it, and its bound is 0. It is NOT zero by
+	// construction, which is the objection 20.4 raised against storing it: the
+	// reconciler converges exactly in both directions (injection is exact by
+	// nature; eviction became exact in this phase — see ReduceLedgerEntryCost)
+	// but it can still FAIL to converge, when there is nothing left to evict.
+	// That case is precisely what the gate should catch and precisely what a
+	// pre-correction reading cannot express.
+	//
+	// RecordServerLedgerReading NULLs this column when it writes the
+	// pre-correction pair, so a row can never carry a fresh server reading
+	// beside a stale residual: if the correction that follows never lands
+	// (transaction rolled back), there is no reading rather than a wrong one.
+	RecordReconciledLedgerLocal(ctx context.Context, rateLimitGroup string, userKey string, localRemainingAfter *int32) error
 	// ---- security log (append-only) ----
 	RecordSecurityLogEntry(ctx context.Context, arg RecordSecurityLogEntryParams) error
 	// PHASE 20.4. Writes BOTH operands of esi_ledger_divergence in one
@@ -1152,6 +1192,13 @@ type Querier interface {
 	// since Phase 20.3, but the server's reading and the ceiling it is a
 	// remainder of arrived in the same response, and pairing them is one less
 	// thing that can drift.
+	//
+	// ── PHASE 20.4.1: THIS PAIR IS NO LONGER THE GATE'S QUANTITY ─────────────
+	// It is esi_ledger_prediction_error — how far HANGAR's own accounting had
+	// drifted from the server's BEFORE the correction. That is real and worth
+	// watching, and it is not what §1.3's sentence names; the post-correction
+	// residual is, and RecordReconciledLedgerLocal below writes it. Migration
+	// 00043 has the measurement and the argument.
 	RecordServerLedgerReading(ctx context.Context, arg RecordServerLedgerReadingParams) error
 	RecordSync304(ctx context.Context, subscriptionID uuid.UUID, nextDueAt time.Time) error
 	RecordSync403(ctx context.Context, subscriptionID uuid.UUID) error
@@ -1169,6 +1216,28 @@ type Querier interface {
 	// those three from the SQL result alone (no timing side-channel about
 	// which reason applies).
 	RedeemTeamspeakChallenge(ctx context.Context, token string, clientUniqueIdentifier *string) (AppTeamspeakChallenge, error)
+	// PHASE 20.4.1. Eviction's LAST step, and the reason the post-correction
+	// residual's bound is 0 rather than 4.
+	//
+	// EvictOldestLedgerEntries above returns whole entries, and the caller used
+	// to delete them whole until availability REACHED the server's figure. A
+	// cost-5 entry at the head of the queue closing a 1-token gap therefore
+	// forgave 4 tokens the server had not forgiven. Two consequences, and the
+	// second is the serious one:
+	//
+	//   * esi_ledger_divergence (the post-correction residual, §1.3 as amended
+	//     by 20.4.1) would carry a floor of up to 4 that no implementation
+	//     could clear;
+	//   * HANGAR would believe it holds headroom the server has not granted,
+	//     which is the direction that causes a Governor 1 BREACH — Gate
+	//     condition 1.1, not 1.3.
+	//
+	// Reducing the boundary entry by exactly the remainder converges exactly.
+	// The entry keeps its consumed_at, so it still ages out of the floating
+	// window on its own schedule; only the part of its cost the server says it
+	// is no longer charging for is forgiven. `greatest(cost - $2, 0)` is
+	// defensive: the caller never passes more than the entry holds.
+	ReduceLedgerEntryCost(ctx context.Context, entryID uuid.UUID, reduceBy int16) error
 	RefreshEffectivePermission(ctx context.Context, userID uuid.UUID, permission string, permitted bool) error
 	RemoveRoleGrant(ctx context.Context, grantID uuid.UUID) error
 	RemoveSquadMember(ctx context.Context, squadID uuid.UUID, characterID int64) error

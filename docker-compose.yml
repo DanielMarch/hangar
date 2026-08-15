@@ -99,6 +99,14 @@ services:
   # cluster-shared through Postgres, and every process heartbeats into
   # app.esi_replica so the in-process fast path is used only while exactly one
   # replica is live. See docs/01_ARCHITECTURE.md §5.6.
+  #
+  # METRICS PORTS (Phase 20.4.1). Splitting the roles here is free: each is its
+  # own container with its own network namespace, so all of them can keep
+  # HANGAR_METRICS_ADDR's default 9090 and a scraper needs one port number.
+  # Running two roles as PROCESSES on one host is the case that needs a port
+  # each — the second to bind loses, non-fatally and silently apart from one
+  # log line, and `work` is where esi_ledger_mode and every alert-delivery
+  # metric live. .env.example says so where an operator will read it.
   # ───────────────────────────────────────────────────────────────────────────
   hangar:
     image: ghcr.io/hangar-project/hangar:${HANGAR_VERSION:-latest}

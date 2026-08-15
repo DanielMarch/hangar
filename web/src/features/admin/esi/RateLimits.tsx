@@ -1,35 +1,45 @@
 // Governor 1's ledger dashboard, and Governor 2's error budget beside it.
 //
-// LEDGER DIVERGENCE IS THE HEADLINE. `divergence` is the same quantity
-// Gate 1.3 measures (`max(esi_ledger_divergence) over the run <= 1, per
-// group`). Sustained divergence is the early warning that the
+// LEDGER DIVERGENCE IS THE HEADLINE. `divergence` is the same quantity Gate
+// 1.3 measures. Sustained divergence is the early warning that the
 // cluster-shared ledger and ESI's own X-Ratelimit-Remaining have drifted
 // apart, which is a Gate 1 failure in the making, so it leads the screen
 // rather than sitting in a column the operator has to scroll to.
 //
-// ── PHASE 20.4: WHICH TWO COLUMNS THE DIVERGENCE IS THE DIFFERENCE OF ────
-// It is |local_at_reading - server_remaining|, NOT |local_remaining -
-// server_remaining|, and the table shows all three so the arithmetic is
-// legible rather than something the operator has to take on trust.
+// ── PHASE 20.4.1: THE WHOLE RECONCILIATION, IN ORDER ─────────────────────
+// The table shows every operand so the arithmetic is legible rather than
+// something the operator has to take on trust. Left to right:
 //
-//   local_remaining    what the ledger holds RIGHT NOW, summed live
-//   local_at_reading   what it held at the instant the server reading
-//                      below was recorded, written in the same statement
-//   server_remaining   the last X-Ratelimit-Remaining CCP sent
+//   local_remaining                what the ledger holds RIGHT NOW, summed live
+//   local_at_reading               what it held when the server reading arrived
+//   server_remaining               the last X-Ratelimit-Remaining CCP sent
+//   local_after_reading            what it held once the reconciler converged
+//   prediction_error               |at_reading - server|, clamped to max_tokens
+//   divergence                     |after_reading - server|, same clamp
 //
-// The first and third describe different moments; subtracting them
-// measures how much has been consumed since the last reconcile, which read
-// 40-55 on healthy buckets on the live installation against a tolerance of
-// 1. The second and third describe one moment, which is what makes their
-// difference a measurement at all. `local_remaining` stays on the screen
-// because current headroom is a real operator question — it is just not
-// this one.
+// The two derived numbers are DIFFERENT QUANTITIES and the distinction is
+// the whole of Phase 20.4.1.
 //
-// A null divergence means the server has said nothing about that bucket
-// yet — rendered as "not observed", never as zero. Zero divergence is a
-// healthy reading; no reading is not a reading, and collapsing them would
-// hide a bucket whose headers have stopped arriving behind a wall of
-// reassuring zeroes.
+//   * `prediction_error` is how far HANGAR's own accounting had drifted
+//     before the correction. It is structurally non-zero — reconciliation
+//     excludes in-flight reservations, so every sibling request ESI has
+//     counted and HANGAR has not yet settled shows up here — and on this
+//     installation a fan-out bucket held 18 for minutes with nothing wrong.
+//   * `divergence` is what was left AFTER the correction, and its bound is
+//     0. Non-zero means the reconciler could not converge, which is the
+//     only one of the two that means something is broken.
+//
+// `local_remaining` stays on the screen because current headroom is a real
+// operator question — it is just not either of these two. That legibility
+// is a requirement rather than a nicety: it is what caught the 20.4 defect,
+// when a board showing local == server beside a divergence of 9 could not
+// have been telling the truth about both.
+//
+// A null reading means the server has said nothing about that bucket yet —
+// rendered as "not observed", never as zero. Zero divergence is a healthy
+// reading; no reading is not a reading, and collapsing them would hide a
+// bucket whose headers have stopped arriving behind a wall of reassuring
+// zeroes.
 import { AlertTriangle, Activity } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -43,12 +53,18 @@ import { ItemPanel } from "@/components/ItemPanel";
 import { Badge } from "@/components/ui/badge";
 import { errorLimitQueryOptions, rateLimitsPath } from "@/features/admin/queries";
 
-/** Gate 1.3's own threshold: divergence above this is out of tolerance. */
-const DIVERGENCE_TOLERANCE = 1;
+// Gate 1.3's own threshold, as amended in Phase 20.4.1: reconciliation is
+// exact in both directions, so anything above zero means it did not
+// converge.
+const DIVERGENCE_TOLERANCE = 0;
+
+function numberOf(row: Row, field: string): number | null {
+  const v = row[field];
+  return typeof v === "number" ? v : null;
+}
 
 function divergenceOf(row: Row): number | null {
-  const v = row.divergence;
-  return typeof v === "number" ? v : null;
+  return numberOf(row, "divergence");
 }
 
 export function RateLimits() {
@@ -63,6 +79,12 @@ export function RateLimits() {
   const unobserved = rows.length - observed.length;
   const breaching = observed.filter((d) => d > DIVERGENCE_TOLERANCE).length;
 
+  const predictionErrors = rows
+    .map((r) => numberOf(r, "prediction_error"))
+    .filter((d): d is number => d !== null);
+  const worstPredictionError =
+    predictionErrors.length > 0 ? Math.max(...predictionErrors) : null;
+
   const columns: ColumnDef<Row>[] = [
     textColumn("rate_limit_group", t("admin.rateLimits.group")),
     textColumn("user_key", t("admin.rateLimits.userKey")),
@@ -70,6 +92,8 @@ export function RateLimits() {
     numberColumn("local_remaining", t("admin.rateLimits.localRemaining")),
     numberColumn("local_remaining_at_reading", t("admin.rateLimits.localAtReading")),
     numberColumn("server_remaining", t("admin.rateLimits.serverRemaining")),
+    numberColumn("local_remaining_after_reading", t("admin.rateLimits.localAfterReading")),
+    numberColumn("prediction_error", t("admin.rateLimits.predictionError")),
     {
       id: "divergence",
       accessorKey: "divergence",
@@ -82,13 +106,24 @@ export function RateLimits() {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label={t("admin.rateLimits.worstDivergence")}
           value={worst === null ? t("admin.rateLimits.notObserved") : String(worst)}
           tone={worst !== null && worst > DIVERGENCE_TOLERANCE ? "bad" : "ok"}
           icon={worst !== null && worst > DIVERGENCE_TOLERANCE ? AlertTriangle : Activity}
           hint={t("admin.rateLimits.gateHint", { tolerance: DIVERGENCE_TOLERANCE })}
+        />
+        <StatCard
+          label={t("admin.rateLimits.worstPredictionError")}
+          value={
+            worstPredictionError === null
+              ? t("admin.rateLimits.notObserved")
+              : String(worstPredictionError)
+          }
+          tone="neutral"
+          icon={Activity}
+          hint={t("admin.rateLimits.predictionErrorHint")}
         />
         <StatCard
           label={t("admin.rateLimits.bucketsBreaching")}

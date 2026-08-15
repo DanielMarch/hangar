@@ -46,7 +46,8 @@ remediation, not a precedent.
 
 | Gate | Metric / artefact | Intended phase | Actual |
 | :-- | :-- | :-- | :-- |
-| 1 | `esi_ledger_divergence`, `esi_ledger_mode`, `esi_replica_live_count` | 4 | 20.1 — **landed** |
+| 1 | `esi_ledger_divergence`, `esi_ledger_mode`, `esi_replica_live_count` | 4 | 20.1 — **landed**; `esi_ledger_divergence` REDEFINED in 20.4 and again in **20.4.1** (see §1.2's amendment note) |
+| 1 | `esi_ledger_prediction_error{group}` | — | **20.4.1 — landed**, alongside the redefinition that split it out of `esi_ledger_divergence`. Two quantities the first three attempts reported under one name: the gap the reconciler CORRECTS, and what it leaves behind |
 | 1 | `esi_429_total{has_headers}`, `esi_429_headerless_total{group}`, `esi_420_total`, `esi_error_limit_remaining` | 4 | **20.2 — landed**, with the B28/B29 wiring that makes them move |
 | 1 | `test/load/gate1_esi.go` + the recording proxy | — | **20.2 — landed**; exercised by its own integration suite, and NOT run as a gate until 20.8 |
 | 2 | `app.provisioning_audit.event_at` / `platform_call_completed_at`, `provisioning_revocation_latency_seconds` | 11 | **20.3**, with the B26/B27 wiring |
@@ -87,12 +88,89 @@ for 4 hours wall-clock with no restarts.
 | :-- | :-- | :-- |
 | 1.1 | Zero Governor 1 breaches | proxy records zero requests admitted with `available < 0` |
 | 1.2 | Zero Governor 2 breaches | `esi_420_total == 0` |
-| 1.3 | Ledger divergence ≤ 1 request | `max(esi_ledger_divergence)` over the run ≤ 1, per group |
+| 1.3 | Ledger divergence **= 0 tokens** after reconciliation | `max(esi_ledger_divergence)` over the run **== 0**, per group, **and at least one sample was observed** — see the amendment note below |
+| 1.3a | Ledger prediction error **recorded** | `max(esi_ledger_prediction_error)` per group written to `divergence.csv`. **No threshold** — see the amendment note below |
 | 1.4 | Proactive error-limit pause worked | at least one pause fired at the configured threshold, and no 420 followed |
 | 1.5 | Failure stayed scoped | an induced 403 on one entity did not reduce throughput on siblings by more than noise |
 | 1.6 | No stall | throughput never drops to zero for more than one `ttl_floor` |
 | 1.7 | Aggregate consumption respected at N>1 | with 3 replicas sharing a bucket, the proxy admitted no request that took aggregate consumption above `max_tokens` |
 | 1.8 | Mode selection was correct throughout | `esi_ledger_mode` was `clustered` for the whole N=3 run and `solo` for the whole N=1 run; no unexpected flapping |
+
+#### Condition 1.3 — amended in Phase 20.4.1
+
+**Amended in Phase 20.4.1.** Condition 1.3 previously read *"Ledger divergence ≤ 1 request"*,
+measured as `max(esi_ledger_divergence) over the run ≤ 1, per group`. Following Phase 20.1's
+precedent in the instrumentation-ownership table above, the amendment names the *property*
+rather than restating the contradiction, and records the measurement that forced it.
+
+**Two things were wrong, and one of them made the condition unsatisfiable by any
+implementation.**
+
+*The units did not match.* The condition states its bound in **requests**; the gauge is
+denominated in **tokens**, and §5.5's cost table prices one 3XX at 1, one 2XX at 2 and one other
+4XX at 5. "≤ 1 request" therefore has no single value in the gauge's units, and the literal
+measurement `≤ 1` cannot be met under any concurrency at all: a single in-flight 2XX is 2.
+
+*The name covered two different quantities.* Measured on the live installation after Phase 20.4's
+fix landed, at 14–68 in-flight jobs:
+
+```
+max |local_at_reading  − server_remaining|                = 18   (corp-contract, held for minutes)
+max |local_after_reading − server_remaining|              =  0   (every bucket, every reading)
+max |live_local        − server_remaining|, readings ≤5s  =  0
+```
+
+Reading the `corp-contract` bucket out explains the 18 exactly: 8 settled entries of cost 1 (all
+304s) = 8 tokens, against a server reporting 26 consumed, plus one **synthetic** entry of cost 18
+injected by the reconcile that observed the gap. The ledger **converged**, as it does on every
+reconcile — "the server always wins" (§5.5) works. What the gauge was reporting was the size of
+the correction.
+
+**The amendment splits them.**
+
+| Metric | Quantity | Bound |
+| :-- | :-- | :-- |
+| `esi_ledger_divergence{group}` | `\|local_after_reading − least(server_remaining, max_tokens)\|` — what is left **after** reconciliation | **0 tokens** |
+| `esi_ledger_prediction_error{group}` | `\|local_at_reading − least(server_remaining, max_tokens)\|` — the gap the reconciliation **closed** | **recorded, not bounded** |
+
+*Why the gate reads the residual, and why its bound is 0 rather than some number of tokens.*
+This is the quantity condition 1.3's own sentence names — §1's headline is "zero divergence
+between the local ledger and `X-Ratelimit-Remaining`", which is a statement about whether the two
+**agree**, and they agree after the correction, not before it. Under §5.5's clamp reconciliation
+is *total*: downward it injects a synthetic entry of any cost, upward it can forgive at most the
+consumption it holds, and the gap it is asked to close is exactly `server − max_tokens + held`,
+which the clamp keeps at or below `held`. Phase 20.4.1 also made the upward direction *exact* —
+eviction previously deleted whole entries until availability **reached** the target, so closing a
+1-token gap with a cost-5 entry over-forgave 4 tokens, which is both a floor of 4 under this
+metric and over-forgiveness in the direction that causes a **Governor 1 breach** (condition 1.1).
+With that fixed the residual is 0 whenever the reconciler runs correctly, and non-zero exactly
+when it does not — a broken correction, or a ceiling disagreement between the value the
+reconciler was handed and the one stored on the bucket row, which is the defect class Phase 20.3
+spent a phase on. **0 tokens is strictly tighter than the "one request" the original sentence
+allowed**, so this amendment narrows the gate; it does not relax it.
+
+*Why the prediction error is recorded and not bounded.* It is a real and useful quantity — it is
+what surfaced the window question recorded in `PRODUCTION_CALLER_AUDIT.md` — but no bound on it
+is honest. Reconciliation deliberately excludes in-flight reservations (a reservation is HANGAR's
+prediction of a request whose outcome the server cannot yet have counted), so **k** sibling
+requests the server has already processed and HANGAR has not yet settled put up to `5k` tokens
+between the two operands. `corp-contract` is a fan-out group
+(`/corporations/{id}/contracts/{contract_id}/items`), which is why it was the bucket holding 18.
+Under Gate 1's recording proxy that is the *only* source of prediction error, so its magnitude
+should track in-flight concurrency and nothing else; against real ESI it additionally carries any
+disagreement between HANGAR's floating window and ESI's own accounting. Either way, choosing a
+threshold here would be choosing a number because it sits above what the system reports, which
+rule 1 forbids. It is recorded per minute per group in `divergence.csv`, beside the residual, and
+a run whose prediction error is not explained by its concurrency is a finding for the reviewer —
+not an automatic fail.
+
+*Why "at least one sample was observed" is part of the measurement.* A maximum over zero samples
+is 0, and 0 is now this condition's passing value. That was not hypothetical: `esi_ledger_divergence`
+is computed from `app.esi_ledger_bucket`, which **only the clustered ledger writes** — so at
+exactly one live replica, the mode §1.4 requires for half of this gate, the gauge emitted no
+samples at all and the harness reported a pass. Phase 20.4.1 gave solo mode a scrape-time source
+of its own and made the harness fail a condition it never observed. This is §3.1's "zero dropped
+on an empty run", one gate over.
 
 ### 1.3 Adversarial conditions injected during the run
 
@@ -140,7 +218,11 @@ across the transition.
 docs/gate-evidence/<version>/gate1/
   n1/  and  n3/
     environment.json        replica count, mode observed, CPU/RAM, PG settings, proxy version
-    divergence.csv          per-group, per-minute max divergence
+    divergence.csv          per-group, per-minute max divergence AND max prediction error
+                            (two columns since 20.4.1 — the second is what the
+                            first was measuring for three phases; a column of
+                            zeroes is only readable beside what the reconciler
+                            was correcting to produce them)
     breaches.json           must be empty
     aggregate-consumption.csv   N=3 only: proxy-side view of total consumption per bucket
     adversarial-log.jsonl   each injected condition and the observed response

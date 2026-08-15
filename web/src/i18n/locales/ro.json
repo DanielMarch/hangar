@@ -294,15 +294,19 @@
       "localRemaining": "Rămas local",
       "localAtReading": "Local la citire",
       "serverRemaining": "Rămas pe server",
+      "localAfterReading": "Local la reconciliere",
+      "predictionError": "Eroare de predicție",
       "divergence": "Divergență",
       "serverObservedAt": "Server observat",
       "worstDivergence": "Divergență maximă",
+      "worstPredictionError": "Cea mai mare eroare de predicție",
       "notObserved": "Neobservat",
-      "gateHint": "Gate 1 permite cel mult {{tolerance}} cerere de divergență per grup.",
+      "gateHint": "Gate 1 cere o divergență de {{tolerance}} jetoane per grup după reconciliere.",
       "bucketsBreaching": "Compartimente peste toleranță",
       "bucketsBreachingHint": "Divergența susținută anunță o eșuare a Gate 1.",
       "bucketsUnobserved": "Compartimente niciodată observate",
-      "bucketsUnobservedHint": "Încă nu s-a văzut niciun antet de limită pentru acestea."
+      "bucketsUnobservedHint": "Încă nu s-a văzut niciun antet de limită pentru acestea.",
+      "predictionErrorHint": "Deriva corectată de reconciliere. Înregistrată, fără prag."
     },
     "errorLimit": {
       "heading": "Buget de erori ESI",

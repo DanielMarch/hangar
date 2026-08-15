@@ -474,3 +474,148 @@ func itoaBench(n int64) string {
 	}
 	return string(buf[i:])
 }
+
+// ── PHASE 20.4.1 ─────────────────────────────────────────────────────────
+
+// TestClusteredEvictionForgivesExactlyWhatTheServerForgave is the clustered
+// half of the solo unit test of the same name, against real SQL, because
+// the two implementations of §5.5 must converge identically and only one of
+// them is exercised by the fast unit suite.
+//
+// One cost-5 entry and a server one token more generous: the entry must
+// survive with cost 4. Deleting it whole would forgive 4 tokens ESI still
+// charges for, which is the direction that causes a breach.
+func TestClusteredEvictionForgivesExactlyWhatTheServerForgave(t *testing.T) {
+	pool := newMigratedPool(t)
+	ctx := context.Background()
+	ledger := ratelimit.NewLedgerClustered(pool)
+
+	req := ratelimit.AcquireRequest{
+		Group: "char-detail", UserKey: "char:exactevict",
+		MaxTokens: 100, AdmissionMaxTokens: 100,
+		Window: 15 * time.Minute, RequestTimeout: 30 * time.Second,
+	}
+	res, err := ledger.Acquire(ctx, req)
+	require.NoError(t, err)
+	require.NoError(t, ledger.Settle(ctx, res, ratelimit.Cost4XXOther, time.Now()))
+
+	require.NoError(t, ledger.Reconcile(ctx, req.Group, req.UserKey, 100, 96))
+
+	var rows, totalCost int64
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT count(*), coalesce(sum(cost), 0) FROM app.esi_ledger_entry
+		 WHERE rate_limit_group = $1 AND user_key = $2 AND state != 'reserved'`,
+		req.Group, req.UserKey).Scan(&rows, &totalCost))
+	require.Equal(t, int64(1), rows, "the boundary entry must be reduced, not deleted — it still ages out on its own schedule")
+	require.Equal(t, int64(4), totalCost, "convergence must be exact: 100-4 = 96, the server's own figure")
+}
+
+// TestReconcileStoresTheResidualAndItIsZero is Gate 1.3's quantity, end to
+// end against real SQL.
+//
+// The pre-correction gap here is deliberately large — eight settled
+// requests the server has not counted — because that is what makes the
+// point: esi_ledger_prediction_error reads 16 and esi_ledger_divergence
+// reads 0, from the SAME row, in the same instant. Measured on the live
+// installation, corp-contract held exactly this shape at 18.
+func TestReconcileStoresTheResidualAndItIsZero(t *testing.T) {
+	pool := newMigratedPool(t)
+	ctx := context.Background()
+	ledger := ratelimit.NewLedgerClustered(pool)
+
+	req := ratelimit.AcquireRequest{
+		Group: "corp-contract", UserKey: "corp:residual",
+		MaxTokens: 600, AdmissionMaxTokens: 600,
+		Window: 15 * time.Minute, RequestTimeout: 30 * time.Second,
+	}
+	for i := 0; i < 8; i++ {
+		res, err := ledger.Acquire(ctx, req)
+		require.NoError(t, err)
+		require.NoError(t, ledger.Settle(ctx, res, ratelimit.Cost2XX, time.Now()))
+	}
+
+	// The server has counted eight more requests than HANGAR has settled.
+	require.NoError(t, ledger.Reconcile(ctx, req.Group, req.UserKey, 600, 568))
+
+	var atReading, afterReading, serverRemaining int32
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT local_remaining_at_reading, local_remaining_after_reading, server_remaining
+		  FROM app.esi_ledger_bucket WHERE rate_limit_group = $1 AND user_key = $2`,
+		req.Group, req.UserKey).Scan(&atReading, &afterReading, &serverRemaining))
+
+	require.Equal(t, int32(568), serverRemaining)
+	require.Equal(t, int32(584), atReading, "16 tokens of prediction error: 8 settled 2XX against a server 16 further along")
+	require.Equal(t, int32(568), afterReading, "and a residual of 0, because the reconciler converged exactly")
+}
+
+// TestResidualIsZeroInBothDirections pins the claim Gate 1.3 now rests on,
+// and states its limits honestly.
+//
+// Under §5.5's clamp, reconciliation is TOTAL: downward it injects a
+// synthetic entry of arbitrary cost, upward it can forgive at most the
+// consumption it holds — and the gap it is asked to close is exactly
+// (server − max_tokens + held), which the clamp keeps at or below `held`.
+// So a correct reconciler converges every time, in both directions, and the
+// residual is 0.
+//
+// That is what makes esi_ledger_divergence a CONSERVATION CHECK on the
+// reconciler rather than a gauge of installation health — the prediction
+// error is the health gauge. A non-zero residual means the arithmetic
+// itself has broken, or the ceiling the reconciler was handed disagrees
+// with the ceiling stored on the bucket row, which is the exact class of
+// defect Phase 20.3 spent a phase on. This metric's own history — three
+// redefinitions in three phases — is why that check is worth a series.
+func TestResidualIsZeroInBothDirections(t *testing.T) {
+	pool := newMigratedPool(t)
+	ctx := context.Background()
+	ledger := ratelimit.NewLedgerClustered(pool)
+
+	req := ratelimit.AcquireRequest{
+		Group: "char-detail", UserKey: "char:bothdirections",
+		MaxTokens: 100, AdmissionMaxTokens: 100,
+		Window: 15 * time.Minute, RequestTimeout: 30 * time.Second,
+	}
+	for i := 0; i < 6; i++ {
+		res, err := ledger.Acquire(ctx, req)
+		require.NoError(t, err)
+		require.NoError(t, ledger.Settle(ctx, res, ratelimit.Cost4XXOther, time.Now()))
+	}
+
+	residual := func() int32 {
+		t.Helper()
+		var after, server int32
+		require.NoError(t, pool.QueryRow(ctx, `
+			SELECT local_remaining_after_reading, server_remaining FROM app.esi_ledger_bucket
+			 WHERE rate_limit_group = $1 AND user_key = $2`,
+			req.Group, req.UserKey).Scan(&after, &server))
+		d := after - server
+		if d < 0 {
+			d = -d
+		}
+		return d
+	}
+
+	// Downward (server has counted more), upward by a margin that does not
+	// divide the cost-5 entries evenly, upward past everything there is to
+	// forgive, and finally exact agreement.
+	for _, serverRemaining := range []int{50, 73, 100, 100} {
+		require.NoError(t, ledger.Reconcile(ctx, req.Group, req.UserKey, 100, serverRemaining))
+		require.Equal(t, int32(0), residual(),
+			"reconciliation must converge exactly against a server reading of %d", serverRemaining)
+	}
+
+	// And above the ceiling: §5.5 refuses to converge past max_tokens, so
+	// the residual is measured against the clamped figure the reconciler
+	// actually aimed at — otherwise the gate fails a system for passing its
+	// own adversarial condition ("Server reports higher | local converges
+	// upward, never above max_tokens").
+	require.NoError(t, ledger.Reconcile(ctx, req.Group, req.UserKey, 100, 400))
+	var after int32
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT local_remaining_after_reading FROM app.esi_ledger_bucket
+		 WHERE rate_limit_group = $1 AND user_key = $2`,
+		req.Group, req.UserKey).Scan(&after))
+	require.Equal(t, int32(100), after)
+	require.Equal(t, int32(100), int32(ratelimit.ConvergenceTarget(100, 400)),
+		"the reader must clamp with the same function the reconciler clamped with")
+}

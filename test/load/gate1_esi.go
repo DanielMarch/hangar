@@ -103,8 +103,17 @@ type Sample struct {
 	URL   string
 	Raw   string
 	Value map[string]float64
-	// Divergence is esi_ledger_divergence keyed by its `group` label.
+	// Divergence is esi_ledger_divergence keyed by its `group` label: the
+	// POST-reconciliation residual, which is Gate 1.3's quantity as amended
+	// in Phase 20.4.1.
 	Divergence map[string]float64
+	// PredictionError is esi_ledger_prediction_error keyed by its `group`
+	// label: the PRE-reconciliation gap. RECORDED as evidence and not
+	// gated — its floor is set by how many sibling requests are in flight
+	// in a bucket, since reconciliation deliberately excludes reservations,
+	// and no implementation of predictive reservation can drive it to a
+	// small constant. §1.3's amendment note has the arithmetic.
+	PredictionError map[string]float64
 	// Mode is the label of whichever esi_ledger_mode series read 1.
 	Mode string
 }
@@ -168,11 +177,37 @@ func evaluate(cfg Config, proxy *Proxy, res *Result) []ConditionResult {
 		Measurement: fmt.Sprintf("esi_420_total peaked at %.0f", max420),
 	})
 
-	worst, worstGroup := maxDivergence(res.Samples)
+	// ── 1.3, AS AMENDED IN PHASE 20.4.1 ──────────────────────────────────
+	// The bound is 0 tokens on the POST-reconciliation residual, which is
+	// strictly tighter than the "one request" the headline sentence allows
+	// (a request is 1, 2 or 5 tokens) and is the quantity that sentence
+	// actually names. The PRE-reconciliation gap is recorded beside it with
+	// no threshold. 04_RELEASE_GATES.md §1.2 has the derivation.
+	//
+	// `observed` is load-bearing and is the hole this replaced. A maximum
+	// over zero samples is 0, which read as a pass — and at N=1 there WERE
+	// zero samples, because nothing on the solo path wrote the bucket row
+	// the gauge is computed from. Half of a gate whose §1.4 requires N=1
+	// and N=3 was therefore passing on an empty gauge, which is §3.1's
+	// "zero dropped on an empty run" one gate over.
+	worst, worstGroup, observed := maxDivergence(res.Samples)
 	out = append(out, ConditionResult{
-		ID: "1.3", Description: "Ledger divergence <= 1 per group",
-		Passed:      worst <= 1,
-		Measurement: fmt.Sprintf("max(esi_ledger_divergence) = %.0f (group %q)", worst, worstGroup),
+		ID: "1.3", Description: "Ledger divergence == 0 tokens after reconciliation, per group",
+		Passed: observed > 0 && worst == 0,
+		Measurement: fmt.Sprintf("max(esi_ledger_divergence) = %.0f (group %q) over %d group-samples",
+			worst, worstGroup, observed),
+	})
+	if observed == 0 {
+		out[len(out)-1].Measurement = "esi_ledger_divergence emitted NO samples for the whole run — " +
+			"the gauge was not being produced, so this condition was not measured (a maximum over nothing is 0, which is not a pass)"
+	}
+
+	worstErr, worstErrGroup, errObserved := maxPredictionError(res.Samples)
+	out = append(out, ConditionResult{
+		ID: "1.3a", Description: "Ledger prediction error recorded (no threshold)",
+		Passed: errObserved > 0,
+		Measurement: fmt.Sprintf("max(esi_ledger_prediction_error) = %.0f (group %q) over %d group-samples; recorded as evidence, not bounded",
+			worstErr, worstErrGroup, errObserved),
 	})
 
 	pausedBelowThreshold, lowest := crossedPauseThreshold(res.Samples, cfg.ErrorLimitPauseAt)
@@ -275,7 +310,8 @@ func scrape(ctx context.Context, url string) (Sample, error) {
 // gate reads six named series and a full one would be another dependency
 // to keep current.
 func parseSample(url, body string) Sample {
-	s := Sample{At: time.Now(), URL: url, Raw: body, Value: map[string]float64{}, Divergence: map[string]float64{}}
+	s := Sample{At: time.Now(), URL: url, Raw: body, Value: map[string]float64{},
+		Divergence: map[string]float64{}, PredictionError: map[string]float64{}}
 	for _, line := range strings.Split(body, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -289,6 +325,10 @@ func parseSample(url, body string) Sample {
 		case "esi_ledger_divergence":
 			if g := labels["group"]; g != "" {
 				s.Divergence[g] = value
+			}
+		case "esi_ledger_prediction_error":
+			if g := labels["group"]; g != "" {
+				s.PredictionError[g] = value
 			}
 		case "esi_ledger_mode":
 			if value == 1 {
@@ -339,16 +379,32 @@ func maxOf(samples []Sample, metric string) float64 {
 	return highest
 }
 
-func maxDivergence(samples []Sample) (float64, string) {
-	highest, group := 0.0, ""
+// maxDivergence returns the highest esi_ledger_divergence reading, the
+// group it came from, and HOW MANY group-samples were seen at all.
+//
+// The count is the whole point of the third return value: a maximum over
+// zero samples is 0, and 0 is this gauge's passing value, so "we never
+// scraped it" and "it was perfect throughout" were indistinguishable.
+func maxDivergence(samples []Sample) (float64, string, int) {
+	return maxLabelled(samples, func(s Sample) map[string]float64 { return s.Divergence })
+}
+
+// maxPredictionError is the same reduction over esi_ledger_prediction_error.
+func maxPredictionError(samples []Sample) (float64, string, int) {
+	return maxLabelled(samples, func(s Sample) map[string]float64 { return s.PredictionError })
+}
+
+func maxLabelled(samples []Sample, pick func(Sample) map[string]float64) (float64, string, int) {
+	highest, group, observed := 0.0, "", 0
 	for _, s := range samples {
-		for g, v := range s.Divergence {
-			if v > highest {
+		for g, v := range pick(s) {
+			observed++
+			if v > highest || group == "" {
 				highest, group = v, g
 			}
 		}
 	}
-	return highest, group
+	return highest, group, observed
 }
 
 // crossedPauseThreshold reports whether esi_error_limit_remaining was ever
@@ -477,6 +533,7 @@ func writeDivergenceCSV(path string, samples []Sample) error {
 		group  string
 	}
 	peak := map[key]float64{}
+	peakErr := map[key]float64{}
 	for _, s := range samples {
 		minute := s.At.UTC().Format("2006-01-02T15:04Z")
 		for g, v := range s.Divergence {
@@ -485,10 +542,25 @@ func writeDivergenceCSV(path string, samples []Sample) error {
 				peak[k] = v
 			}
 		}
+		// PHASE 20.4.1: recorded in the same file, per minute per group, so
+		// the two are read side by side. A gate reviewer looking at a
+		// divergence column of zeroes must be able to see what the ledger
+		// was actually doing while the reconciler kept catching it.
+		for g, v := range s.PredictionError {
+			k := key{minute: minute, group: g}
+			if current, seen := peakErr[k]; !seen || v > current {
+				peakErr[k] = v
+			}
+		}
 	}
 	keys := make([]key, 0, len(peak))
 	for k := range peak {
 		keys = append(keys, k)
+	}
+	for k := range peakErr {
+		if _, seen := peak[k]; !seen {
+			keys = append(keys, k)
+		}
 	}
 	sort.Slice(keys, func(i, j int) bool {
 		if keys[i].minute != keys[j].minute {
@@ -498,9 +570,9 @@ func writeDivergenceCSV(path string, samples []Sample) error {
 	})
 
 	var sb strings.Builder
-	sb.WriteString("minute,group,max_divergence\n")
+	sb.WriteString("minute,group,max_divergence,max_prediction_error\n")
 	for _, k := range keys {
-		fmt.Fprintf(&sb, "%s,%s,%.0f\n", k.minute, k.group, peak[k])
+		fmt.Fprintf(&sb, "%s,%s,%.0f,%.0f\n", k.minute, k.group, peak[k], peakErr[k])
 	}
 	if err := os.WriteFile(path, []byte(sb.String()), 0o600); err != nil {
 		return fmt.Errorf("load: writing divergence.csv: %w", err)

@@ -294,15 +294,19 @@
       "localRemaining": "Локальный остаток",
       "localAtReading": "Локально на момент замера",
       "serverRemaining": "Остаток сервера",
+      "localAfterReading": "Локально после чтения",
+      "predictionError": "Ошибка прогноза",
       "divergence": "Расхождение",
       "serverObservedAt": "Сервер наблюдался",
       "worstDivergence": "Максимальное расхождение",
+      "worstPredictionError": "Худшая ошибка прогноза",
       "notObserved": "Не наблюдалось",
-      "gateHint": "Gate 1 допускает не более {{tolerance}} запроса расхождения на группу.",
+      "gateHint": "Gate 1 требует расхождения {{tolerance}} токенов на группу после сверки.",
       "bucketsBreaching": "Корзины вне допуска",
       "bucketsBreachingHint": "Устойчивое расхождение — предвестник провала Gate 1.",
       "bucketsUnobserved": "Ни разу не наблюдались",
-      "bucketsUnobservedHint": "Заголовок лимита по ним ещё не приходил."
+      "bucketsUnobservedHint": "Заголовок лимита по ним ещё не приходил.",
+      "predictionErrorHint": "Дрейф, исправленный сверкой. Записывается, не ограничивается."
     },
     "errorLimit": {
       "heading": "Бюджет ошибок ESI",

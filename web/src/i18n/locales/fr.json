@@ -294,15 +294,19 @@
       "localRemaining": "Restant local",
       "localAtReading": "Local à la lecture",
       "serverRemaining": "Restant serveur",
+      "localAfterReading": "Local après lecture",
+      "predictionError": "Erreur de prédiction",
       "divergence": "Divergence",
       "serverObservedAt": "Serveur observé",
       "worstDivergence": "Divergence maximale",
+      "worstPredictionError": "Pire erreur de prédiction",
       "notObserved": "Non observé",
-      "gateHint": "Le Gate 1 tolère au plus {{tolerance}} requête de divergence par groupe.",
+      "gateHint": "Gate 1 exige une divergence de {{tolerance}} jetons par groupe après rapprochement.",
       "bucketsBreaching": "Compartiments hors tolérance",
       "bucketsBreachingHint": "Une divergence durable annonce un échec du Gate 1.",
       "bucketsUnobserved": "Compartiments jamais observés",
-      "bucketsUnobservedHint": "Aucun en-tête de limite n'a encore été vu pour ceux-ci."
+      "bucketsUnobservedHint": "Aucun en-tête de limite n'a encore été vu pour ceux-ci.",
+      "predictionErrorHint": "Dérive corrigée par le rapprochement. Enregistrée, non bornée."
     },
     "errorLimit": {
       "heading": "Budget d'erreurs ESI",

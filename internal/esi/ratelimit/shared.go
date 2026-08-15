@@ -27,6 +27,8 @@ type Store interface {
 	EvictOldestLedgerEntries(ctx context.Context, rateLimitGroup string, userKey string, maxEvict int32) ([]gen.EvictOldestLedgerEntriesRow, error)
 	DeleteLedgerEntryByID(ctx context.Context, entryID uuid.UUID) error
 	RecordServerLedgerReading(ctx context.Context, arg gen.RecordServerLedgerReadingParams) error
+	RecordReconciledLedgerLocal(ctx context.Context, rateLimitGroup string, userKey string, localRemainingAfter *int32) error
+	ReduceLedgerEntryCost(ctx context.Context, entryID uuid.UUID, reduceBy int16) error
 	FlushLedgerEntriesForBucket(ctx context.Context, rateLimitGroup string, userKey string) ([]gen.AppEsiLedgerEntry, error)
 	BulkInsertLedgerEntry(ctx context.Context, arg gen.BulkInsertLedgerEntryParams) error
 	ListLedgerBuckets(ctx context.Context) ([]gen.AppEsiLedgerBucket, error)
@@ -296,48 +298,92 @@ func (l *LedgerClustered) Reconcile(ctx context.Context, group, userKey string, 
 			return fmt.Errorf("record server reading: %w", err)
 		}
 
-		if needsEvict {
-			return l.evictUntil(ctx, q, group, userKey, maxTokens, evictTarget)
-		}
-		if inject > 0 {
+		// localAfter is availability once the correction below has landed.
+		// It is COMPUTED rather than re-summed: injection moves
+		// availability by exactly the injected cost, and evictUntil returns
+		// what it actually achieved. A second SumSettledLedgerEntryCost
+		// would be a third round-trip inside the bucket lock to learn a
+		// number this transaction already knows.
+		localAfter := localAvailable
+		switch {
+		case needsEvict:
+			achieved, err := l.evictUntil(ctx, q, group, userKey, maxTokens, evictTarget)
+			if err != nil {
+				return err
+			}
+			localAfter = achieved
+		case inject > 0:
 			if err := q.InsertSyntheticLedgerEntry(ctx, group, userKey, int16(inject)); err != nil {
 				return fmt.Errorf("insert synthetic: %w", err)
 			}
+			localAfter -= inject
+		}
+
+		// PHASE 20.4.1: the other operand of esi_ledger_divergence as Gate
+		// 1.3 now reads it — see RecordReconciledLedgerLocal and migration
+		// 00043. Written LAST, still inside this transaction and still
+		// under the lock taken above, so a reader can never see the
+		// pre-correction pair refreshed beside a residual from a previous
+		// reading.
+		after32 := int32(max(localAfter, 0))
+		if err := q.RecordReconciledLedgerLocal(ctx, group, userKey, &after32); err != nil {
+			return fmt.Errorf("record reconciled local: %w", err)
 		}
 		return nil
 	})
 }
 
-// evictUntil deletes oldest non-reservation entries until availability
-// reaches target (or there is nothing left to evict), accumulating exactly
-// enough cost rather than guessing a row count.
-func (l *LedgerClustered) evictUntil(ctx context.Context, q Store, group, userKey string, maxTokens, target int) error {
+// evictUntil forgives oldest non-reservation consumption until availability
+// reaches target (or there is nothing left to forgive), and returns the
+// availability it achieved.
+//
+// ── PHASE 20.4.1: THE LAST ENTRY IS REDUCED, NOT DELETED ─────────────────
+// This used to delete whole entries until availability REACHED target, so
+// a cost-5 entry closing a 1-token gap forgave 4 tokens the server had not
+// forgiven. That is the direction that causes breaches — HANGAR believing
+// it holds headroom ESI has not granted — and it put a floor of up to 4
+// under the gate's own metric. The boundary entry now has its cost reduced
+// by exactly the remainder (ReduceLedgerEntryCost), keeping its consumed_at
+// so it still ages out of the floating window on its own schedule.
+func (l *LedgerClustered) evictUntil(ctx context.Context, q Store, group, userKey string, maxTokens, target int) (int, error) {
 	for {
 		used, err := q.SumSettledLedgerEntryCost(ctx, group, userKey)
 		if err != nil {
-			return fmt.Errorf("sum cost: %w", err)
+			return 0, fmt.Errorf("sum cost: %w", err)
 		}
-		if maxTokens-int(used) >= target {
-			return nil
+		available := maxTokens - int(used)
+		deficit := target - available
+		if deficit <= 0 {
+			return available, nil
 		}
 		candidates, err := q.EvictOldestLedgerEntries(ctx, group, userKey, 16)
 		if err != nil {
-			return fmt.Errorf("evict oldest candidates: %w", err)
+			return 0, fmt.Errorf("evict oldest candidates: %w", err)
 		}
 		if len(candidates) == 0 {
-			return nil // nothing left to evict; converge as far as possible
+			// Nothing left to forgive: converge as far as possible and
+			// report it honestly. This is the one case esi_ledger_divergence
+			// exists to catch, so returning `target` here would be the
+			// vacuous pass 20.4 was right to fear — just in the other half
+			// of the metric.
+			return available, nil
 		}
 		for _, c := range candidates {
-			if err := q.DeleteLedgerEntryByID(ctx, c.EntryID); err != nil {
-				return fmt.Errorf("delete evicted entry: %w", err)
+			if int(c.Cost) <= deficit {
+				if err := q.DeleteLedgerEntryByID(ctx, c.EntryID); err != nil {
+					return 0, fmt.Errorf("delete evicted entry: %w", err)
+				}
+				deficit -= int(c.Cost)
+				available += int(c.Cost)
+				if deficit == 0 {
+					return available, nil
+				}
+				continue
 			}
-			used, err := q.SumSettledLedgerEntryCost(ctx, group, userKey)
-			if err != nil {
-				return fmt.Errorf("sum cost: %w", err)
+			if err := q.ReduceLedgerEntryCost(ctx, c.EntryID, int16(deficit)); err != nil {
+				return 0, fmt.Errorf("reduce evicted entry: %w", err)
 			}
-			if maxTokens-int(used) >= target {
-				return nil
-			}
+			return target, nil
 		}
 	}
 }

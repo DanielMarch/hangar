@@ -294,15 +294,19 @@
       "localRemaining": "Plaaslik oor",
       "localAtReading": "Plaaslik by lesing",
       "serverRemaining": "Bediener oor",
+      "localAfterReading": "Plaaslik na lesing",
+      "predictionError": "Voorspellingsfout",
       "divergence": "Afwyking",
       "serverObservedAt": "Bediener waargeneem",
       "worstDivergence": "Grootste afwyking",
+      "worstPredictionError": "Ergste voorspellingsfout",
       "notObserved": "Nie waargeneem nie",
-      "gateHint": "Gate 1 laat hoogstens {{tolerance}} versoek se afwyking per groep toe.",
+      "gateHint": "Gate 1 vereis 'n afwyking van {{tolerance}} tekens per groep ná versoening.",
       "bucketsBreaching": "Emmers buite toleransie",
       "bucketsBreachingHint": "Volgehoue afwyking is 'n vroeë Gate 1-mislukking.",
       "bucketsUnobserved": "Emmers nooit waargeneem nie",
-      "bucketsUnobservedHint": "Nog geen tempoperk-kopstuk is hiervoor gesien nie."
+      "bucketsUnobservedHint": "Nog geen tempoperk-kopstuk is hiervoor gesien nie.",
+      "predictionErrorHint": "Afwyking wat die versoening reggestel het. Aangeteken, nie begrens nie."
     },
     "errorLimit": {
       "heading": "ESI-foutbegroting",

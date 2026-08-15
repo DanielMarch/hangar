@@ -115,22 +115,46 @@ type ModeSource interface {
 // sub-second skew that no freshness rule can resolve. Making the mistake
 // unrepresentable is the only remedy that does not depend on the next
 // reader having read this comment.
+// ── PHASE 20.4.1: ONE ROW, TWO METRICS ───────────────────────────────────
+// 20.4's pair turned out to measure PREDICTION ERROR — how far HANGAR's own
+// accounting had drifted from the server's before the correction — and not
+// the quantity 04_RELEASE_GATES.md §1.3's sentence names, which is whether
+// the ledger AGREES with the server, i.e. the state AFTER reconciliation.
+// Measured on the live installation: the pre-correction gap held 18 for
+// minutes on a fan-out bucket while the post-correction residual was 0.
+//
+// Both are kept, under two names, because they answer two different
+// operator questions and conflating them is what made this take three
+// phases to see:
+//
+//	esi_ledger_divergence       |LocalAfter     − target|  the gate, bound 0
+//	esi_ledger_prediction_error |LocalAtReading − target|  recorded, unbounded
+//
+// where target is min(ServerRemaining, MaxTokens) — see
+// ratelimit.ConvergenceTarget for why the clamp is load-bearing rather than
+// decorative.
 type DivergenceRow struct {
 	Group string
 
-	// LocalAtReading and ServerRemaining are the pair the reconciler wrote
-	// together, under the bucket's own lock, in one statement
-	// (app.esi_ledger_bucket.local_remaining_at_reading and
-	// .server_remaining — see RecordServerLedgerReading). They describe one
-	// instant, which is what makes their difference a measurement.
+	// LocalAtReading, LocalAfter and ServerRemaining are the reconciler's
+	// whole arithmetic, written together under the bucket's own lock
+	// (app.esi_ledger_bucket's three columns — see
+	// RecordServerLedgerReading and RecordReconciledLedgerLocal) or held in
+	// memory by the solo ledger. They describe one instant, which is what
+	// makes their differences measurements.
 	//
-	// Either being nil means the server has not been heard from for this
-	// bucket. Nil is NOT zero: zero divergence is a healthy reading, no
-	// reading is not a reading, and collapsing them would hide a bucket
-	// whose headers have stopped arriving behind a wall of reassuring
-	// zeroes. A nil row contributes no sample at all.
+	// Any of them being nil means this bucket has no complete reading. Nil
+	// is NOT zero: zero divergence is a healthy reading, no reading is not
+	// a reading, and collapsing them would hide a bucket whose headers have
+	// stopped arriving behind a wall of reassuring zeroes. A nil row
+	// contributes no sample at all — to either metric.
 	LocalAtReading  *int64
+	LocalAfter      *int64
 	ServerRemaining *int64
+
+	// MaxTokens is the bucket's ceiling, needed because §5.5 converges to
+	// min(server, max) and never above it. Zero disables the clamp.
+	MaxTokens int64
 
 	// ObservedAt is when that pair was written, and Window is the bucket's
 	// floating window.
@@ -159,6 +183,30 @@ type DivergenceRow struct {
 	// exactly what this gauge cannot express.
 	ObservedAt *time.Time
 	Window     time.Duration
+}
+
+// target is the availability the reconciler aimed at for this row: the
+// server's reading clamped to the bucket's own ceiling. Kept here so both
+// metrics subtract against the same figure the correction used.
+func (r DivergenceRow) target() int64 {
+	if r.MaxTokens > 0 && *r.ServerRemaining > r.MaxTokens {
+		return r.MaxTokens
+	}
+	return *r.ServerRemaining
+}
+
+// complete reports whether this row carries a usable reading for both
+// metrics: every operand present, and the pair not older than one window.
+func (r DivergenceRow) complete(now time.Time) bool {
+	return r.ServerRemaining != nil && r.LocalAtReading != nil &&
+		r.LocalAfter != nil && r.readingIsCurrent(now)
+}
+
+func absInt64(v int64) int64 {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 // DivergenceLister lists the current per-bucket readings.
@@ -204,6 +252,7 @@ type GatewayCollector struct {
 	replicaCount   *prometheus.Desc
 	ledgerMode     *prometheus.Desc
 	ledgerDiv      *prometheus.Desc
+	ledgerPredErr  *prometheus.Desc
 	errorRemaining *prometheus.Desc
 	scrapeErrors   *prometheus.CounterVec
 }
@@ -249,7 +298,11 @@ func NewGatewayCollector(
 			[]string{"mode"}, nil),
 		ledgerDiv: prometheus.NewDesc(
 			"esi_ledger_divergence",
-			"Maximum absolute difference, across the buckets of a rate-limit group, between the local ledger's remaining count and the server's X-Ratelimit-Remaining. Gate 1.3 requires max <= 1 per group. Groups the server has not reported on emit no sample.",
+			"Maximum absolute difference, in tokens, across the buckets of a rate-limit group, between the local ledger's remaining count AFTER header reconciliation and the server's X-Ratelimit-Remaining (clamped to max_tokens). Gate 1.3 requires max == 0 per group: reconciliation is exact in both directions, so any non-zero value means the reconciler could not converge. Groups the server has not reported on emit no sample.",
+			[]string{"group"}, nil),
+		ledgerPredErr: prometheus.NewDesc(
+			"esi_ledger_prediction_error",
+			"Maximum absolute difference, in tokens, across the buckets of a rate-limit group, between the local ledger's remaining count BEFORE header reconciliation and the server's X-Ratelimit-Remaining (clamped to max_tokens). Recorded as Gate 1 evidence, deliberately NOT bounded: reconciliation excludes in-flight reservations, so sibling requests the server has counted and HANGAR has not yet settled put up to 5 tokens each between the two. Sustained growth with esi_ledger_divergence at zero means the ledger is drifting further each cycle and the reconciler is still catching it.",
 			[]string{"group"}, nil),
 		errorRemaining: prometheus.NewDesc(
 			"esi_error_limit_remaining",
@@ -266,6 +319,7 @@ func (c *GatewayCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.replicaCount
 	ch <- c.ledgerMode
 	ch <- c.ledgerDiv
+	ch <- c.ledgerPredErr
 	ch <- c.errorRemaining
 	c.scrapeErrors.Describe(ch)
 }
@@ -316,22 +370,33 @@ func (c *GatewayCollector) Collect(ch chan<- prometheus.Metric) {
 			// Per-group maximum, not per-bucket: see DivergenceRow's note on
 			// why a user_key label would be a cardinality bomb during the
 			// very run it exists to measure.
-			maxByGroup := make(map[string]int64, len(rows))
+			//
+			// Both metrics are aggregated over the SAME rows in one pass,
+			// so a group can never appear in one and be missing from the
+			// other — an operator comparing them is comparing the same
+			// population, which is the whole point of exporting two.
+			residualByGroup := make(map[string]int64, len(rows))
+			predErrByGroup := make(map[string]int64, len(rows))
 			now := time.Now()
 			for _, row := range rows {
-				if row.ServerRemaining == nil || row.LocalAtReading == nil || !row.readingIsCurrent(now) {
+				if !row.complete(now) {
 					continue
 				}
-				d := *row.LocalAtReading - *row.ServerRemaining
-				if d < 0 {
-					d = -d
+				target := row.target()
+				residual := absInt64(*row.LocalAfter - target)
+				predErr := absInt64(*row.LocalAtReading - target)
+				if current, seen := residualByGroup[row.Group]; !seen || residual > current {
+					residualByGroup[row.Group] = residual
 				}
-				if current, seen := maxByGroup[row.Group]; !seen || d > current {
-					maxByGroup[row.Group] = d
+				if current, seen := predErrByGroup[row.Group]; !seen || predErr > current {
+					predErrByGroup[row.Group] = predErr
 				}
 			}
-			for group, d := range maxByGroup {
+			for group, d := range residualByGroup {
 				ch <- prometheus.MustNewConstMetric(c.ledgerDiv, prometheus.GaugeValue, float64(d), group)
+			}
+			for group, d := range predErrByGroup {
+				ch <- prometheus.MustNewConstMetric(c.ledgerPredErr, prometheus.GaugeValue, float64(d), group)
 			}
 		}
 	}

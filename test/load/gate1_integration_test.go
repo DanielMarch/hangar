@@ -332,7 +332,8 @@ func TestHarnessRunProducesEveryEvidenceArtefact(t *testing.T) {
 		_, _ = w.Write([]byte(strings.Join([]string{
 			`esi_ledger_mode{mode="solo"} 1`,
 			`esi_ledger_mode{mode="clustered"} 0`,
-			`esi_ledger_divergence{group="gate1-test"} 1`,
+			`esi_ledger_divergence{group="gate1-test"} 0`,
+			`esi_ledger_prediction_error{group="gate1-test"} 14`,
 			`esi_420_total 0`,
 			`esi_429_total{has_headers="false"} 1`,
 			`esi_429_headerless_total{group="gate1-test"} 1`,
@@ -376,7 +377,8 @@ func TestHarnessRunProducesEveryEvidenceArtefact(t *testing.T) {
 	}
 	require.True(t, byID["1.1"].Passed, "a correctly-governed client must produce zero breaches: %s", byID["1.1"].Measurement)
 	require.True(t, byID["1.2"].Passed, "esi_420_total must be zero: %s", byID["1.2"].Measurement)
-	require.True(t, byID["1.3"].Passed, "divergence must stay within one request: %s", byID["1.3"].Measurement)
+	require.True(t, byID["1.3"].Passed, "a converged ledger must read zero divergence: %s", byID["1.3"].Measurement)
+	require.True(t, byID["1.3a"].Passed, "the prediction error must be RECORDED even though it is not bounded: %s", byID["1.3a"].Measurement)
 	require.True(t, byID["1.4"].Passed, "the stub reports 12 remaining against a threshold of 20: %s", byID["1.4"].Measurement)
 	require.True(t, byID["1.8"].Passed, "one replica must select solo mode: %s", byID["1.8"].Measurement)
 }
@@ -407,4 +409,57 @@ func TestSpecRouteResolverReadsRealRateLimits(t *testing.T) {
 	unknown, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://esi.local/not/a/route", nil)
 	require.NoError(t, err)
 	require.Empty(t, resolve(unknown).Group, "an unmatched path must be unlimited, never a wrong bucket")
+}
+
+// TestGate13FailsWhenTheGaugeWasNeverScraped closes a hole that made half
+// of Gate 1 unmeasurable, and it is 20.4.1's own item 1 in miniature.
+//
+// Condition 1.3's bar is a MAXIMUM, and its passing value is now 0 — so a
+// run in which esi_ledger_divergence was never exported at all produced a
+// maximum of 0 and reported a pass. That was not hypothetical: nothing on
+// the solo ledger's path wrote app.esi_ledger_bucket, so at exactly one
+// live replica the gauge had no source, and §1.4 requires a run at exactly
+// one live replica.
+//
+// The harness now has to have SEEN the gauge. (cmd/hangar gives solo mode
+// a scrape-time source of its own, so both halves of the hole are shut —
+// this end asserts the harness would notice if the other end regressed.)
+func TestGate13FailsWhenTheGaugeWasNeverScraped(t *testing.T) {
+	t.Parallel()
+
+	proxy := load.NewProxy(fixedResolver(1000), load.NewInjector(nil, nil), nil)
+	srv := proxy.Server()
+	defer srv.Close()
+
+	// Everything Gate 1 reads EXCEPT the two ledger gauges.
+	metrics := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(strings.Join([]string{
+			`esi_ledger_mode{mode="solo"} 1`,
+			`esi_ledger_mode{mode="clustered"} 0`,
+			`esi_420_total 0`,
+			`esi_error_limit_remaining 12`,
+			"",
+		}, "\n")))
+	}))
+	defer metrics.Close()
+
+	res, err := load.Run(context.Background(), load.Config{
+		Duration:          150 * time.Millisecond,
+		Replicas:          1,
+		MetricsURLs:       []string{metrics.URL},
+		ScrapeInterval:    50 * time.Millisecond,
+		ErrorLimitPauseAt: 20,
+	}, proxy)
+	require.NoError(t, err)
+
+	byID := map[string]load.ConditionResult{}
+	for _, c := range res.Conditions {
+		byID[c.ID] = c
+	}
+	require.False(t, byID["1.3"].Passed,
+		"a run that never observed esi_ledger_divergence must NOT report a pass — a maximum over nothing is 0, "+
+			"and 0 is this condition's passing value: %s", byID["1.3"].Measurement)
+	require.Contains(t, byID["1.3"].Measurement, "NO samples")
+	require.False(t, byID["1.3a"].Passed,
+		"the same rule applies to the recorded-only condition: an artefact with no readings is not evidence")
 }

@@ -294,15 +294,19 @@
       "localRemaining": "Lokal verbleibend",
       "localAtReading": "Lokal bei Messung",
       "serverRemaining": "Server verbleibend",
+      "localAfterReading": "Lokal nach Messung",
+      "predictionError": "Vorhersagefehler",
       "divergence": "Abweichung",
       "serverObservedAt": "Server beobachtet",
       "worstDivergence": "Größte Abweichung",
+      "worstPredictionError": "Schlechtester Vorhersagefehler",
       "notObserved": "Nicht beobachtet",
-      "gateHint": "Gate 1 erlaubt höchstens {{tolerance}} Anfrage Abweichung pro Gruppe.",
+      "gateHint": "Gate 1 verlangt nach dem Abgleich {{tolerance}} Token Abweichung pro Gruppe.",
       "bucketsBreaching": "Buckets außerhalb der Toleranz",
       "bucketsBreachingHint": "Anhaltende Abweichung kündigt einen Gate-1-Fehler an.",
       "bucketsUnobserved": "Nie beobachtete Buckets",
-      "bucketsUnobservedHint": "Für diese wurde noch kein Ratenlimit-Header gesehen."
+      "bucketsUnobservedHint": "Für diese wurde noch kein Ratenlimit-Header gesehen.",
+      "predictionErrorHint": "Vom Abgleich korrigierte Abweichung. Erfasst, nicht begrenzt."
     },
     "errorLimit": {
       "heading": "ESI-Fehlerbudget",

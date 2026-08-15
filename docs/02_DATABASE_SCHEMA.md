@@ -273,9 +273,37 @@ CREATE UNLOGGED TABLE app.esi_ledger_bucket (
     -- 'sourceIP' or 'sourceIP:applicationID' on unauthenticated ones.
     user_key           text        NOT NULL,
     max_tokens         integer     NOT NULL,
+    -- The floating window's length. NOT a HANGAR constant: it is the spec's
+    -- own x-rate-limit.window-size, "15m" on every one of the 225 routes
+    -- ingested from live ESI, corroborated by X-Ratelimit-Limit's own
+    -- "<max>/15m" suffix. Verified in Phase 20.4.1 rather than assumed. The
+    -- LENGTH is right and the SHAPE differs: HANGAR releases each request's
+    -- cost one window after that request, while ESI was measured behaving as
+    -- a sliding-window counter over fixed 15-minute wall-clock windows, so
+    -- its tail is longer. 01_ARCHITECTURE.md §5.5 has the readings and why
+    -- HANGAR's shape is deliberately not changed to match.
     window             interval    NOT NULL,
-    -- Last authoritative server reading. The server always wins.
-    server_remaining   integer,
+    -- ── THE RECONCILER'S OWN ARITHMETIC (§5.5, Phases 20.4 and 20.4.1) ──
+    -- Three readings, written under this row's own FOR UPDATE lock in the
+    -- transaction that performs the correction, in this order:
+    --
+    --   local_remaining_at_reading     what HANGAR held, BEFORE
+    --   server_remaining               what the server said
+    --   local_remaining_after_reading  what HANGAR held, once converged
+    --
+    -- and two metrics, both measured against least(server_remaining,
+    -- max_tokens) because §5.5 never converges above the ceiling:
+    --
+    --   esi_ledger_prediction_error = |at_reading    − that|  recorded
+    --   esi_ledger_divergence       = |after_reading − that|  Gate 1.3, bound 0
+    --
+    -- All three are nullable and NULL means no reading, which is not a
+    -- reading of zero. Storing only the live sum against a snapshot server
+    -- reading is the defect migration 00042 fixed; reporting only the
+    -- pre-correction pair is the one 00043 fixed.
+    server_remaining              integer,
+    local_remaining_at_reading    integer,
+    local_remaining_after_reading integer,
     server_observed_at timestamptz,
     updated_at         timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (rate_limit_group, user_key)

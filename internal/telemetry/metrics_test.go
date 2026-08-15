@@ -59,27 +59,142 @@ func freshReading(rows []DivergenceRow) []DivergenceRow {
 	return rows
 }
 
+// converged fills in LocalAfter for rows that only state the pre-correction
+// pair, as a bucket the reconciler successfully converged: local ends up on
+// the server's own figure.
+//
+// PHASE 20.4.1. It exists so a test about aggregation, freshness or
+// nullability does not have to restate what convergence means, and so a
+// test asserting on esi_ledger_divergence VALUES has to opt out of it
+// deliberately rather than by forgetting a field.
+func converged(rows []DivergenceRow) []DivergenceRow {
+	for i := range rows {
+		if rows[i].LocalAfter == nil && rows[i].ServerRemaining != nil {
+			after := *rows[i].ServerRemaining
+			rows[i].LocalAfter = &after
+		}
+	}
+	return rows
+}
+
+const divergenceHelp = "# HELP esi_ledger_divergence Maximum absolute difference, in tokens, across the buckets of a rate-limit group, between the local ledger's remaining count AFTER header reconciliation and the server's X-Ratelimit-Remaining (clamped to max_tokens). Gate 1.3 requires max == 0 per group: reconciliation is exact in both directions, so any non-zero value means the reconciler could not converge. Groups the server has not reported on emit no sample.\n# TYPE esi_ledger_divergence gauge\n"
+
+const predictionErrorHelp = "# HELP esi_ledger_prediction_error Maximum absolute difference, in tokens, across the buckets of a rate-limit group, between the local ledger's remaining count BEFORE header reconciliation and the server's X-Ratelimit-Remaining (clamped to max_tokens). Recorded as Gate 1 evidence, deliberately NOT bounded: reconciliation excludes in-flight reservations, so sibling requests the server has counted and HANGAR has not yet settled put up to 5 tokens each between the two. Sustained growth with esi_ledger_divergence at zero means the ledger is drifting further each cycle and the reconciler is still catching it.\n# TYPE esi_ledger_prediction_error gauge\n"
+
 // TestLedgerDivergenceIsPerGroupMaximum pins the aggregation that keeps
 // Gate 1's own metric from becoming a cardinality bomb during Gate 1's own
 // run: buckets are keyed (group, user_key) and a 5000-character run has
 // 5000 user keys, so the collector must emit one series per GROUP carrying
 // that group's maximum — which is also exactly what Gate 1.3 measures.
+//
+// PHASE 20.4.1: the values under test are now the PRE-correction gaps, so
+// this asserts on esi_ledger_prediction_error. The aggregation itself is
+// shared by both metrics and is what this test is about.
 func TestLedgerDivergenceIsPerGroupMaximum(t *testing.T) {
-	collector := NewGatewayCollector(nil, nil, stubDivergence{rows: freshReading([]DivergenceRow{
+	collector := NewGatewayCollector(nil, nil, stubDivergence{rows: converged(freshReading([]DivergenceRow{
 		{Group: "market", LocalAtReading: int64p(100), ServerRemaining: int64p(99)},  // 1
 		{Group: "market", LocalAtReading: int64p(100), ServerRemaining: int64p(93)},  // 7  <- max
 		{Group: "market", LocalAtReading: int64p(100), ServerRemaining: int64p(100)}, // 0
 		{Group: "corp", LocalAtReading: int64p(50), ServerRemaining: int64p(52)},     // 2 (absolute)
+	}))}, nil, LiveThreshold, quietLogger())
+
+	expected := predictionErrorHelp + `esi_ledger_prediction_error{group="corp"} 2
+esi_ledger_prediction_error{group="market"} 7
+`
+	if err := testutil.CollectAndCompare(collector, strings.NewReader(expected), "esi_ledger_prediction_error"); err != nil {
+		t.Error(err)
+	}
+}
+
+// ── PHASE 20.4.1: THE TWO METRICS ARE DIFFERENT QUANTITIES ───────────────
+
+// TestConvergedBucketReportsZeroDivergenceAndItsRealPredictionError is the
+// whole of 20.4.1's item 1 in one assertion, and it is taken from a real
+// reading: `corp-contract` held a pre-correction gap of 18 for minutes
+// while the reconciler converged exactly, every time, so the residual after
+// the correction was 0.
+//
+// Reporting only the first number fails Gate 1.3 on a healthy installation.
+// Reporting only the second discards the signal that surfaced the window
+// question. They are two quantities and they get two names.
+func TestConvergedBucketReportsZeroDivergenceAndItsRealPredictionError(t *testing.T) {
+	collector := NewGatewayCollector(nil, nil, stubDivergence{rows: freshReading([]DivergenceRow{
+		{Group: "corp-contract", MaxTokens: 600,
+			LocalAtReading: int64p(592), ServerRemaining: int64p(574), LocalAfter: int64p(574)},
 	})}, nil, LiveThreshold, quietLogger())
 
-	expected := `
-# HELP esi_ledger_divergence Maximum absolute difference, across the buckets of a rate-limit group, between the local ledger's remaining count and the server's X-Ratelimit-Remaining. Gate 1.3 requires max <= 1 per group. Groups the server has not reported on emit no sample.
-# TYPE esi_ledger_divergence gauge
-esi_ledger_divergence{group="corp"} 2
-esi_ledger_divergence{group="market"} 7
-`
+	wantDiv := divergenceHelp + "esi_ledger_divergence{group=\"corp-contract\"} 0\n"
+	if err := testutil.CollectAndCompare(collector, strings.NewReader(wantDiv), "esi_ledger_divergence"); err != nil {
+		t.Errorf("a bucket the reconciler converged must read 0 on the gate's metric: %v", err)
+	}
+	wantErr := predictionErrorHelp + "esi_ledger_prediction_error{group=\"corp-contract\"} 18\n"
+	if err := testutil.CollectAndCompare(collector, strings.NewReader(wantErr), "esi_ledger_prediction_error"); err != nil {
+		t.Errorf("the drift the reconciler corrected must still be reported somewhere: %v", err)
+	}
+}
+
+// TestDivergenceIsNonZeroWhenTheReconcilerCannotConverge is the reason the
+// post-correction residual is a real signal rather than the vacuous
+// constant Phase 20.4 took it for.
+//
+// The reconciler converges exactly in both directions — injection is exact
+// by nature, eviction became exact in 20.4.1 — so the ONLY way this reads
+// non-zero is that convergence was impossible: the server reported more
+// headroom than HANGAR holds and there was nothing left to evict. That is
+// a ledger that has lost track of the server, which is precisely what Gate
+// 1.3's sentence is about.
+func TestDivergenceIsNonZeroWhenTheReconcilerCannotConverge(t *testing.T) {
+	collector := NewGatewayCollector(nil, nil, stubDivergence{rows: freshReading([]DivergenceRow{
+		// Server says 500 free; the ledger held 480 and had only 14 tokens
+		// of evictable entries, so it got to 494 and stopped.
+		{Group: "exhausted", MaxTokens: 600,
+			LocalAtReading: int64p(480), ServerRemaining: int64p(500), LocalAfter: int64p(494)},
+	})}, nil, LiveThreshold, quietLogger())
+
+	expected := divergenceHelp + "esi_ledger_divergence{group=\"exhausted\"} 6\n"
 	if err := testutil.CollectAndCompare(collector, strings.NewReader(expected), "esi_ledger_divergence"); err != nil {
-		t.Error(err)
+		t.Errorf("a reconciler that could not converge must SAY so: %v", err)
+	}
+}
+
+// TestServerReadingAboveTheCeilingIsClampedBeforeSubtracting stops the gate
+// failing a system for obeying the gate.
+//
+// §1.3's own adversarial table says "Server reports higher | local converges
+// upward, NEVER above max_tokens", and §5.5 clamps for exactly that reason.
+// A residual measured against the RAW header would then report the whole
+// overshoot as divergence on the one condition the gate injects
+// deliberately. Both metrics subtract against ratelimit.ConvergenceTarget's
+// figure — min(server, max_tokens) — which is what the correction aimed at.
+func TestServerReadingAboveTheCeilingIsClampedBeforeSubtracting(t *testing.T) {
+	collector := NewGatewayCollector(nil, nil, stubDivergence{rows: freshReading([]DivergenceRow{
+		{Group: "generous", MaxTokens: 600,
+			LocalAtReading: int64p(600), ServerRemaining: int64p(700), LocalAfter: int64p(600)},
+	})}, nil, LiveThreshold, quietLogger())
+
+	expected := divergenceHelp + "esi_ledger_divergence{group=\"generous\"} 0\n"
+	if err := testutil.CollectAndCompare(collector, strings.NewReader(expected), "esi_ledger_divergence"); err != nil {
+		t.Errorf("a server reading above max_tokens must be clamped, not reported as divergence: %v", err)
+	}
+}
+
+// TestBucketWithNoPostCorrectionReadingEmitsNoSample covers the row shape a
+// database carried across migration 00043 produces: a server reading and a
+// pre-correction local from before the phase, and no residual until the
+// next reconcile. Half a pair is not a measurement, and this half's absence
+// must not read as perfect convergence — which is the single most
+// reassuring value the gauge has.
+func TestBucketWithNoPostCorrectionReadingEmitsNoSample(t *testing.T) {
+	collector := NewGatewayCollector(nil, nil, stubDivergence{rows: freshReading([]DivergenceRow{
+		{Group: "premigration", MaxTokens: 600, LocalAtReading: int64p(500), ServerRemaining: int64p(499)},
+	})}, nil, LiveThreshold, quietLogger())
+
+	if n := testutil.CollectAndCount(collector, "esi_ledger_divergence"); n != 0 {
+		t.Errorf("a bucket with no post-correction reading produced %d divergence samples, want 0", n)
+	}
+	if n := testutil.CollectAndCount(collector, "esi_ledger_prediction_error"); n != 0 {
+		t.Errorf("an incomplete row produced %d prediction-error samples, want 0 — "+
+			"both metrics must aggregate the same population, or comparing them is meaningless", n)
 	}
 }
 
@@ -102,13 +217,18 @@ func TestBucketWithNoServerReadingEmitsNoSample(t *testing.T) {
 // rule, and it is new in Phase 20.4 because the local half only became a
 // stored, nullable value in this phase (migration 00042).
 //
-// It has two real sources, not just a theoretical one: a bucket carried
-// across the migration keeps its server_remaining and has no paired local
-// reading until the next reconcile, and `solo` mode reconciles in process
-// and writes neither column. In both cases the honest answer is "no
-// reading", and it must not be reported as a divergence equal to the whole
-// server reading — which is what subtracting a zeroed nil would produce,
-// and which would look exactly like a catastrophically broken ledger.
+// It has a real source, not just a theoretical one: a bucket carried across
+// the migration keeps its server_remaining and has no paired local reading
+// until the next reconcile. The honest answer is "no reading", and it must
+// not be reported as a divergence equal to the whole server reading — which
+// is what subtracting a zeroed nil would produce, and which would look
+// exactly like a catastrophically broken ledger.
+//
+// (This comment used to name a SECOND source: "`solo` mode reconciles in
+// process and writes neither column". That was true, and it meant the gate's
+// metric had no samples at all at N=1 — see cmd/hangar's ledgerDivergence.
+// Phase 20.4.1 gave solo mode a scrape-time source of its own, so a nil
+// local reading no longer has a healthy explanation.)
 func TestBucketWithNoLocalReadingEmitsNoSample(t *testing.T) {
 	now := time.Now()
 	collector := NewGatewayCollector(nil, nil, stubDivergence{rows: []DivergenceRow{
@@ -236,15 +356,12 @@ func TestStaleServerReadingEmitsNoSample(t *testing.T) {
 func TestReadingInsideTheWindowStillCounts(t *testing.T) {
 	recent := time.Now().Add(-30 * time.Second)
 	collector := NewGatewayCollector(nil, nil, stubDivergence{rows: []DivergenceRow{
-		{Group: "busy", LocalAtReading: int64p(300), ServerRemaining: int64p(299), ObservedAt: &recent, Window: 15 * time.Minute},
+		{Group: "busy", MaxTokens: 600, LocalAtReading: int64p(300), ServerRemaining: int64p(299),
+			LocalAfter: int64p(299), ObservedAt: &recent, Window: 15 * time.Minute},
 	}}, nil, LiveThreshold, quietLogger())
 
-	expected := `
-# HELP esi_ledger_divergence Maximum absolute difference, across the buckets of a rate-limit group, between the local ledger's remaining count and the server's X-Ratelimit-Remaining. Gate 1.3 requires max <= 1 per group. Groups the server has not reported on emit no sample.
-# TYPE esi_ledger_divergence gauge
-esi_ledger_divergence{group="busy"} 1
-`
-	if err := testutil.CollectAndCompare(collector, strings.NewReader(expected), "esi_ledger_divergence"); err != nil {
+	expected := predictionErrorHelp + "esi_ledger_prediction_error{group=\"busy\"} 1\n"
+	if err := testutil.CollectAndCompare(collector, strings.NewReader(expected), "esi_ledger_prediction_error"); err != nil {
 		t.Error(err)
 	}
 }

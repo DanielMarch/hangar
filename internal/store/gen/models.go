@@ -730,8 +730,10 @@ type AppEsiLedgerBucket struct {
 	ServerRemaining  *int32
 	ServerObservedAt *time.Time
 	UpdatedAt        time.Time
-	// HANGAR's own remaining headroom as it stood at the instant server_remaining was recorded, under the same bucket lock — BEFORE the reconciliation correction. The other operand of esi_ledger_divergence (04_RELEASE_GATES.md §1.3). NULL means no reading, which is not a divergence of zero. Phase 20.4.
+	// HANGAR's own remaining headroom as it stood at the instant server_remaining was recorded, under the same bucket lock — BEFORE the reconciliation correction. Paired with server_remaining it is esi_ledger_prediction_error, which is RECORDED and not bounded: it is structurally proportional to the number of sibling requests in flight in this bucket, because reconciliation deliberately excludes reservations. NULL means no reading, which is not a prediction error of zero. Phase 20.4, re-scoped in 20.4.1.
 	LocalRemainingAtReading *int32
+	// HANGAR's own remaining headroom immediately AFTER the reconciliation correction, under the same bucket lock that wrote local_remaining_at_reading and server_remaining. esi_ledger_divergence (04_RELEASE_GATES.md §1.3, as amended by Phase 20.4.1) is |this - least(server_remaining, max_tokens)|, and its bound is 0: non-zero means the reconciler COULD NOT converge. NULL means no reading, which is not a divergence of zero. Phase 20.4.1.
+	LocalRemainingAfterReading *int32
 }
 
 type AppEsiLedgerEntry struct {

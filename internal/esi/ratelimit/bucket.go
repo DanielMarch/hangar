@@ -54,6 +54,27 @@ type bucket struct {
 	// reserved is keyed by entry ID so Settle can find and remove its
 	// reservation directly rather than scanning.
 	reserved map[uuid.UUID]reservedEntry
+
+	// PHASE 20.4.1: the reconciler's own arithmetic, kept so that solo mode
+	// can be MEASURED. These are the in-memory counterpart of
+	// app.esi_ledger_bucket's server_remaining / local_remaining_at_reading
+	// / local_remaining_after_reading — see reading below for why the solo
+	// path could not be measured at all before this.
+	lastReading reading
+	hasReading  bool
+}
+
+// reading is one reconcile's before/after pair, as the solo ledger holds it.
+// The clustered ledger stores the same three numbers as bucket-row columns;
+// this struct exists so the two modes report the SAME metric rather than
+// one of them reporting nothing.
+type reading struct {
+	serverRemaining int
+	localAtReading  int
+	localAfter      int
+	observedAt      time.Time
+	window          time.Duration
+	maxTokens       int
 }
 
 func newBucket(maxTokens int, window time.Duration) *bucket {
@@ -197,15 +218,38 @@ func (b *bucket) injectSynthetic(cost int16, now time.Time) {
 	heap.Push(&b.ledger, ledgerEntry{cost: cost, consumedAt: now})
 }
 
-// evictOldestUntil pops oldest ledger entries (never reservations) until
-// SETTLED availability would reach at least target, or the ledger is
-// exhausted. Settled, for the same reason Reconcile compares against
-// settled: the target came from the server, and the server has not counted
-// the in-flight reservations.
-func (b *bucket) evictOldestUntil(target int) {
-	for b.settledAvailable() < target && b.ledger.Len() > 0 {
-		heap.Pop(&b.ledger)
+// evictOldestUntil forgives oldest ledger entries (never reservations)
+// until SETTLED availability reaches target, or the ledger is exhausted,
+// and returns the availability it achieved. Settled, for the same reason
+// Reconcile compares against settled: the target came from the server, and
+// the server has not counted the in-flight reservations.
+//
+// PHASE 20.4.1: the boundary entry is REDUCED, not popped — the solo
+// counterpart of ReduceLedgerEntryCost, and it must stay identical to it,
+// because TestSoloAndClusteredConvergeIdentically compares the two ledgers
+// against the same script. Mutating cost in place is safe: the heap is
+// ordered by consumedAt, which this does not touch.
+func (b *bucket) evictOldestUntil(target int) int {
+	for {
+		available := b.settledAvailable()
+		deficit := target - available
+		if deficit <= 0 || b.ledger.Len() == 0 {
+			return available
+		}
+		head := b.ledger[0]
+		if int(head.cost) <= deficit {
+			heap.Pop(&b.ledger)
+			continue
+		}
+		b.ledger[0].cost -= int16(deficit)
+		return target
 	}
+}
+
+// recordReading stores the reconciler's before/after pair so solo mode is
+// visible to esi_ledger_divergence and esi_ledger_prediction_error.
+func (b *bucket) recordReading(r reading) {
+	b.lastReading, b.hasReading = r, true
 }
 
 // fixHeap restores the heap invariant after entries have been appended
