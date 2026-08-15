@@ -118,11 +118,21 @@ func run() error {
 		switch r.URL.Path {
 		case catalogue.CompatibilityDatesPath:
 			w.Header().Set("Content-Type", "application/json")
+			// The OBJECT shape ESI actually returns, which
+			// fetchCompatibilityDates decodes into
+			// {"compatibility_dates": [...]}. A bare array decodes to an
+			// error, the whole fetch fails, and Boot falls back to the
+			// EMBEDDED SNAPSHOT — which is a silent, complete defeat of this
+			// gate: it would then assert the four synthetic outcomes against
+			// the real spec, find none of them, and report four failures
+			// that say nothing about spec-drift resilience. It did exactly
+			// that on the first run.
+			//
 			// D_max is deliberately later than the synthetic route's own
 			// compatibility date, so the spec is fetched at a date that
 			// INCLUDES the post-pin route. A D_max that hid it would make
 			// condition (a) unobservable.
-			_, _ = w.Write([]byte(`["2026-09-03"]`))
+			_, _ = w.Write([]byte(`{"compatibility_dates":["2026-09-03"]}`))
 		case catalogue.OpenAPIPath:
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write(spec)

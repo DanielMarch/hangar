@@ -393,14 +393,21 @@ func specServingProxy(proxy *load.Proxy, spec []byte) http.Handler {
 // the embedded snapshot was captured at, so D_max discovery resolves to the
 // spec actually being served rather than to a date with no document behind
 // it.
-func compatibilityDates(spec []byte) []byte {
+//
+// The shape is the OBJECT ESI returns and internal/esi/catalogue decodes,
+// `{"compatibility_dates": [...]}`. A bare array decodes to an error and
+// Boot falls back to the embedded snapshot — silently, because an offline
+// boot is a supported outcome. The installation would still run (the
+// snapshot IS this spec), but the run's claim that the catalogue and the
+// proxy come from the same server would be false.
+func compatibilityDates(_ []byte) []byte {
 	_, meta, err := catalogue.LoadEmbeddedSnapshot()
 	if err != nil || meta.DMax == "" {
-		return []byte(`[]`)
+		return []byte(`{"compatibility_dates":[]}`)
 	}
-	out, err := json.Marshal([]string{meta.DMax})
+	out, err := json.Marshal(map[string][]string{"compatibility_dates": {meta.DMax}})
 	if err != nil {
-		return []byte(`[]`)
+		return []byte(`{"compatibility_dates":[]}`)
 	}
 	return out
 }
