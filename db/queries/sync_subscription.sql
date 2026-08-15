@@ -201,6 +201,46 @@ SELECT 'corporation', c.corporation_id, r.route_id, c.character_id
                    WHERE s.character_id = c.character_id))
 ON CONFLICT (entity_kind, entity_id, route_id) DO NOTHING;
 
+-- name: ReconcileAllianceSubscriptions :execrows
+-- PHASE 20.8 — capability #37. Alliance-scoped routes, gated on the acting
+-- character's scopes for the same reason the corporation statement is: an
+-- alliance has no token of its own, so §6.3 elects a character to act for
+-- it. The candidate must be IN the alliance, which is what the join through
+-- app.corporation expresses — a character's alliance is its corporation's.
+--
+-- This is ordered even more deeply than the corporation pass: it can only
+-- produce a row once app.character.corporation_id AND
+-- app.corporation.alliance_id are both populated, and those come from a
+-- character route and a corporation route respectively. So an installation
+-- reaches alliance subscriptions on the third reconciliation at the
+-- earliest, which is why reconciliation is periodic rather than a single
+-- pass at link time.
+--
+-- An installation whose characters are in no alliance produces NO rows here,
+-- which is not a failure: app.alliance is empty, there is no alliance to
+-- poll, and no subscription should exist. That is the state of the
+-- development installation this was written on.
+INSERT INTO app.sync_subscription (entity_kind, entity_id, route_id, acting_character_id)
+SELECT 'alliance', corp.alliance_id, r.route_id, c.character_id
+  FROM app.character c
+  JOIN app.character_token t ON t.character_id = c.character_id AND t.valid
+  JOIN app.corporation corp ON corp.corporation_id = c.corporation_id
+  JOIN app.esi_route r
+    ON r.method = 'GET'
+   AND r.retired_at IS NULL
+   AND NOT r.blocked_by_pin
+   AND r.upstream_path = ANY(sqlc.arg(paths)::text[])
+ WHERE corp.alliance_id IS NOT NULL
+   AND c.deleted_at IS NULL
+   AND NOT EXISTS (
+         SELECT 1
+           FROM app.esi_route_scope rs
+          WHERE rs.route_id = r.route_id
+            AND rs.scope NOT IN (
+                  SELECT s.scope FROM app.character_token_scope s
+                   WHERE s.character_id = c.character_id))
+ON CONFLICT (entity_kind, entity_id, route_id) DO NOTHING;
+
 -- name: ReconcileGlobalSubscriptions :execrows
 -- Global routes (/status, sovereignty) belong to no owner: entity_id = 0 per
 -- internal/sync.EntityGlobal, and acting_character_id stays NULL because

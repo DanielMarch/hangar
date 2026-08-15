@@ -128,6 +128,31 @@ type detailFanout struct {
 	// instead of re-walking every page.
 	etag *string
 
+	// forbiddenIsData makes a 403 on ONE item skip that item and continue,
+	// instead of ending the pass.
+	//
+	// ── PHASE 20.8: WHY THE DEFAULT IS WRONG FOR EXACTLY ONE ROUTE ───────
+	// The default (below) aborts the pass on the first 403, and its stated
+	// premise is that "per-role 403s are almost always homogeneous across
+	// every item of the same owner/route" — which is true when the 403 is
+	// about the TOKEN: a character without Accountant is refused every
+	// division's journal, and burning the whole item set to rediscover that
+	// wastes Governor 2's budget.
+	//
+	// /universe/structures/{structure_id} breaks that premise, and is the
+	// only route here that does. Its 403 is per-STRUCTURE: an Upwell
+	// structure's ACL decides who may dock, so a character can be refused
+	// one structure and served the next, and refusing to look at the next is
+	// discarding data over an answer that was itself data. The 403 cannot be
+	// the token-shaped kind on a running installation, because the
+	// subscription reconciler's scope gate never creates a subscription for
+	// a route whose scopes the acting token lacks.
+	//
+	// It is a field rather than a route check inside the loop so that the
+	// reasoning lives with the route that needs it, and so that a second
+	// route claiming the behaviour has to say so out loud.
+	forbiddenIsData bool
+
 	// on403 runs extra bookkeeping beyond RecordSync403 (the corporation
 	// elector's per-candidate history). nil is valid and means "nothing
 	// beyond the subscription's own counter".
@@ -153,6 +178,7 @@ type detailFanout struct {
 // forever.
 func runDetailFanout(ctx context.Context, gw *esi.Client, policy sync.PolicyConfig, s *store.Store, f detailFanout) (rowsAffected int32, outcome string, err error) {
 	outcome = "200"
+	forbidden := 0
 	for _, item := range f.items {
 		pathParams := map[string]string{
 			f.ownerParam: strconv.FormatInt(f.ownerID, 10),
@@ -198,6 +224,15 @@ func runDetailFanout(ctx context.Context, gw *esi.Client, policy sync.PolicyConf
 		case http.StatusNotFound:
 			continue
 		case http.StatusForbidden:
+			if f.forbiddenIsData {
+				// Deliberately NOT RecordSync403: consecutive_403 drives the
+				// §5.8 breaker and the elector's penalty, and both would be
+				// reading "the token cannot do this" from an answer that says
+				// "this one item is not visible to you". The item is skipped
+				// and the pass continues.
+				forbidden++
+				continue
+			}
 			if err := s.RecordSync403(ctx, f.sub.SubscriptionID); err != nil {
 				return rowsAffected, normalize.Outcome(resp.StatusCode, false), err
 			}
@@ -213,6 +248,15 @@ func runDetailFanout(ctx context.Context, gw *esi.Client, policy sync.PolicyConf
 		default:
 			return rowsAffected, normalize.Outcome(resp.StatusCode, false), fmt.Errorf("worker: detail id %s of %s returned status %d", item.pathValue(), f.route.UpstreamPath, resp.StatusCode)
 		}
+	}
+
+	// A pass in which EVERY item was refused reports 403, not 200. The
+	// subscription's own counter is deliberately untouched (see
+	// forbiddenIsData), but the sync_run row and the admin board must not
+	// show a green 200 over a set nothing in it could be read — that is
+	// precisely the shape of failure this phase's capabilities were hiding.
+	if forbidden > 0 && forbidden == len(f.items) {
+		outcome = "403"
 	}
 
 	next, err := sync.PlanNextDueAt(sync.DueTimeInput{

@@ -101,13 +101,13 @@ var capabilitySpecs = map[int]CapabilitySpec{
 	},
 	8: {
 		Routes:    []string{"/characters/{character_id}/fittings"},
-		Endpoints: []string{"/api/v1/characters/{id}/fittings", "/api/v1/characters/{id}/fittings/{fitting_id}/eft"},
+		Endpoints: []string{"/api/v1/characters/{id}/fittings", "/api/v1/characters/{id}/fittings/{sub_id}/eft"},
 		// PHASE 20.7 (B48): sync handler written and dispatched; verified on
 		// the live installation (1 fitting, 32 items, EFT export renders).
 		// The SPA screen was added in the same phase — capability #8 had a
 		// SECOND gap behind the writer: no fittings component and no route
 		// existed, so the data was invisible in the app even once it landed.
-		Phase: "7", Test: "(none automated yet — live-verified in 20.7; see defect B51)",
+		Phase: "7", Test: "TestSyncCharacterFittings",
 	},
 	9: {
 		Routes: []string{
@@ -203,7 +203,7 @@ var capabilitySpecs = map[int]CapabilitySpec{
 		Routes:      []string{"/corporations/{corporation_id}/assets"},
 		Controllers: []string{"CorporationController"},
 		Endpoints:   []string{"/api/v1/corporations/{id}/assets"},
-		Phase:       "20.6", Test: "TestEveryCatalogedGetRouteIsClassified",
+		Phase:       "20.6", Test: "TestSyncCorporationAssets",
 	},
 	19: {
 		Routes:      []string{"/corporations/{corporation_id}/blueprints"},
@@ -371,7 +371,7 @@ var capabilitySpecs = map[int]CapabilitySpec{
 			"/markets/{region_id}/orders",
 			"/markets/{region_id}/types",
 		},
-		Endpoints: []string{"/api/v1/market/prices"},
+		Endpoints: []string{"/api/v1/markets/prices"},
 		Phase:     "9", Test: "TestSyncMarketPrices",
 	},
 
@@ -391,7 +391,7 @@ var capabilitySpecs = map[int]CapabilitySpec{
 		// need a global fan-out over app.alliance, and CONTACTS additionally
 		// needs an alliance-scoped acting-character elector that has no
 		// worker at all. See internal/sync/worker/unmapped.go.
-		Phase: "9", Test: "(none — no route dispatched; blocked, see unmapped.go)",
+		Phase: "20.8", Test: "TestSyncAlliance",
 	},
 	38: {
 		Routes: []string{
@@ -418,7 +418,7 @@ var capabilitySpecs = map[int]CapabilitySpec{
 		// — CEODude has no kills in ESI's recent window. The /api/v2 shim's
 		// three killmail routes remain UNSERVABLE, blocked on legacy's
 		// `attacker_hash` surrogate (internal/api/v2shim/classification.go).
-		Phase: "9", Test: "(none automated yet — live-verified in 20.7; see defect B51)",
+		Phase: "9", Test: "TestSyncKillmails",
 	},
 
 	// ── Utilities (40–44) ────────────────────────────────────────────────
@@ -441,14 +441,14 @@ var capabilitySpecs = map[int]CapabilitySpec{
 		// neither route is dispatched: both need a fan-out over the location
 		// ids HANGAR has seen in its own synced rows, and that enumeration
 		// query has not been written.
-		Phase: "15", Test: "(none — no route dispatched; blocked, see unmapped.go)",
+		Phase: "20.8", Test: "TestSyncLocationResolution",
 	},
 	42: {
 		Routes:    []string{"/insurance/prices"},
 		Endpoints: []string{"/api/v1/tools/insurance"},
 		// PHASE 20.7 (B48): global dispatch entry; verified on the live
 		// installation landing 3,414 rows.
-		Phase: "15", Test: "(none automated yet — live-verified in 20.7; see defect B51)",
+		Phase: "15", Test: "TestSyncInsurancePrices",
 	},
 	43: {
 		Endpoints: []string{"/api/v1/tools/character/{id}/notes"},
@@ -467,7 +467,7 @@ var capabilitySpecs = map[int]CapabilitySpec{
 		// hard-coded `"healthy": true` replaced by a value derived from CCP's
 		// own per-route statuses. Verified live: 229 routes, 0 down, 0
 		// degraded.
-		Phase: "15.1", Test: "(none automated yet — live-verified in 20.7; see defect B51)",
+		Phase: "15.1", Test: "TestSyncEsiStatus",
 	},
 	46: {
 		Routes:    []string{"/status"},
@@ -477,22 +477,30 @@ var capabilitySpecs = map[int]CapabilitySpec{
 
 	// ── Admin & Auth (47–52), Squads (53–55), Alerts (56–58) ─────────────
 	// HANGAR-native: no upstream ESI route delivers any of these.
-	47: {Endpoints: []string{"/api/v1/admin/tokens"}, Controllers: []string{"UserController"}, Phase: "18", Test: "TestApiTokenScopeCap"},
+	47: {Endpoints: []string{"/api/v1/api-tokens"}, Controllers: []string{"UserController"}, Phase: "18", Test: "TestApiTokenScopeCap"},
 	48: {Endpoints: []string{"/api/v1/admin/scopes"}, Phase: "18", Test: "TestScopeAdministration"},
-	49: {Endpoints: []string{"/api/v1/admin/pin"}, Phase: "17", Test: "TestCompatibilityPinAdvance"},
+	49: {Endpoints: []string{"/api/v1/admin/esi/catalogue/pin"}, Phase: "17", Test: "TestCompatibilityPinAdvance"},
 	50: {Endpoints: []string{"/api/v1/admin/users"}, Controllers: []string{"UserController", "RoleLookupController"}, Phase: "18", Test: "TestUserAdministration"},
-	51: {Endpoints: []string{"/api/v1/admin/audit"}, Phase: "18", Test: "TestAuditLog"},
-	52: {Endpoints: []string{"/api/v1/admin/sync", "/api/v1/admin/routes"}, Controllers: []string{"RoleController"}, Phase: "20.1", Test: "TestAdminSyncBoard"},
+	51: {Endpoints: []string{"/api/v1/admin/security-log"}, Phase: "18", Test: "TestAuditLog"},
+	52: {Endpoints: []string{"/api/v1/admin/sync", "/api/v1/admin/sync/routes"}, Controllers: []string{"RoleController"}, Phase: "20.1", Test: "TestAdminSyncBoard"},
 	53: {Endpoints: []string{"/api/v1/squads"}, Controllers: []string{"SquadController"}, Phase: "16", Test: "TestSquadCRUD"},
 	54: {Endpoints: []string{"/api/v1/squads/{id}/members"}, Controllers: []string{"SquadController"}, Phase: "16", Test: "TestSquadMembers"},
 	55: {Endpoints: []string{"/api/v1/squads/{id}/roles"}, Controllers: []string{"SquadController"}, Phase: "16", Test: "TestSquadRoles"},
-	56: {Endpoints: []string{"/api/v1/admin/webhooks", "/api/v1/admin/platforms"}, Phase: "20.5", Test: "TestWebhookRotationOverlap"},
+	56: {Endpoints: []string{"/api/v1/me/webhooks", "/api/v1/admin/platforms"}, Phase: "20.5", Test: "TestWebhookRotationOverlap"},
 	57: {
 		AlertTypes: []string{"54 seeded (42 esi_notification, 9 domain_event, 4 threshold), 8 domains"},
 		Endpoints:  []string{"/api/v1/admin/alerts"},
 		Phase:      "20.4", Test: "TestAlertCatalogueComplete",
 	},
-	58: {Endpoints: []string{"/api/v1/meta/locales"}, Phase: "3", Test: "TestLocaleResolutionExhaustive"},
+	// #58 Localisation has NO HANGAR ENDPOINT, and the empty list is the
+	// finding rather than an omission (defect B52). The matrix claimed
+	// /api/v1/meta/locales, which has never been registered in any spelling:
+	// HANGAR's locale is an installation-wide boot setting (HANGAR_LOCALE,
+	// rejected at boot by internal/config if unsupported, resolved to an ESI
+	// Accept-Language by internal/i18n), not a resource a client asks for.
+	// Naming a fictional endpoint made the row look delivered by machinery
+	// nobody could call; naming none says what is true.
+	58: {Phase: "3", Test: "TestLocaleResolutionExhaustive"},
 }
 
 func capabilitySpec(id int) CapabilitySpec { return capabilitySpecs[id] }

@@ -29,6 +29,7 @@ type DispatchWorker struct {
 
 	Character   *CharacterWorker
 	Corporation *CorporationWorker
+	Alliance    *AllianceWorker
 	Global      *GlobalWorker
 }
 
@@ -45,6 +46,15 @@ func (w *DispatchWorker) Work(ctx context.Context, job *river.Job[planner.SyncJo
 			return fmt.Errorf("worker: dispatch received a corporation subscription %s but no CorporationWorker is configured", job.Args.SubscriptionID)
 		}
 		return w.Corporation.Work(ctx, job)
+	case sync.EntityAlliance:
+		// PHASE 20.8 (capability #37). The fourth arm; §6.3's election is
+		// per-alliance and its candidate pool is alliance-wide, which is why
+		// this is its own worker rather than a corporation subscription with
+		// a different id.
+		if w.Alliance == nil {
+			return fmt.Errorf("worker: dispatch received an alliance subscription %s but no AllianceWorker is configured", job.Args.SubscriptionID)
+		}
+		return w.Alliance.Work(ctx, job)
 	case sync.EntityGlobal:
 		if w.Global == nil {
 			return fmt.Errorf("worker: dispatch received a global subscription %s but no GlobalWorker is configured", job.Args.SubscriptionID)

@@ -54,6 +54,11 @@ func fanoutRoutes() map[string]sync.EntityKind {
 		// fetched, so there would be nothing for it to enumerate.
 		characterKillmailsPath: sync.EntityCharacter,
 
+		// PHASE 20.8 (capability #41). Structure resolution is character-
+		// scoped because docking access is per character; the enumeration is
+		// that character's own rows. See character.go's structureDetailPath.
+		structureDetailPath: sync.EntityCharacter,
+
 		// Corporation-owned detail and per-division fan-outs.
 		walletJournalPath:         sync.EntityCorporation,
 		walletTransactionsPath:    sync.EntityCorporation,
@@ -71,9 +76,17 @@ func fanoutRoutes() map[string]sync.EntityKind {
 		projectContributionPath:  sync.EntityCorporation,
 		corporationKillmailsPath: sync.EntityCorporation,
 
-		// Global fan-out: one subscription, fanning out over the
-		// (region_id, type_id) pairs this installation actually tracks.
+		// Global fan-outs: one subscription each, fanning out over ids this
+		// installation's own rows already carry — the (region_id, type_id)
+		// pairs it trades in, and (PHASE 20.8, capability #41) the NPC
+		// stations it has not yet resolved. Both are unauthenticated, which
+		// is what makes a global subscription legitimate for them:
+		// ReconcileGlobalSubscriptions has no scope gate (a global row has no
+		// acting character to gate on), so a SCOPED route in this set would
+		// be created enabled and 403 forever. TestGlobalRoutesRequireNoScope
+		// holds that invariant.
 		marketHistoryPath: sync.EntityGlobal,
+		stationDetailPath: sync.EntityGlobal,
 	}
 }
 
@@ -92,12 +105,18 @@ func fanoutRoutes() map[string]sync.EntityKind {
 // A fresh map is returned per call; callers may mutate it freely.
 func SubscribableRoutes() map[string]sync.EntityKind {
 	fanout := fanoutRoutes()
-	out := make(map[string]sync.EntityKind, len(characterDispatch)+len(corporationDispatch)+len(globalDispatch)+len(fanout))
+	out := make(map[string]sync.EntityKind, len(characterDispatch)+len(corporationDispatch)+len(allianceDispatch)+len(globalDispatch)+len(fanout))
 	for path := range characterDispatch {
 		out[path] = sync.EntityCharacter
 	}
 	for path := range corporationDispatch {
 		out[path] = sync.EntityCorporation
+	}
+	// PHASE 20.8 (capability #37): the fourth dispatch table. All four
+	// alliance routes take the alliance id as their only path parameter, so
+	// none of them is a fan-out — see worker/alliance.go.
+	for path := range allianceDispatch {
+		out[path] = sync.EntityAlliance
 	}
 	for path := range globalDispatch {
 		out[path] = sync.EntityGlobal

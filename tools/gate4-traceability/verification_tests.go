@@ -37,8 +37,35 @@ import (
 	"strings"
 )
 
+// minAssertions is how many assertions a cited test must make before this
+// program will accept it as evidence.
+//
+// ── WHY EXISTENCE IS NOT ENOUGH (PHASE 20.8) ─────────────────────────────
+// 20.7's checker asked one question — does the named test exist — and that
+// was the right question then, because forty-two of them did not. Once they
+// do, the question has a new wrong answer available: a function named
+// TestSyncAssets that asserts nothing satisfies an existence check and is a
+// WORSE artefact than the missing test was, because it looks checked.
+//
+// Three is deliberately low. It is not a quality bar and cannot be: no
+// counting rule distinguishes a good test from a bad one. It is a floor
+// under the specific failure this file exists to prevent — the empty
+// function written to make a gate pass — and every real test in this tree
+// clears it by a wide margin.
+const minAssertions = 3
+
 var (
 	testFuncRe = regexp.MustCompile(`(?m)^func (Test\w+)`)
+
+	// assertionRe counts the ways this tree's tests assert. testify's
+	// require/assert dominate; t.Error/t.Fatal cover the handful of
+	// hand-rolled checks (internal/api's generated_test.go, the reachability
+	// suite) that predate it; and `requireSomething(` catches the shared
+	// helpers test/capability's harness factors out — requireDispatched,
+	// requireEndpoints, requireDTOCoversSpec. Those ARE assertions, each
+	// wrapping several require calls of its own, and not counting them would
+	// penalise the tests that factored their checks out properly.
+	assertionRe = regexp.MustCompile(`\b(?:require|assert)\.\w+\(|\bt\.(?:Error|Errorf|Fatal|Fatalf)\(|\brequire[A-Z]\w*\(`)
 
 	// skippedDirs are trees with no Go tests worth scanning. web/node_modules
 	// in particular is large enough that walking it dominates the run.
@@ -48,9 +75,13 @@ var (
 )
 
 // collectGoTestNames returns every Go test function name defined in the
-// repository.
-func collectGoTestNames(repoRoot string) (map[string]bool, error) {
-	names := map[string]bool{}
+// repository, mapped to how many assertions its body makes.
+//
+// The body is taken as the text between one `func Test...` and the next
+// top-level `func`, which is exact for gofmt'd source: gofmt puts every
+// top-level declaration at column zero and nothing else there.
+func collectGoTestNames(repoRoot string) (map[string]int, error) {
+	names := map[string]int{}
 	err := filepath.WalkDir(repoRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -68,8 +99,17 @@ func collectGoTestNames(repoRoot string) (map[string]bool, error) {
 		if readErr != nil {
 			return fmt.Errorf("reading %s: %w", path, readErr)
 		}
-		for _, m := range testFuncRe.FindAllStringSubmatch(string(src), -1) {
-			names[m[1]] = true
+		text := string(src)
+		for _, loc := range testFuncRe.FindAllStringSubmatchIndex(text, -1) {
+			name := text[loc[2]:loc[3]]
+			body := text[loc[1]:nextTopLevelFunc(text, loc[1])]
+			n := len(assertionRe.FindAllString(body, -1))
+			// A name may legitimately be defined twice — a unit half and a
+			// build-tagged integration half. Keep the LARGER count so the
+			// order of the directory walk cannot change the verdict.
+			if existing, seen := names[name]; !seen || n > existing {
+				names[name] = n
+			}
 		}
 		return nil
 	})
@@ -79,8 +119,20 @@ func collectGoTestNames(repoRoot string) (map[string]bool, error) {
 	return names, nil
 }
 
+// nextTopLevelFunc returns the offset of the next top-level `func` at or
+// after from, or len(text) if there is none. Column zero is the whole test:
+// gofmt indents everything inside a declaration, so a `func` at the start of
+// a line is always the next declaration and never a closure.
+func nextTopLevelFunc(text string, from int) int {
+	if idx := strings.Index(text[from:], "\nfunc "); idx >= 0 {
+		return from + idx
+	}
+	return len(text)
+}
+
 // checkVerificationTests reports every capability row whose named
-// verification test does not exist in the tree.
+// verification test does not exist in the tree, or exists and asserts
+// almost nothing.
 //
 // A row whose Test field is parenthetical — "(none — no sync handler
 // exists)" and its kin — is NOT reported here. Those are explicit
@@ -108,8 +160,16 @@ func checkVerificationTests(repoRoot string, rows []CapabilityRow) ([]string, er
 			if candidate == "" || !strings.HasPrefix(candidate, "Test") {
 				continue
 			}
-			if !defined[candidate] {
-				missing = append(missing, fmt.Sprintf("capability %d names %s, which is not defined anywhere in the tree", row.ID, candidate))
+			assertions, exists := defined[candidate]
+			switch {
+			case !exists:
+				missing = append(missing, fmt.Sprintf(
+					"capability %d names %s, which is not defined anywhere in the tree", row.ID, candidate))
+			case assertions < minAssertions:
+				missing = append(missing, fmt.Sprintf(
+					"capability %d names %s, which exists but makes only %d assertion(s) — a test that asserts "+
+						"nothing is worse evidence than a missing one, because it looks checked",
+					row.ID, candidate, assertions))
 			}
 		}
 	}

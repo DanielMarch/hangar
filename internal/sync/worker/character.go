@@ -81,6 +81,31 @@ const (
 	// could hold corporation rows and never a character's.
 	characterContractItemsPath = "/characters/{character_id}/contracts/{contract_id}/items"
 	characterContractBidsPath  = "/characters/{character_id}/contracts/{contract_id}/bids"
+
+	// ── PHASE 20.8: CAPABILITY #41's STRUCTURE HALF ──────────────────────
+	// This path contains NO character placeholder. It is a character-scoped
+	// subscription anyway, and that is the design rather than an accident:
+	// the route needs esi-universe.read_structures.v1 and DOCKING ACCESS,
+	// and docking access is granted per character by the structure's own
+	// ACL. Subscribing per character means the enumeration
+	// (ListCharacterStructureIDs) asks each token only about the structures
+	// that character's own rows already sit in — ids it has demonstrably
+	// proven access to — instead of asking one token about every structure
+	// the installation has ever seen and collecting a 403 per item.
+	//
+	// The station half is the opposite shape and is a GLOBAL subscription
+	// (worker/global.go): it is unauthenticated, so there is no token whose
+	// access could differ, and one pass for the installation is right.
+	structureDetailPath = "/universe/structures/{structure_id}"
+
+	// maxStructureResolutions bounds one character's structure pass. The set
+	// is already bounded by that character's own rows, but "own rows" for a
+	// character in a large alliance with corporation structures is not
+	// self-evidently small, and this route carries no x-rate-limit group in
+	// the catalogue — so Governor 1 does not throttle it and Governor 2's
+	// installation-wide error budget is all that stands behind it. Same
+	// reasoning, and the same shape, as maxMarketHistoryPairs.
+	maxStructureResolutions = 500
 )
 
 // characterHandler is the shape every character-domain sync function in
@@ -356,6 +381,9 @@ func (w *CharacterWorker) Work(ctx context.Context, job *river.Job[planner.SyncJ
 		// killmail's detail. See killmail_fanout.go for why both stages live
 		// in one subscription.
 		rowsAffected, outcome, syncErr = w.doKillmailFanout(ctx, s, sub, route, args.EntityID, tok.Value)
+	case structureDetailPath:
+		// PHASE 20.8 (capability #41).
+		rowsAffected, outcome, syncErr = w.doStructureFanout(ctx, s, sub, route, args.EntityID, tok.Value)
 	default:
 		handler, ok := characterDispatch[route.UpstreamPath]
 		if !ok {
@@ -781,6 +809,56 @@ func (w *CharacterWorker) doContractBidsFanout(ctx context.Context, s *store.Sto
 			}
 			return res.RowsAffected, nil
 		})
+}
+
+// doStructureFanout resolves every Upwell structure this character's own
+// rows reference into app.location — Appendix A capability #41's structure
+// half, and the reason UpsertLocation had no production caller until this
+// phase.
+//
+// It calls runDetailFanout directly rather than through w.fanoutDetail
+// because it is the one fan-out in HANGAR whose 403 is DATA, and
+// forbiddenIsData is not something a shared wrapper should be able to set by
+// accident — see the field's comment in worker/fanout.go.
+//
+// AN EMPTY ITEM SET IS A COMPLETE PASS. On an installation whose characters
+// keep nothing in a structure, this resolves nothing and records a success,
+// which is correct and is NOT the same thing as the capability being
+// unreachable. The difference is visible: a subscription exists, it runs, and
+// its sync_run rows say 0 — as opposed to no subscription at all, which is
+// what every installation had before this phase.
+func (w *CharacterWorker) doStructureFanout(ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute, characterID int64, accessToken string) (int32, string, error) {
+	ids, err := s.ListCharacterStructureIDs(ctx, characterID, maxStructureResolutions)
+	if err != nil {
+		return 0, "", fmt.Errorf("worker: listing structure ids seen by character %d: %w", characterID, err)
+	}
+	items := make([]fanoutDetailItem, len(ids))
+	for i, id := range ids {
+		items[i] = fanoutDetailItem{id: id}
+	}
+
+	return runDetailFanout(ctx, w.Gateway, w.Policy, s, detailFanout{
+		sub: sub, route: route,
+		// ownerParam names a placeholder this path does not contain;
+		// esi.Client.buildURL ignores path params with no matching
+		// placeholder, which is what lets one engine serve owned and unowned
+		// detail routes alike (the killmail detail route relies on the same).
+		ownerParam: "character_id", ownerID: characterID, idParam: "structure_id",
+		actingCharacterID: characterID, entityID: characterID, accessToken: accessToken,
+		items:           items,
+		forbiddenIsData: true,
+		syncOne: func(ctx context.Context, s *store.Store, item fanoutDetailItem, body []byte) (int32, error) {
+			dto, perr := handlers.ParseStructure(body)
+			if perr != nil {
+				return 0, perr
+			}
+			res, serr := handlers.SyncStructure(ctx, s, item.id, dto)
+			if serr != nil {
+				return 0, serr
+			}
+			return res.RowsAffected, nil
+		},
+	})
 }
 
 // knownContractItems is the contract set both character contract fan-outs

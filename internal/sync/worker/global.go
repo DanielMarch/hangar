@@ -114,6 +114,35 @@ const (
 	insurancePricesPath = "/insurance/prices"
 	metaStatusPath      = "/meta/status"
 
+	// ── PHASE 20.8: CAPABILITY #41's STATION HALF ────────────────────────
+	// Global rather than per-character because the route is unauthenticated:
+	// there is no token whose docking access could make one caller's answer
+	// differ from another's, so resolving a station once for the whole
+	// installation is both correct and the cheapest possible shape. Its
+	// structure twin is character-scoped for exactly the opposite reason —
+	// see structureDetailPath in worker/character.go.
+	stationDetailPath = "/universe/stations/{station_id}"
+
+	// maxStationResolutions bounds one pass. The enumeration only returns
+	// stations HANGAR has NOT yet resolved (reference.sql's
+	// ListUnresolvedStationIDs), so in steady state it is zero and this cap
+	// only ever bites on the first pass of an installation that has just
+	// imported a large asset set.
+	maxStationResolutions = 500
+)
+
+// globalFanoutRoutes are the global routes whose pass makes MORE than the
+// single upstream call a globalDispatch entry describes, and which therefore
+// have no entry in that table. Listing them explicitly is what lets
+// GlobalWorker.Work say "no handler registered" for a genuinely unknown
+// route instead of silently taking the fan-out branch for it.
+var globalFanoutRoutes = map[string]bool{
+	marketHistoryPath: true,
+	stationDetailPath: true,
+}
+
+const (
+
 	// maxMarketHistoryPairs bounds one pass of the market-history fan-out.
 	//
 	// The pair set comes from app.market_order (ListMarketHistoryPairs), so
@@ -167,7 +196,7 @@ func (w *GlobalWorker) Work(ctx context.Context, job *river.Job[planner.SyncJobA
 	}
 
 	var handler globalHandler
-	if route.UpstreamPath != marketHistoryPath {
+	if !globalFanoutRoutes[route.UpstreamPath] {
 		h, ok := globalDispatch[route.UpstreamPath]
 		if !ok {
 			return fmt.Errorf("worker: no global handler registered for route %s (%s)", route.UpstreamPath, route.OperationID)
@@ -183,9 +212,12 @@ func (w *GlobalWorker) Work(ctx context.Context, job *river.Job[planner.SyncJobA
 	var rowsAffected int32
 	var outcome string
 	var syncErr error
-	if route.UpstreamPath == marketHistoryPath {
+	switch route.UpstreamPath {
+	case marketHistoryPath:
 		rowsAffected, outcome, syncErr = w.doMarketHistoryFanout(ctx, s, sub, route)
-	} else {
+	case stationDetailPath:
+		rowsAffected, outcome, syncErr = w.doStationFanout(ctx, s, sub, route)
+	default:
 		rowsAffected, outcome, syncErr = w.doSync(ctx, s, sub, route, handler)
 	}
 
@@ -280,6 +312,94 @@ func (w *GlobalWorker) doSync(ctx context.Context, s *store.Store, sub gen.AppSy
 	default:
 		return 0, outcome, fmt.Errorf("worker: unexpected status %d from %s", resp.StatusCode, route.UpstreamPath)
 	}
+}
+
+// doStationFanout resolves the NPC stations HANGAR's own rows reference into
+// app.location — Appendix A capability #41's station half.
+//
+// ── WHY THIS IS A GLOBAL FAN-OUT ─────────────────────────────────────────
+// /universe/stations/{station_id} is unauthenticated and takes one path
+// parameter that no subscription row can carry, which is the same position
+// /markets/{region_id}/history is in: the parameter is enumerated at work
+// time from rows earlier syncs already committed. It is GLOBAL rather than
+// per-owner because a station's identity is the same for every caller —
+// there is no token whose access changes the answer — so one pass resolves
+// it for the whole installation. Its structure twin is character-scoped for
+// exactly the opposite reason (worker/character.go's structureDetailPath).
+//
+// ── WHY A ZERO ITEM SET IS THE HEALTHY STEADY STATE ──────────────────────
+// ListUnresolvedStationIDs returns only stations with no app.location row,
+// because an NPC station is static reference data whose name and system do
+// not change. So this fan-out makes requests on the first pass after new
+// assets land and none afterwards, and a run reporting 0 rows is the
+// resolved state rather than an empty one. That is the opposite of a run
+// reporting 0 because nothing was ever subscribed, which is what every
+// installation had until this phase — and the two are distinguishable on the
+// admin board, which is the point.
+//
+// A 404 on one id is data (CCP does not know that station) and skips.
+func (w *GlobalWorker) doStationFanout(ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute) (rowsAffected int32, outcome string, err error) {
+	ids, err := s.ListUnresolvedStationIDs(ctx, maxStationResolutions)
+	if err != nil {
+		return 0, "", fmt.Errorf("worker: listing unresolved station ids: %w", err)
+	}
+
+	outcome = "200"
+	for _, id := range ids {
+		resp, doErr := w.Gateway.Do(ctx, esi.Request{
+			Method: route.Method, UpstreamPath: route.UpstreamPath,
+			PathParams:            map[string]string{"station_id": strconv.FormatInt(id, 10)},
+			CacheMode:             derefStr(route.CacheMode),
+			RateLimitGroup:        derefStr(route.RateLimitGroup),
+			RateLimitMax:          RouteRateLimitMax(derefInt32(route.RateLimitMax)),
+			RateLimitAdmissionMax: BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
+			RateLimitWindow:       sync.IntervalToDuration(route.RateLimitWindow),
+			UserKey:               "hangar:global",
+		})
+		if doErr != nil {
+			if r, ok := classifyRefusal(doErr, w.Policy.TTLFloor, time.Now()); ok {
+				return rowsAffected, r.reason, snoozeRefusal(ctx, s, sub.SubscriptionID, r)
+			}
+			return rowsAffected, normalize.Outcome(0, true), fmt.Errorf("worker: resolving station %d: %w", id, doErr)
+		}
+
+		switch resp.StatusCode {
+		case http.StatusOK:
+			dto, perr := handlers.ParseStation(resp.Body)
+			if perr != nil {
+				return rowsAffected, normalize.Outcome(resp.StatusCode, false), perr
+			}
+			res, serr := handlers.SyncStation(ctx, s, id, dto)
+			if serr != nil {
+				return rowsAffected, normalize.Outcome(resp.StatusCode, false), serr
+			}
+			rowsAffected += res.RowsAffected
+			outcome = normalize.Outcome(resp.StatusCode, false)
+		case http.StatusNotFound:
+			continue
+		case http.StatusTooManyRequests:
+			return rowsAffected, normalize.Outcome(resp.StatusCode, false),
+				snoozeAfter429(ctx, s, sub.SubscriptionID, resp, w.Policy.TTLFloor)
+		default:
+			return rowsAffected, normalize.Outcome(resp.StatusCode, false),
+				fmt.Errorf("worker: resolving station %d returned status %d", id, resp.StatusCode)
+		}
+	}
+
+	next, err := sync.PlanNextDueAt(sync.DueTimeInput{
+		Route:  sync.RouteCacheConfig{CacheMode: derefStr(route.CacheMode), CacheAge: sync.IntervalToDuration(route.CacheAge), BlockedByPin: route.BlockedByPin},
+		Policy: w.Policy, LastSuccess: time.Now(), Consecutive304: 0, OptInNoCache: sub.OptInNoCache, Now: time.Now(),
+	})
+	if err != nil {
+		return rowsAffected, outcome, err
+	}
+	if err := s.RecordSyncSuccess(ctx, gen.RecordSyncSuccessParams{
+		SubscriptionID: sub.SubscriptionID, LastStatus: statusOf(outcome), CursorAfter: sub.CursorAfter,
+		NextDueAt: next, Consecutive304: 0,
+	}); err != nil {
+		return rowsAffected, outcome, err
+	}
+	return rowsAffected, outcome, nil
 }
 
 // doMarketHistoryFanout walks every (region_id, type_id) pair this

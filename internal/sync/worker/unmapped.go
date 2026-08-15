@@ -283,55 +283,43 @@ func DeliberatelyUnmapped() map[string]UnmappedReason {
 		// the per-alliance sheet sync fills.
 		"/alliances": ReasonNoCapability,
 
+		// ── CAPABILITY #37 IS NO LONGER HERE (PHASE 20.8) ────────────────
+		// The four /alliances/{alliance_id}* routes were ReasonNotBuilt
+		// through 20.7, blocked on a worker nobody had built: an alliance has
+		// no token, so its routes need an alliance-scoped acting-character
+		// election, and DispatchWorker routed character, corporation and
+		// global only. 20.8 built it — worker/alliance.go, the EntityAlliance
+		// branch of internal/sync/election.go, and
+		// ReconcileAllianceSubscriptions. All four are now SUBSCRIBABLE and
+		// therefore absent from this map by construction.
+		//
+		// THIS HAS LANDED NO DATA ON THE DEVELOPMENT INSTALLATION, and will
+		// not: app.alliance holds 0 rows because HANGAR Corp is in no
+		// alliance, so the reconciler creates no alliance subscription and
+		// the worker is never dispatched. That is the correct behaviour for
+		// the state rather than a verification of it. Putting a tracked
+		// character into an alliance is an operator action.
+		//
 		// ── ⚠ GATE 4 FAILURES STILL RECORDED (ReasonNotBuilt) ────────────
-		//
-		// Capability #37's contacts half. app.contact/contact_label carry an
-		// 'alliance' owner_kind and GET /api/v1/alliances/{id}/contacts reads
-		// it, and the two routes that would fill it are NOT wired.
-		//
-		// The blocker is structural, not clerical, and is recorded rather
-		// than worked around: both routes need a token from a character IN
-		// the alliance, which means an alliance-scoped acting-character
-		// election. internal/sync.EntityAlliance exists in the vocabulary,
-		// but there is no AllianceWorker and no elector for it — DispatchWorker
-		// routes character, corporation and global only. Making these two
-		// routes work means building that worker, which is a phase's own
-		// piece of work and not a map entry.
-		//
-		// The alliance SHEET and MEMBER-CORPORATION routes do not have this
-		// problem (both are public) and are also not wired, for the narrower
-		// reason that they need a global fan-out over app.alliance that this
-		// phase did not build. app.alliance holds 0 rows on this installation
-		// — HANGAR Corp is in no alliance — so neither route would have had
-		// anything to resolve.
-		//
-		// Handlers for all four WERE written in 20.7 and then DELETED, on
-		// purpose. Unwired handlers are defect class B20 — code that is
-		// built, tested and never called — and test/reachability catches it;
-		// keeping them would have been the same "written but unreachable"
-		// disease this phase spent itself removing, with a comment attached.
-		// The design is recorded here instead, which is where the next phase
-		// will look.
-		"/alliances/{alliance_id}":                 ReasonNotBuilt,
-		"/alliances/{alliance_id}/contacts":        ReasonNotBuilt,
-		"/alliances/{alliance_id}/contacts/labels": ReasonNotBuilt,
-		"/alliances/{alliance_id}/corporations":    ReasonNotBuilt,
+		// None. This map holds no ReasonNotBuilt route as of Phase 20.8. The
+		// constant stays defined, and this heading with it: it is the
+		// vocabulary for the next capability found to have a table, an
+		// endpoint and no writer, and deleting it would make the next such
+		// discovery reach for a softer word.
 
-		// Capability #41's two resolution routes. app.location exists and
-		// UpsertLocation still has no production caller: both routes need a
-		// fan-out over the location ids HANGAR has already seen in its own
-		// synced rows (app.asset.location_id and friends), and that
-		// enumeration query has not been written. GET
-		// /api/v1/support/universe/{structures,stations} still 404 on every
-		// id.
+		// ── CAPABILITY #41 IS NO LONGER HERE (PHASE 20.8) ────────────────
+		// /universe/stations/{station_id} and
+		// /universe/structures/{structure_id} were ReasonNotBuilt through
+		// 20.7. Both are now wired and SUBSCRIBABLE (worker/syncset.go), so
+		// they are absent from this map by construction — the partition is
+		// disjoint and TestEveryCatalogedGetRouteIsClassified enforces it.
 		//
-		// Handlers were written in 20.7 and DELETED unwired, for the same
-		// reason the alliance ones were — see above. Note that the ids ARE
-		// now available: app.asset holds character- and corporation-owned
-		// rows carrying location_ids, so the enumeration this needs would
-		// have something real to resolve on the next attempt.
-		"/universe/structures/{structure_id}": ReasonNotBuilt,
-		"/universe/stations/{station_id}":     ReasonNotBuilt,
+		// What was actually missing was never the handler: it was the
+		// enumeration. Neither route can be listed, so the id set has to come
+		// from HANGAR's own rows, and no query produced one. See
+		// db/queries/reference.sql's ListUnresolvedStationIDs and
+		// ListCharacterStructureIDs, which document which tables can supply
+		// an id whose KIND ESI itself stated and which cannot.
 	}
 }
 

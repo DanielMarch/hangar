@@ -49,6 +49,9 @@ func TestNoSubscribableRouteIsOrphaned(t *testing.T) {
 		case sync.EntityCorporation:
 			_, ok := corporationDispatch[path]
 			require.Truef(t, ok, "%s is subscribable as a corporation route with neither a dispatch entry nor a fan-out", path)
+		case sync.EntityAlliance:
+			_, ok := allianceDispatch[path]
+			require.Truef(t, ok, "%s is subscribable as an alliance route with neither a dispatch entry nor a fan-out", path)
 		case sync.EntityGlobal:
 			_, ok := globalDispatch[path]
 			require.Truef(t, ok, "%s is subscribable as a global route with neither a dispatch entry nor a fan-out", path)

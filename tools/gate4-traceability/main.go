@@ -133,6 +133,17 @@ func run(repoRoot, version string) error {
 	for _, m := range missingTests {
 		failures = append(failures, "Gate 4.1: "+m)
 	}
+	// The same question asked of the OTHER hand-written column (defect B52 —
+	// see tools/gate4-traceability/capability_endpoints.go). A row that names
+	// the endpoint delivering the capability is only evidence if the endpoint
+	// is registered.
+	missingEndpoints, err := checkCapabilityEndpoints(repoRoot, rows)
+	if err != nil {
+		return fmt.Errorf("checking capability endpoints: %w", err)
+	}
+	for _, m := range missingEndpoints {
+		failures = append(failures, "Gate 4.1: "+m)
+	}
 	if len(failures) > 0 {
 		fmt.Fprintln(os.Stderr, "\nGATE 4 IS NOT MET. The artefacts above record it, which is the point:")
 		for _, f := range failures {

@@ -29,14 +29,41 @@ import (
 // legitimate case; on a character's own orders it is always that same
 // character, so it is never actually absent there in practice, but the
 // column stays nullable rather than assuming that holds for every past and
-// future spec revision. `is_corporation` does not appear on either owner's
-// response at all; the caller supplies it (SyncMarketOrders'
-// isCorporation parameter) since it is a property of WHICH endpoint
-// answered, not of the order.
+// future spec revision.
+//
+// ── DEFECT B53 (PHASE 20.8): is_corporation WAS NOT THE CALLER'S TO SAY ──
+// This comment used to read "`is_corporation` does not appear on either
+// owner's response at all; the caller supplies it ... since it is a property
+// of WHICH endpoint answered, not of the order". Half of that is true and
+// the half that is not was losing data. Measured against the live spec:
+//
+//	/characters/{character_id}/orders          is_corporation: REQUIRED
+//	/characters/{character_id}/orders/history  is_corporation: REQUIRED
+//	/corporations/{corporation_id}/orders           absent entirely
+//	/corporations/{corporation_id}/orders/history   absent entirely
+//
+// The corporation half of the claim is right — every order on a corporation
+// endpoint is a corporation order, so ESI does not repeat it. The CHARACTER
+// half is wrong, and it is wrong in the direction that matters: a director
+// who places an order on behalf of their corporation sees it in their OWN
+// order list with is_corporation true, and CharacterWorker passed a
+// hard-coded false. Every such order has been recorded as personal on every
+// installation.
+//
+// It is a pointer so that "ESI said false" and "ESI said nothing" stay
+// distinguishable — which is what lets SyncMarketOrders prefer the body when
+// there is one and fall back to the caller's flag when there is not, instead
+// of one of the two silently winning.
+//
+// Found by test/capability's requireDTOCoversSpec, which compares the DTO
+// against the spec rather than against its own field names — the same
+// comparison that would have caught B50, and the reason it is mechanical
+// now instead of a thing somebody remembers to do.
 type MarketOrderDTO struct {
 	Duration       int32               `json:"duration"`
 	Escrow         decimal.NullDecimal `json:"escrow"`
 	IsBuyOrder     *bool               `json:"is_buy_order,omitempty"`
+	IsCorporation  *bool               `json:"is_corporation,omitempty"`
 	Issued         time.Time           `json:"issued"`
 	IssuedBy       *int64              `json:"issued_by,omitempty"`
 	LocationID     int64               `json:"location_id"`
@@ -49,6 +76,17 @@ type MarketOrderDTO struct {
 	VolumeRemain   int64               `json:"volume_remain"`
 	VolumeTotal    int64               `json:"volume_total"`
 	WalletDivision int16               `json:"wallet_division"`
+}
+
+// orderIsCorporation resolves B53's two sources: ESI's own answer when the
+// response carried one, and otherwise the caller's flag, which encodes which
+// endpoint answered. The caller's flag is never allowed to override a value
+// ESI actually sent.
+func orderIsCorporation(fromBody *bool, fromEndpoint bool) bool {
+	if fromBody != nil {
+		return *fromBody
+	}
+	return fromEndpoint
 }
 
 func ParseMarketOrders(body []byte) ([]MarketOrderDTO, error) {
@@ -78,7 +116,8 @@ func SyncMarketOrders(ctx context.Context, s *store.Store, ownerKind string, own
 		if _, err := s.UpsertMarketOrder(ctx, gen.UpsertMarketOrderParams{
 			OwnerKind: ownerKind, OwnerID: ownerID, OrderID: o.OrderID, TypeID: o.TypeID,
 			RegionID: o.RegionID, LocationID: o.LocationID, Range: o.Range, IsBuyOrder: isBuy,
-			IsCorporation: isCorporation, Escrow: o.Escrow, Price: o.Price, VolumeTotal: o.VolumeTotal,
+			IsCorporation: orderIsCorporation(o.IsCorporation, isCorporation),
+			Escrow:        o.Escrow, Price: o.Price, VolumeTotal: o.VolumeTotal,
 			VolumeRemain: o.VolumeRemain, MinVolume: o.MinVolume, Duration: o.Duration, Issued: o.Issued,
 			WalletDivision: &division, IssuedBy: o.IssuedBy,
 		}); ignoreUnchanged(err) != nil {
@@ -98,6 +137,7 @@ type MarketOrderHistoryDTO struct {
 	Duration       int32               `json:"duration"`
 	Escrow         decimal.NullDecimal `json:"escrow"`
 	IsBuyOrder     *bool               `json:"is_buy_order,omitempty"`
+	IsCorporation  *bool               `json:"is_corporation,omitempty"`
 	Issued         time.Time           `json:"issued"`
 	IssuedBy       *int64              `json:"issued_by,omitempty"`
 	LocationID     int64               `json:"location_id"`
@@ -131,7 +171,8 @@ func SyncMarketOrderHistory(ctx context.Context, s *store.Store, ownerKind strin
 		if _, err := s.UpsertMarketOrderHistory(ctx, gen.UpsertMarketOrderHistoryParams{
 			OwnerKind: ownerKind, OwnerID: ownerID, OrderID: o.OrderID, TypeID: o.TypeID,
 			RegionID: o.RegionID, LocationID: o.LocationID, Range: o.Range, IsBuyOrder: isBuy,
-			IsCorporation: isCorporation, Escrow: o.Escrow, Price: o.Price, VolumeTotal: o.VolumeTotal,
+			IsCorporation: orderIsCorporation(o.IsCorporation, isCorporation),
+			Escrow:        o.Escrow, Price: o.Price, VolumeTotal: o.VolumeTotal,
 			VolumeRemain: o.VolumeRemain, MinVolume: o.MinVolume, Duration: o.Duration, Issued: o.Issued,
 			State: o.State, WalletDivision: &division, IssuedBy: o.IssuedBy,
 		}); ignoreUnchanged(err) != nil {

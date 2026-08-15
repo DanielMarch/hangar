@@ -107,6 +107,14 @@ func runWork(ctx context.Context) error {
 			Pool: pool, Gateway: gateway, Tokens: refresher, Policy: syncPolicy,
 			Elector: sync.DBElector{Store: s},
 		},
+		// PHASE 20.8 (capability #37): the fourth worker. Same elector — §6.3's
+		// candidate ordering is about the character, not about what it acts
+		// for; only the candidate POOL differs, and DBElector branches on the
+		// entity kind for that.
+		Alliance: &worker.AllianceWorker{
+			Pool: pool, Gateway: gateway, Tokens: refresher, Policy: syncPolicy,
+			Elector: sync.DBElector{Store: s},
+		},
 		Global: &worker.GlobalWorker{
 			Pool: pool, Gateway: gateway, Policy: syncPolicy,
 		},

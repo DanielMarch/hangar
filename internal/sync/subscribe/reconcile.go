@@ -41,13 +41,14 @@ import (
 type Result struct {
 	CharacterCreated   int64
 	CorporationCreated int64
+	AllianceCreated    int64
 	GlobalCreated      int64
 	EnabledChanged     int64
 }
 
 // Total is the number of rows this pass created.
 func (r Result) Total() int64 {
-	return r.CharacterCreated + r.CorporationCreated + r.GlobalCreated
+	return r.CharacterCreated + r.CorporationCreated + r.AllianceCreated + r.GlobalCreated
 }
 
 // Empty reports whether the pass was a no-op, i.e. the installation was
@@ -60,6 +61,7 @@ func (r Result) Empty() bool { return r.Total() == 0 && r.EnabledChanged == 0 }
 type Store interface {
 	ReconcileCharacterSubscriptions(ctx context.Context, paths []string, characterID int64) (int64, error)
 	ReconcileCorporationSubscriptions(ctx context.Context, paths []string) (int64, error)
+	ReconcileAllianceSubscriptions(ctx context.Context, paths []string) (int64, error)
 	ReconcileGlobalSubscriptions(ctx context.Context, paths []string) (int64, error)
 	DisableUnscopedSubscriptions(ctx context.Context) (int64, error)
 	ListCharacterIDsWithValidTokens(ctx context.Context) ([]int64, error)
@@ -88,13 +90,14 @@ func ForCharacter(ctx context.Context, s Store, characterID int64) (Result, erro
 		return result, err
 	}
 	result.CorporationCreated = rest.CorporationCreated
+	result.AllianceCreated = rest.AllianceCreated
 	result.GlobalCreated = rest.GlobalCreated
 	result.EnabledChanged = rest.EnabledChanged
 	return result, nil
 }
 
-// All reconciles every character with a valid token, then the corporation
-// and global sets.
+// All reconciles every character with a valid token, then the corporation,
+// alliance and global sets.
 //
 // ── WHY THIS RUNS PERIODICALLY AND NOT ONLY AT LOGIN ─────────────────────
 // The bootstrap is genuinely ordered and cannot be collapsed into one pass.
@@ -136,13 +139,14 @@ func All(ctx context.Context, s Store) (Result, error) {
 		return result, err
 	}
 	result.CorporationCreated = rest.CorporationCreated
+	result.AllianceCreated = rest.AllianceCreated
 	result.GlobalCreated = rest.GlobalCreated
 	result.EnabledChanged = rest.EnabledChanged
 	return result, nil
 }
 
-// shared does the corporation, global and enable/disable passes, which are
-// installation-wide and identical whichever entry point ran.
+// shared does the corporation, alliance, global and enable/disable passes,
+// which are installation-wide and identical whichever entry point ran.
 func shared(ctx context.Context, s Store) (Result, error) {
 	var result Result
 
@@ -151,6 +155,19 @@ func shared(ctx context.Context, s Store) (Result, error) {
 		return result, fmt.Errorf("subscribe: reconciling corporations: %w", err)
 	}
 	result.CorporationCreated = corporation
+
+	// PHASE 20.8 (capability #37). Runs after the corporation pass and is
+	// ordered one step deeper than it: an alliance subscription needs
+	// app.corporation.alliance_id, which the CORPORATION sheet route fills,
+	// which itself needs app.character.corporation_id from a CHARACTER route.
+	// An installation therefore reaches its alliance subscriptions on the
+	// third reconciliation at the earliest — and an installation whose
+	// characters are in no alliance never does, correctly.
+	alliance, err := s.ReconcileAllianceSubscriptions(ctx, worker.SubscribablePathsFor(sync.EntityAlliance))
+	if err != nil {
+		return result, fmt.Errorf("subscribe: reconciling alliances: %w", err)
+	}
+	result.AllianceCreated = alliance
 
 	global, err := s.ReconcileGlobalSubscriptions(ctx, worker.SubscribablePathsFor(sync.EntityGlobal))
 	if err != nil {
@@ -184,6 +201,7 @@ func (r Result) Log(ctx context.Context, log *slog.Logger, trigger string) {
 		"trigger", trigger,
 		"character_created", r.CharacterCreated,
 		"corporation_created", r.CorporationCreated,
+		"alliance_created", r.AllianceCreated,
 		"global_created", r.GlobalCreated,
 		"enabled_changed", r.EnabledChanged)
 }

@@ -43,12 +43,42 @@ For a real deployment later, register a **second** application with the public H
 rather than editing this one — the localhost registration stays useful for development, and CCP
 allows only one callback URL per application.
 
-## 3. Scopes — 50, and why each
+## 3. Scopes — 52, and why each
 
-HANGAR's sync set is 93 routes, and 50 distinct scopes are declared across their `GET`
+HANGAR's sync set is 102 routes, and 52 distinct scopes are declared across their `GET`
 operations. That is the complete set, and it is a **read-only** set.
 
-> ### ⚠ This count moved from 47 to 50 in Phase 20.7 (defect B48)
+> ### ⚠ This count moved from 50 to 52 in Phase 20.8 (capabilities #37 and #41)
+>
+> Phase 20.8 wired the last two unreachable Appendix A capabilities. Both needed machinery
+> rather than a map entry, and each brought in one scope that was **already enabled in the
+> developer portal and deliberately absent from the derived set** — so this move needed no
+> portal edit, only a re-authorization.
+>
+> | Scope | Route | Capability |
+> | :-- | :-- | :-- |
+> | `esi-universe.read_structures.v1` | `GET /universe/structures/{structure_id}` | #41 Structure/station resolution |
+> | `esi-alliances.read_contacts.v1` | `GET /alliances/{alliance_id}/contacts`, `.../contacts/labels` | #37 Alliance |
+>
+> The other newly wired routes need none: `/universe/stations/{station_id}`,
+> `/alliances/{alliance_id}` and `/alliances/{alliance_id}/corporations` are unauthenticated.
+> That is not a detail — it is what let the station half be a GLOBAL subscription while the
+> structure half had to be character-scoped. `ReconcileGlobalSubscriptions` has **no scope
+> gate** (a global row has `acting_character_id = NULL`, so there is no token to gate on), which
+> means a scoped route in the global set would be created *enabled* and 403 forever against
+> Governor 2's budget. `TestGlobalRoutesRequireNoScope` now holds that invariant, which until
+> this phase was only asserted in a comment.
+>
+> **A RE-AUTHORIZATION IS OUTSTANDING ON THE DEVELOPMENT INSTALLATION.** CEODude's stored token
+> carries the 50-scope grant it was minted with. Until the character re-authorizes through
+> `/auth/login`, the scope gate keeps the structure and alliance-contact routes correctly
+> **unsubscribed** rather than 403ing — measured, not assumed: after this phase's binary
+> reconciled, `esi-universe.read_structures.v1` and `esi-alliances.read_contacts.v1` were absent
+> from `app.character_token_scope` and no subscription for their routes existed. The two
+> unauthenticated additions (`/universe/stations/{station_id}` and the two public alliance
+> routes) are unaffected and subscribe immediately.
+
+> ### This count moved from 47 to 50 in Phase 20.7 (defect B48)
 >
 > Phase 20.7 wired sync handlers for capabilities whose tables, store queries and `/api/v1`
 > endpoints had shipped with **no writer at all**. Three of the newly dispatched routes are
@@ -79,6 +109,9 @@ operations. That is the complete set, and it is a **read-only** set.
 > exist yet: a location-id enumeration query, and an alliance-scoped acting-character elector).
 > A scope enabled in the portal but absent from the derived set costs nothing and is not
 > requested at login; it will be picked up automatically when those routes are wired.
+>
+> *(Phase 20.8 built both pieces of machinery and both scopes joined the derived set, exactly as
+> this predicted — no portal edit was needed. See the 20.8 note above.)*
 
 > ### This count moved from 46 to 47 in Phase 20.6 (defect B47)
 >
@@ -133,6 +166,7 @@ Grouped as the portal's tree presents them:
 | `esi-contracts` | `read_character_contracts.v1`, `read_corporation_contracts.v1` |
 | `esi-corporations` | `read_blueprints.v1`, `read_contacts.v1`, `read_container_logs.v1`, `read_corporation_membership.v1`, `read_divisions.v1`, `read_facilities.v1`, `read_medals.v1`, `read_projects.v1`, `read_standings.v1`, `read_starbases.v1`, `read_structures.v1`, `read_titles.v1`, `track_members.v1` |
 | `esi-fittings` | `read_fittings.v1` |
+| `esi-alliances` | `read_contacts.v1` |
 | `esi-industry` | `read_character_jobs.v1`, `read_character_mining.v1`, `read_corporation_jobs.v1`, `read_corporation_mining.v1` |
 | `esi-killmails` | `read_corporation_killmails.v1`, `read_killmails.v1` |
 | `esi-location` | `read_location.v1`, `read_online.v1`, `read_ship_type.v1` |
@@ -141,6 +175,7 @@ Grouped as the portal's tree presents them:
 | `esi-planets` | `manage_planets.v1`, `read_customs_offices.v1` |
 | `esi-skills` | `read_skillqueue.v1`, `read_skills.v1` |
 | `esi-structures` | `read_corporation.v1` |
+| `esi-universe` | `read_structures.v1` |
 | `esi-wallet` | `read_character_wallet.v1`, `read_corporation_wallets.v1` |
 
 `esi-planets.manage_planets.v1` looks like a write scope and is not: it is CCP's name for the

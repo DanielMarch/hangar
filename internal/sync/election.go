@@ -52,21 +52,50 @@ func (c candidate) eligible() bool {
 	return c.tokenValid && c.hasScopes && c.hasRoles
 }
 
-// Elect implements ActingCharacterElector. It only ever consults
-// entityKind == EntityCorporation — alliance-scoped election, if HANGAR
-// ever needs one, is a different candidate pool (alliance member
-// corporations' directors) and not this phase's scope.
+// Elect implements ActingCharacterElector for the two entity kinds that
+// have no token of their own.
+//
+// ── PHASE 20.8: THE ALLIANCE BRANCH ──────────────────────────────────────
+// This used to reject everything but EntityCorporation, with the note that
+// alliance election "is a different candidate pool ... and not this phase's
+// scope". Capability #37 is that scope. The pool is every tracked character
+// whose corporation is in the alliance — a character's alliance is its
+// corporation's, so app.corporation.alliance_id is the whole join — and the
+// SCORING below is shared verbatim, because §6.3's ordering (valid token,
+// then scopes, then roles, then fewest recent 403s, then lowest id) is about
+// the candidate, not about what it is acting for.
+//
+// Roles are the one asymmetry, and it resolves itself: ESI's alliance routes
+// declare no corporation role at all (app.esi_route_role is empty for all
+// four), so requiredRoles is empty and satisfiesRoles returns true without
+// consulting a corporation. No alliance-specific role logic exists because
+// EVE has no alliance-level role that gates these routes.
 func (e DBElector) Elect(ctx context.Context, entityKind EntityKind, entityID int64, routeID uuid.UUID) (int64, error) {
-	if entityKind != EntityCorporation {
-		return 0, fmt.Errorf("sync: acting-character election is only defined for corporation-scoped subscriptions, got %q", entityKind)
-	}
-
-	members, err := e.Store.ListCorporationMembers(ctx, entityID)
-	if err != nil {
-		return 0, fmt.Errorf("sync: listing members of corporation %d: %w", entityID, err)
-	}
-	if len(members) == 0 {
-		return 0, fmt.Errorf("%w: corporation %d has no tracked members", ErrNoEligibleActingCharacter, entityID)
+	var memberIDs []int64
+	switch entityKind {
+	case EntityCorporation:
+		members, err := e.Store.ListCorporationMembers(ctx, entityID)
+		if err != nil {
+			return 0, fmt.Errorf("sync: listing members of corporation %d: %w", entityID, err)
+		}
+		memberIDs = make([]int64, len(members))
+		for i, m := range members {
+			memberIDs[i] = m.CharacterID
+		}
+		if len(memberIDs) == 0 {
+			return 0, fmt.Errorf("%w: corporation %d has no tracked members", ErrNoEligibleActingCharacter, entityID)
+		}
+	case EntityAlliance:
+		ids, err := e.Store.ListAllianceMemberCharacters(ctx, entityID)
+		if err != nil {
+			return 0, fmt.Errorf("sync: listing tracked characters in alliance %d: %w", entityID, err)
+		}
+		memberIDs = ids
+		if len(memberIDs) == 0 {
+			return 0, fmt.Errorf("%w: alliance %d has no tracked characters", ErrNoEligibleActingCharacter, entityID)
+		}
+	default:
+		return 0, fmt.Errorf("sync: acting-character election is only defined for corporation- and alliance-scoped subscriptions, got %q", entityKind)
 	}
 
 	requiredScopes, err := e.Store.ListEsiRouteScopes(ctx, routeID)
@@ -80,30 +109,37 @@ func (e DBElector) Elect(ctx context.Context, entityKind EntityKind, entityID in
 
 	history, err := e.Store.ListActingCharacterHistory(ctx, string(entityKind), entityID, routeID)
 	if err != nil {
-		return 0, fmt.Errorf("sync: listing acting-character history for corporation %d route %s: %w", entityID, routeID, err)
+		return 0, fmt.Errorf("sync: listing acting-character history for %s %d route %s: %w", entityKind, entityID, routeID, err)
 	}
 	failCount := make(map[int64]int32, len(history))
 	for _, h := range history {
 		failCount[h.CharacterID] = h.Consecutive403
 	}
 
-	candidates := make([]candidate, 0, len(members))
-	for _, m := range members {
-		c := candidate{characterID: m.CharacterID, consecutive403: failCount[m.CharacterID]}
+	candidates := make([]candidate, 0, len(memberIDs))
+	for _, characterID := range memberIDs {
+		c := candidate{characterID: characterID, consecutive403: failCount[characterID]}
 
-		tok, err := e.Store.GetCharacterToken(ctx, m.CharacterID)
+		tok, err := e.Store.GetCharacterToken(ctx, characterID)
 		if err == nil {
 			c.tokenValid = tok.Valid
 		} // no row / other error => tokenValid stays false, never fatal to the whole election
 
 		if c.tokenValid {
-			tokenScopes, err := e.Store.ListCharacterTokenScopes(ctx, m.CharacterID)
+			tokenScopes, err := e.Store.ListCharacterTokenScopes(ctx, characterID)
 			if err != nil {
-				return 0, fmt.Errorf("sync: listing token scopes for character %d: %w", m.CharacterID, err)
+				return 0, fmt.Errorf("sync: listing token scopes for character %d: %w", characterID, err)
 			}
 			c.hasScopes = supersetOf(tokenScopes, requiredScopes)
 
-			hasRoles, err := e.satisfiesRoles(ctx, entityID, m.CharacterID, requiredRoles)
+			// satisfiesRoles takes a CORPORATION id for its CEO check. For an
+			// alliance subscription entityID is an alliance id, and passing it
+			// would look up a corporation that does not exist — harmless
+			// (GetCorporation's error is tolerated) but meaningless. It is
+			// only ever reached with a non-empty requiredRoles, which no
+			// alliance route has, so the corporation id is the right and only
+			// thing to pass here.
+			hasRoles, err := e.satisfiesRoles(ctx, entityID, characterID, requiredRoles)
 			if err != nil {
 				return 0, err
 			}
@@ -136,7 +172,7 @@ func (e DBElector) Elect(ctx context.Context, entityKind EntityKind, entityID in
 
 	winner := candidates[0]
 	if !winner.eligible() {
-		return 0, fmt.Errorf("%w: corporation %d, route %s", ErrNoEligibleActingCharacter, entityID, routeID)
+		return 0, fmt.Errorf("%w: %s %d, route %s", ErrNoEligibleActingCharacter, entityKind, entityID, routeID)
 	}
 	return winner.characterID, nil
 }
