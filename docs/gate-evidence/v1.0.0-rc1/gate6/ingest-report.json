@@ -1,0 +1,51 @@
+{
+  "future_route": {
+    "operation_id": "GetSyntheticFutureRoute",
+    "upstream_path": "/synthetic/future-route",
+    "compatibility_date": "2026-09-03",
+    "blocked_by_pin": true,
+    "cache_mode": "ttl-based",
+    "identifier_types": {},
+    "present": true
+  },
+  "uuid_path_identifier": {
+    "operation_id": "GetSyntheticWidgetsWidgetId",
+    "upstream_path": "/synthetic/widgets/{widget_id}",
+    "compatibility_date": "2020-01-01",
+    "blocked_by_pin": false,
+    "cache_mode": "ttl-based",
+    "identifier_types": {
+      "widget_id": "uuid"
+    },
+    "present": true
+  },
+  "novel_scope_grammar": {
+    "operation_id": "GetSyntheticScopeGrammar",
+    "upstream_path": "/synthetic/scope-grammar",
+    "compatibility_date": "2020-01-01",
+    "blocked_by_pin": false,
+    "cache_mode": "ttl-based",
+    "identifier_types": {},
+    "present": true
+  },
+  "unrecognised_cache_mode": {
+    "operation_id": "GetSyntheticCacheMode",
+    "upstream_path": "/synthetic/cache-mode",
+    "compatibility_date": "2020-01-01",
+    "blocked_by_pin": false,
+    "cache_mode": "quantum-entangled",
+    "identifier_types": {},
+    "present": true
+  },
+  "novel_scope_stored_verbatim": true,
+  "cache_mode_open_vocabulary": [
+    "quantum-entangled",
+    "ttl-based"
+  ],
+  "schedulable_synthetic_operations": [
+    "GetSyntheticCacheMode",
+    "GetSyntheticScopeGrammar",
+    "GetSyntheticWidgetsWidgetId"
+  ],
+  "app_pin": "\"2026-08-04\""
+}

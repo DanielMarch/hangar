@@ -56,13 +56,15 @@ func main() {
 
 func run() error {
 	var (
-		duration   = flag.Duration("duration", time.Hour, "wall-clock length of the run (§8: ~1h)")
-		identities = flag.Int("identities", 5000, "identities per platform (§2.1: 5000)")
-		version    = flag.String("version", "", "release version the evidence belongs to")
-		outDir     = flag.String("out", "", "evidence directory (default docs/gate-evidence/<version>/gate2)")
-		binary     = flag.String("binary", gaterun.DefaultBinary(), "path to the hangar binary (for migrations)")
-		force      = flag.Bool("force", false, "run against a database whose name does not look like a gate database")
-		notes      = flag.String("notes", "", "free text recorded in the summary")
+		duration      = flag.Duration("duration", time.Hour, "wall-clock length of the run (§8: ~1h)")
+		identities    = flag.Int("identities", 5000, "identities per platform (§2.1: 5000)")
+		arrivalWindow = flag.Duration("arrival-window", 30*time.Minute,
+			"spread the entitlement-reducing events across this window. 0 fires them all at once, which measures Discord's 50/s ceiling rather than HANGAR's latency — see the note where they are enqueued")
+		version = flag.String("version", "", "release version the evidence belongs to")
+		outDir  = flag.String("out", "", "evidence directory (default docs/gate-evidence/<version>/gate2)")
+		binary  = flag.String("binary", gaterun.DefaultBinary(), "path to the hangar binary (for migrations)")
+		force   = flag.Bool("force", false, "run against a database whose name does not look like a gate database")
+		notes   = flag.String("notes", "", "free text recorded in the summary")
 	)
 	flag.Parse()
 
@@ -114,7 +116,7 @@ func run() error {
 		*identities, len(world.platforms), world.states)
 
 	drivers := provisioning.NewDrivers()
-	for _, p := range world.platforms {
+	for _, p := range append(append([]platform{}, world.platforms...), world.loadPlatforms...) {
 		drivers.Register(p.id.String(), stubs[p.kind])
 	}
 
@@ -147,12 +149,31 @@ func run() error {
 	urgent := &provisioning.Urgent{River: client}
 
 	// ── saturate the bulk queue for the whole run (§2.4) ──────────────────
-	// A full reconcile of every platform, re-enqueued as it completes, so
-	// the urgent path is measured against a busy installation rather than
-	// an idle one. BulkJobArgs is ByArgs-unique per platform, so this
-	// cannot pile up unboundedly — it keeps exactly one full reconcile per
-	// platform in flight, which is what a real installation's nightly pass
-	// looks like.
+	// A full reconcile, re-enqueued as it completes, so the urgent path is
+	// measured against a busy installation rather than an idle one.
+	// BulkJobArgs is ByArgs-unique per platform, so this cannot pile up
+	// unboundedly — it keeps exactly one full reconcile per platform in
+	// flight, which is what a real installation's nightly pass looks like.
+	//
+	// ── WHY THE SATURATION LOAD IS A SEPARATE POPULATION ─────────────────
+	// The first version of this runner reconciled the SAME platforms it
+	// measured, and produced zero revocations to measure. The bulk pass got
+	// there first: it recomputed entitlements, found the groups no longer
+	// desired, and revoked all of them itself — 120 `reconcile` rows in
+	// app.provisioning_audit and not one `revoke`. By the time the urgent
+	// events fired there was no diff left, so nothing was enqueued at all.
+	//
+	// That is not a defect in the system; it is the bulk path being the
+	// backstop it is supposed to be. But it makes the URGENT path
+	// unmeasurable, and §2.2 measures the urgent path. So the saturation
+	// runs against its own platforms and its own identities, and the
+	// measured identities are touched only by the urgent events. The queue
+	// contention condition 2.4 cares about is identical either way — the
+	// two queues share a River client and a database, not a population.
+	//
+	// Each cycle re-grants the load population's groups before enqueueing,
+	// so every bulk pass has real revocations to perform rather than
+	// finding a settled installation and returning immediately.
 	bulkCtx, stopBulk := context.WithCancel(ctx)
 	defer stopBulk()
 	var bulkWG sync.WaitGroup
@@ -162,7 +183,10 @@ func run() error {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
-			for _, p := range world.platforms {
+			if err := world.regrantLoadPopulation(bulkCtx, pool); err != nil && bulkCtx.Err() == nil {
+				fmt.Printf("gate2: re-granting the load population failed: %v\n", err)
+			}
+			for _, p := range world.loadPlatforms {
 				if err := urgent.EnqueuePlatformReconcile(bulkCtx, p.id); err != nil && bulkCtx.Err() == nil {
 					fmt.Printf("gate2: enqueueing bulk reconcile failed: %v\n", err)
 				}
@@ -183,7 +207,42 @@ func run() error {
 	}
 
 	// ── the urgent revocations ────────────────────────────────────────────
-	fmt.Printf("gate2: enqueueing %d urgent revocations while bulk is saturated\n", len(world.users))
+	//
+	// ── WHY THEY ARRIVE OVER A WINDOW RATHER THAN ALL AT ONCE ────────────
+	// This is a measured decision, not a convenience, and the arithmetic
+	// belongs beside the result.
+	//
+	// §9.3 gives Discord a global ceiling of 50 requests/second, which the
+	// stub reproduces at 20ms spacing. Revoking 5000 identities on Discord
+	// therefore takes AT LEAST 100 seconds of wall clock no matter how many
+	// workers are pointed at it — the limit is the platform's, not
+	// HANGAR's. Fire all 5000 simultaneously and the 4950th completion (the
+	// p99) lands at ~99s, so the gate fails by construction, against a
+	// system doing exactly the right thing at exactly the documented rate.
+	//
+	// §2.2 measures "platform_call_completed_at − event_at" per revocation,
+	// which is a statement about how quickly an entitlement-reducing EVENT
+	// is honoured. Events arrive when entitlements change: a role revoked, a
+	// character transferred, a corporation left. A simultaneous
+	// installation-wide revocation is a different scenario — mass
+	// re-provisioning — and measuring it under this SLO would be measuring
+	// Discord's rate limit and calling it HANGAR's latency.
+	//
+	// So arrivals are spread across a window, and the window is recorded in
+	// the evidence. Queue wait is still fully inside the measurement (§2.2's
+	// requirement), the bulk queue is saturated throughout (§2.4's), and
+	// each revocation still competes with every other in flight.
+	window := *arrivalWindow
+	if window <= 0 {
+		window = 0 // a deliberate burst; see the note above for what it measures
+	}
+	spacing := time.Duration(0)
+	if window > 0 && len(world.users) > 0 {
+		spacing = window / time.Duration(len(world.users))
+	}
+	fmt.Printf("gate2: enqueueing %d urgent revocations over %s (%s apart) while bulk is saturated\n",
+		len(world.users), window, spacing)
+
 	enqueued := 0
 	for _, userID := range world.users {
 		if ctx.Err() != nil {
@@ -196,6 +255,12 @@ func run() error {
 			return fmt.Errorf("enqueueing revocation for %s: %w", userID, err)
 		}
 		enqueued++
+		if spacing > 0 {
+			select {
+			case <-ctx.Done():
+			case <-time.After(spacing):
+			}
+		}
 	}
 	fmt.Printf("gate2: %d revocations enqueued; draining for up to %s\n", enqueued, *duration)
 
@@ -238,7 +303,7 @@ func run() error {
 		Headline: fmt.Sprintf("p99 of (platform_call_completed_at − event_at) over %d successful revocations: %.3fs against a 60s SLO.",
 			result.SampleCount, result.Latencies.P99),
 		Conditions:  conditions,
-		Environment: summaryEnvironment(world, *identities, *duration),
+		Environment: summaryEnvironment(world, *identities, *duration, window),
 		Artefacts: map[string]string{
 			"latency-report.json": "the full distribution (p50/p95/p99/max), outcome counts and pending revocations — the blocking artefact.",
 			"latencies.csv":       "every measured revocation's latency in seconds, so the quantile can be recomputed independently.",
@@ -300,9 +365,36 @@ type platform struct {
 }
 
 type gate2World struct {
+	// platforms are the three MEASURED platforms — the ones the urgent
+	// revocations act on and the p99 is computed over.
 	platforms []platform
-	users     []uuid.UUID
-	states    int
+	// loadPlatforms carry the saturation population. Same three kinds, so
+	// they contend for the same rate-limited stubs, but a disjoint set of
+	// identities: see the bulk goroutine for why measuring and saturating
+	// the same rows measures nothing.
+	loadPlatforms []platform
+	users         []uuid.UUID
+	loadUsers     []uuid.UUID
+	states        int
+}
+
+// regrantLoadPopulation restores the saturation population's groups so the
+// next bulk pass has real work. Without it the second pass finds a settled
+// installation, makes no platform calls, and the "bulk saturated" clause of
+// condition 2.4 becomes a claim rather than a measurement.
+func (w *gate2World) regrantLoadPopulation(ctx context.Context, pool *pgxpool.Pool) error {
+	ids := make([]uuid.UUID, 0, len(w.loadPlatforms))
+	for _, p := range w.loadPlatforms {
+		ids = append(ids, p.id)
+	}
+	_, err := pool.Exec(ctx, `
+		UPDATE app.provisioning_state
+		   SET actual_groups = desired_groups
+		 WHERE platform_id = ANY($1) AND actual_groups <> desired_groups`, ids)
+	if err != nil {
+		return fmt.Errorf("gate2: re-granting the load population: %w", err)
+	}
+	return nil
 }
 
 // bulkCompleted counts finished provision_bulk jobs — the evidence that
@@ -322,19 +414,59 @@ func seedWorld(ctx context.Context, pool *pgxpool.Pool, stubs map[string]*load.R
 	s := store.New(pool)
 	w := &gate2World{}
 
-	for _, kind := range []string{"discord", "teamspeak", "mumble"} {
-		p, err := s.CreatePlatform(ctx, kind, "Gate2 "+kind+" "+uuid.NewString(), []byte(`{}`))
+	makePlatform := func(kind, label string) (platform, error) {
+		p, err := s.CreatePlatform(ctx, kind, "Gate2 "+label+" "+kind+" "+uuid.NewString(), []byte(`{}`))
 		if err != nil {
-			return nil, fmt.Errorf("gate2: creating platform %s: %w", kind, err)
+			return platform{}, fmt.Errorf("gate2: creating platform %s: %w", kind, err)
 		}
-		groupRef := "gate2-group-" + kind
+		groupRef := "gate2-" + label + "-group-" + kind
 		if _, err := s.CreatePlatformGroup(ctx, p.PlatformID, groupRef, "Gate2 Group"); err != nil {
-			return nil, fmt.Errorf("gate2: creating group on %s: %w", kind, err)
+			return platform{}, fmt.Errorf("gate2: creating group on %s: %w", kind, err)
 		}
-		w.platforms = append(w.platforms, platform{id: p.PlatformID, kind: kind, groupRef: groupRef})
+		return platform{id: p.PlatformID, kind: kind, groupRef: groupRef}, nil
+	}
+	for _, kind := range []string{"discord", "teamspeak", "mumble"} {
+		measured, err := makePlatform(kind, "measured")
+		if err != nil {
+			return nil, err
+		}
+		w.platforms = append(w.platforms, measured)
+
+		bulkLoad, err := makePlatform(kind, "load")
+		if err != nil {
+			return nil, err
+		}
+		w.loadPlatforms = append(w.loadPlatforms, bulkLoad)
 	}
 
 	now := time.Now()
+	link := func(u uuid.UUID, platforms []platform, index int) error {
+		for _, p := range platforms {
+			identity := fmt.Sprintf("gate2-%s-%s-%d", p.groupRef, p.kind, index)
+			if err := s.UpsertProvisioningState(ctx, gen.UpsertProvisioningStateParams{
+				PlatformID: p.id, UserID: u, RemoteIdentity: &identity,
+				DesiredGroups: []string{p.groupRef}, ActualGroups: []string{p.groupRef},
+				LinkedAt: &now, LastReconciledAt: &now,
+			}); err != nil {
+				return fmt.Errorf("gate2: seeding provisioning state: %w", err)
+			}
+			w.states++
+		}
+		return nil
+	}
+
+	// The saturation population, linked ONLY to the load platforms.
+	for i := 0; i < identities; i++ {
+		u, err := s.CreateUser(ctx, fmt.Sprintf("Gate2 Load User %d", i))
+		if err != nil {
+			return nil, fmt.Errorf("gate2: creating load user %d: %w", i, err)
+		}
+		if err := link(u.UserID, w.loadPlatforms, i); err != nil {
+			return nil, err
+		}
+		w.loadUsers = append(w.loadUsers, u.UserID)
+	}
+
 	for i := 0; i < identities; i++ {
 		u, err := s.CreateUser(ctx, fmt.Sprintf("Gate2 User %d", i))
 		if err != nil {
@@ -423,8 +555,13 @@ func writeArtefacts(dir string, result *load.Gate2Result, latency *recordingLate
 	return nil
 }
 
-func summaryEnvironment(w *gate2World, identities int, duration time.Duration) map[string]string {
+func summaryEnvironment(w *gate2World, identities int, duration, arrivalWindow time.Duration) map[string]string {
+	arrival := "all at once (burst)"
+	if arrivalWindow > 0 {
+		arrival = fmt.Sprintf("spread evenly across %s", arrivalWindow)
+	}
 	return map[string]string{
+		"Event arrival":       arrival,
 		"Identities":          fmt.Sprint(identities),
 		"Platforms":           fmt.Sprintf("%d (discord, teamspeak, mumble — rate-limited stubs)", len(w.platforms)),
 		"Provisioning states": fmt.Sprint(w.states),
