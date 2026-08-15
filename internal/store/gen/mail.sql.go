@@ -252,9 +252,15 @@ func (q *Queries) ListMailLists(ctx context.Context, characterID int64) ([]AppMa
 }
 
 const listMailRecipients = `-- name: ListMailRecipients :many
-SELECT character_id, mail_id, recipient_id, recipient_type FROM app.mail_recipient WHERE character_id = $1 AND mail_id = $2
+SELECT character_id, mail_id, recipient_id, recipient_type FROM app.mail_recipient WHERE character_id = $1 AND mail_id = $2 ORDER BY recipient_id
 `
 
+// ORDER BY added in Phase 20.10. It had none, so the row order was whatever
+// Postgres chose and could differ between two calls for the same mail — not
+// a defect anything had noticed, but the /api/v2 shim renders these into a
+// JSON array whose order IS the bytes, and an unordered read cannot be
+// byte-compared. recipient_id matches both HANGAR's primary key and the
+// (mail_id, recipient_id) unique index legacy clusters this table on.
 func (q *Queries) ListMailRecipients(ctx context.Context, characterID int64, mailID int64) ([]AppMailRecipient, error) {
 	rows, err := q.db.Query(ctx, listMailRecipients, characterID, mailID)
 	if err != nil {

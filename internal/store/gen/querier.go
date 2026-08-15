@@ -986,6 +986,12 @@ type Querier interface {
 	ListMailHeadersWithoutBody(ctx context.Context, characterID int64) ([]AppMailHeader, error)
 	ListMailLabels(ctx context.Context, characterID int64) ([]AppMailLabel, error)
 	ListMailLists(ctx context.Context, characterID int64) ([]AppMailList, error)
+	// ORDER BY added in Phase 20.10. It had none, so the row order was whatever
+	// Postgres chose and could differ between two calls for the same mail — not
+	// a defect anything had noticed, but the /api/v2 shim renders these into a
+	// JSON array whose order IS the bytes, and an unordered read cannot be
+	// byte-compared. recipient_id matches both HANGAR's primary key and the
+	// (mail_id, recipient_id) unique index legacy clusters this table on.
 	ListMailRecipients(ctx context.Context, characterID int64, mailID int64) ([]AppMailRecipient, error)
 	ListMarketHistory(ctx context.Context, regionID int32, typeID int32, pageSize int32) ([]AppMarketHistory, error)
 	// PHASE 20.5 (B30). The (region_id, type_id) pairs the market-history
