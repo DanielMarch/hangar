@@ -155,13 +155,21 @@ const (
 	// same as a reason that is THE BLOCKER, and only asking "what happens
 	// after this is fixed" tells them apart.
 	//
-	// reasonNoKeysetWindow now names the TWO routes it was ever the whole
-	// story for — and both are served as of this phase, so nothing carries it.
-	// It is kept, unreferenced, because deleting it would delete the record.
-	reasonNoKeysetWindow = "shimmable: keyed by EVE identifiers HANGAR stores unchanged. " +
-		"The store exposes this relation ONLY as a keyset page (LIMIT + a cursor predicate) because " +
-		"OFFSET is prohibited (SRS §6, enforced by sqlc's no-offset rule), and legacy paginated the " +
-		"whole relation in PHP. Needs a full-set store query and corpus fixtures; not yet written."
+	// reasonNoKeysetWindow was ever the whole story for exactly TWO routes —
+	// character.mail and character.notifications — and both are served as of
+	// Phase 20.10, so the constant is DELETED rather than kept unreferenced.
+	// Its text was:
+	//
+	//	shimmable: keyed by EVE identifiers HANGAR stores unchanged. The store
+	//	exposes this relation ONLY as a keyset page (LIMIT + a cursor
+	//	predicate) because OFFSET is prohibited (SRS §6), and legacy paginated
+	//	the whole relation in PHP. Needs a full-set store query and corpus
+	//	fixtures; not yet written.
+	//
+	// Deleted rather than parked: an unreferenced constant is not a record,
+	// it is dead code that reads as live, and the linter is right to say so.
+	// The record is this comment. Same reasoning that removed
+	// BreakingControllers and its two siblings in 20.6.
 
 	// reasonAssetMapColumns is what BOTH asset routes are actually blocked on.
 	reasonAssetMapColumns = "NOT shimmable, and not for want of a store query (B57 — it carried " +
@@ -202,7 +210,8 @@ const (
 	// That MEASURES the primary-key ordering rule every other route in this
 	// package had only inferred from the corporation-history recording.
 	//
-	// reasonStructureServices, as it stood:
+	// reasonStructureServices is DELETED, not parked unreferenced — see the
+	// note on reasonNoKeysetWindow above for why. As it stood:
 	//
 	// The store query exists (ListCorporationStructures, full ordered set) and
 	// fourteen of the row's seventeen fields are reproducible: HANGAR holds
@@ -229,14 +238,6 @@ const (
 	//
 	// Closing it needs a NEW RECORDING with a populated
 	// corporation_structure_services table, not more code.
-	reasonStructureServices = "shimmable in shape and no longer blocked on the store (B55: " +
-		"ListCorporationStructures returns the full ordered set, and the two `reinforce_weekday` " +
-		"fields are constants because the live ESI spec has no such properties). Blocked on " +
-		"`services`: legacy's is a HasMany onto corporation_structure_services and HANGAR's is a " +
-		"jsonb array of ESI `{name, state}` objects, and fixtures.php seeds NO services — so the " +
-		"recording holds `[]` and does not pin the element shape at all. Byte-identity cannot be " +
-		"claimed from a field the corpus never exercised, and a structure with services online is " +
-		"the common case. Needs a re-recording with services present, not more code."
 
 	reasonIdentitySpace = "HANGAR's user and squad ids are uuids where legacy's were MySQL " +
 		"auto-increment integers. `\"id\":1` and `\"id\":\"019ff31f-…\"` are different " +
