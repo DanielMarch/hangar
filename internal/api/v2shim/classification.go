@@ -119,18 +119,90 @@ const (
 	// the ninth (corporation.structures) turned out to have a DIFFERENT and
 	// real blocker, which is reasonStructureServices below.
 	//
-	// reasonNoKeysetWindow survives, narrowed to the four routes it was
-	// always true of: assets, contracts, mail and notifications are the ones
-	// whose store query really is a keyset page.
+	// ── DEFECT B57 (PHASE 20.10): AND IT WAS STILL WRONG FOR FOUR MORE ────
+	// 20.9 narrowed reasonNoKeysetWindow to six routes and said they were
+	// "verified per route". They were — against the STORE. The question asked
+	// was "is this relation really only a keyset page?", and for all six the
+	// answer was yes. The question NOT asked was the one that decides whether
+	// the reason is the real blocker: "and if the full-set query existed,
+	// would the route then be servable?"
+	//
+	// For four of the six the answer is no, permanently:
+	//
+	//   character.assets, corporation.assets — `map_id` and `map_name` are
+	//   REAL COLUMNS on legacy's asset tables (2018_01_05_195350:
+	//   `bigInteger('map_id')->nullable()`, `string('map_name')->nullable()`),
+	//   a persisted denormalisation of SeAT's own location resolution.
+	//   app.asset has neither, and the recording proves legacy populates
+	//   them: character.assets row TWO carries map_id 30000142 and map_name
+	//   "Jita". Already documented as unreproducible in
+	//   APPENDIX_C_MIGRATION.md §7 — while this file told clients to wait.
+	//
+	//   character.contracts, corporation.contracts — `contract_details.price`
+	//   is a MySQL `double` (2018_01_07_134346), the same column type as
+	//   character_wallet_journals.amount, and the recording carries the SAME
+	//   divergent value: the fixture seeds 9007199254740993.01, which parses
+	//   to the float64 9007199254740994, and the recording says
+	//   9007199254741000 — three ulps away. That is reasonMySQLDoubleRounding
+	//   exactly, settled in 20.7 and equally unfixable here.
+	//
+	// The cost of getting this wrong is not cosmetic. StatusPending's 501
+	// body says "not yet"; four routes were telling integrators to wait for a
+	// release that could never ship, and two of them contradicted a document
+	// in this same repository that already said so.
+	//
+	// The lesson generalises past this file: a reason that is TRUE is not the
+	// same as a reason that is THE BLOCKER, and only asking "what happens
+	// after this is fixed" tells them apart.
+	//
+	// reasonNoKeysetWindow now names the TWO routes it was ever the whole
+	// story for — and both are served as of this phase, so nothing carries it.
+	// It is kept, unreferenced, because deleting it would delete the record.
 	reasonNoKeysetWindow = "shimmable: keyed by EVE identifiers HANGAR stores unchanged. " +
 		"The store exposes this relation ONLY as a keyset page (LIMIT + a cursor predicate) because " +
 		"OFFSET is prohibited (SRS §6, enforced by sqlc's no-offset rule), and legacy paginated the " +
-		"whole relation in PHP. Needs a full-set store query and corpus fixtures; not yet written. " +
-		"MEASURED per route in Phase 20.9 (B55) rather than assumed for the family: nine routes that " +
-		"carried this reason already had a full-set query and eight of them are now served."
+		"whole relation in PHP. Needs a full-set store query and corpus fixtures; not yet written."
 
-	// reasonStructureServices is corporation.structures' real blocker, and it
-	// is not the one it carried for three phases.
+	// reasonAssetMapColumns is what BOTH asset routes are actually blocked on.
+	reasonAssetMapColumns = "NOT shimmable, and not for want of a store query (B57 — it carried " +
+		"reasonNoKeysetWindow until Phase 20.10). Legacy's asset tables have `map_id` (bigint) and " +
+		"`map_name` (string) as REAL PERSISTED COLUMNS holding SeAT's own location-resolution " +
+		"denormalisation; app.asset has neither, and HANGAR resolves locations through " +
+		"app.asset_location with a different shape and no stored name. The recording is decisive " +
+		"rather than silent about it: character.assets row two carries map_id 30000142 and " +
+		"map_name \"Jita\", so a constant null would be provably wrong. Recorded as unreproducible " +
+		"in APPENDIX_C_MIGRATION.md §7 since Phase 19 — this route's reason simply did not say so."
+
+	// reasonContractDoublePrice is what BOTH contract routes are actually
+	// blocked on: the same measured conflict as character.wallet-journal.
+	reasonContractDoublePrice = "NOT shimmable, and not for want of a store query (B57 — it carried " +
+		"reasonNoKeysetWindow until Phase 20.10). `contract_details.price` is a MySQL DOUBLE, the " +
+		"same column type as character_wallet_journals.amount, and the corpus carries the same " +
+		"divergence settled in 20.7: the fixture seeds 9007199254740993.01, which parses to the " +
+		"float64 9007199254740994, and the recording says 9007199254741000 — three ulps away. " +
+		"HANGAR's app.contract.price is NUMERIC(30,2) and holds the value it was given, exactly. " +
+		"No formatting rule makes an exact decimal emit a different double, so this is the same " +
+		"unfixable corpus fact, not a second instance of a fixable bug. Everything else about the " +
+		"route IS reproducible — bids, lines, the three entity objects and the nested location " +
+		"objects all have HANGAR sources or recorded constants — which is precisely why the price " +
+		"had to be checked rather than assumed."
+
+	// ── reasonStructureServices IS RESOLVED (PHASE 20.10) AND UNREFERENCED ─
+	// The re-recording it asked for was made. `services` elements are
+	// {name, state} — the create migration's `corporation_id` column was
+	// dropped by a later migration, so the model not hiding it is moot — and
+	// that is exactly what app.corporation_structure.services holds. The
+	// route is SERVED. Kept, unreferenced, because the reasoning below is why
+	// the route was NOT served on evidence the corpus did not contain, and
+	// that judgement was correct even though its prediction was not.
+	//
+	// It also bought something worth more than the route: the re-recording
+	// inserts two structures in DESCENDING id order and two services in
+	// non-alphabetical order, and legacy returns both in ASCENDING key order.
+	// That MEASURES the primary-key ordering rule every other route in this
+	// package had only inferred from the corporation-history recording.
+	//
+	// reasonStructureServices, as it stood:
 	//
 	// The store query exists (ListCorporationStructures, full ordered set) and
 	// fourteen of the row's seventeen fields are reproducible: HANGAR holds
@@ -337,19 +409,19 @@ func Classification() []LegacyRoute {
 		pending("CharacterController", Prefix+"/character/sheet/{id}", "character.sheet",
 			migrationCharacters, reasonCharacterSheetFields),
 		pending("CharacterController", Prefix+"/character/assets/{id}", "character.assets",
-			migrationCharacters+"/assets", reasonNoKeysetWindow),
+			migrationCharacters+"/assets", reasonAssetMapColumns),
 		pending("CharacterController", Prefix+"/character/contracts/{id}", "character.contracts",
-			migrationCharacters+"/contracts", reasonNoKeysetWindow),
+			migrationCharacters+"/contracts", reasonContractDoublePrice),
 		served("CharacterController", Prefix+"/character/industry/{id}", "character.industry",
 			"characters.view", characterIndustry),
 		served("CharacterController", Prefix+"/character/jump-clones/{id}", "character.jump-clones",
 			"characters.view", characterJumpClones),
-		pending("CharacterController", Prefix+"/character/mail/{id}", "character.mail",
-			migrationCharacters+"/mail", reasonNoKeysetWindow),
+		served("CharacterController", Prefix+"/character/mail/{id}", "character.mail",
+			"characters.view", characterMail),
 		served("CharacterController", Prefix+"/character/market-orders/{id}", "character.market-orders",
 			"characters.view", characterMarketOrders),
-		pending("CharacterController", Prefix+"/character/notifications/{id}", "character.notifications",
-			migrationCharacters+"/notifications", reasonNoKeysetWindow),
+		served("CharacterController", Prefix+"/character/notifications/{id}", "character.notifications",
+			"characters.view", characterNotifications),
 		served("CharacterController", Prefix+"/character/skills/{id}", "character.skills",
 			"characters.view", characterSkills),
 		served("CharacterController", Prefix+"/character/skill-queue/{id}", "character.skill-queue",
@@ -368,17 +440,17 @@ func Classification() []LegacyRoute {
 			migrationCorporations+"/wallets/{division}/transactions", reasonSurrogateID),
 
 		pending("CorporationController", Prefix+"/corporation/assets/{id}", "corporation.assets",
-			migrationCorporations+"/assets", reasonNoKeysetWindow),
+			migrationCorporations+"/assets", reasonAssetMapColumns),
 		pending("CorporationController", Prefix+"/corporation/contracts/{id}", "corporation.contracts",
-			migrationCorporations+"/contracts", reasonNoKeysetWindow),
+			migrationCorporations+"/contracts", reasonContractDoublePrice),
 		served("CorporationController", Prefix+"/corporation/industry/{id}", "corporation.industry",
 			"corporations.view", corporationIndustry),
 		served("CorporationController", Prefix+"/corporation/market-orders/{id}", "corporation.market-orders",
 			"corporations.view", corporationMarketOrders),
 		served("CorporationController", Prefix+"/corporation/member-tracking/{id}", "corporation.member-tracking",
 			"corporations.view", corporationMemberTracking),
-		pending("CorporationController", Prefix+"/corporation/structures/{id}", "corporation.structures",
-			migrationCorporations+"/structures", reasonStructureServices),
+		served("CorporationController", Prefix+"/corporation/structures/{id}", "corporation.structures",
+			"corporations.view", corporationStructures),
 		pending("CorporationController", Prefix+"/corporation/killmails/{id}", "killmails.corporation",
 			migrationKillmails, reasonKillmailHash),
 

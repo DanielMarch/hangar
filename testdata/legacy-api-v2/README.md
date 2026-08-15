@@ -35,14 +35,43 @@ The pipeline:
    `Seat\Api\Http\Resources\*` classes over real Eloquent models, and writes
    `$response->getContent()` unmodified.
 
-To re-record:
+To re-record, from `recorder/`:
 
 ```bash
-docker network create hangar-corpus && docker run -d --name corpus-mysql --network hangar-corpus -e MYSQL_ROOT_PASSWORD=root -e MYSQL_DATABASE=seat mysql:8
+sh bootstrap-legacy.sh
 ```
 
-then build `recorder/Dockerfile`, clone the four pinned repos into `recorder/seat-{api,eveapi,services,web}`,
-and run `run.sh migrate.php` followed by `run.sh record.php`.
+```bash
+docker network create hangar-corpus && docker run -d --name corpus-mysql --network hangar-corpus -e MYSQL_ROOT_PASSWORD=root -e MYSQL_DATABASE=seat mysql:8.4.11
+```
+
+```bash
+docker build -t hangar-corpus-recorder .
+```
+
+```bash
+docker run --rm --network hangar-corpus -v "$PWD":/app -w /app hangar-corpus-recorder sh run.sh migrate.php
+```
+
+```bash
+docker run --rm --network hangar-corpus -v "$PWD":/app -w /app hangar-corpus-recorder sh run.sh record.php
+```
+
+`bootstrap-legacy.sh` clones the four repos at the pinned commits, **fails hard if a clone does not
+land on the pinned SHA**, and applies `recorder/patches/`. Output goes to `recorder/out/`, never
+over `responses/` — diff the two and copy across deliberately.
+
+> **[Phase 20.10, defect B58] These steps used to be prose, and following them did not work.**
+> The list said "clone the four pinned repos", which is right, and omitted the one-line patch to
+> `eveseat/web` described under *Deviations* below — because that patch lived only inside an
+> untracked clone on whichever machine last ran the recorder. A fresh checkout following the
+> documented procedure got **464 of 472** migrations, not 471, and the seven extra failures all
+> named `users.id` / `refresh_tokens.user_id` rather than the `CAST` that caused them. The patch is
+> now committed under `recorder/patches/` and applied automatically, so "reproducible rather than
+> asserted" is a property of the repository instead of a property of one laptop.
+>
+> Verified at Phase 20.10: bootstrap → migrate → record from clean clones reproduces **all 34
+> committed responses and `MANIFEST.json` byte for byte**.
 
 ### Why MySQL and not SQLite
 
@@ -59,9 +88,13 @@ it there. Recording on SQLite would have produced a plausible, wrong answer.
 
 1. **One patched migration.** `web/2019_11_12_220840_drop_groups_table.php` contains
    `CAST(user_settings.value AS INT)`, which MySQL 8.4 rejects (`SIGNED` is the MySQL spelling;
-   `INT` is MariaDB's). Patched to `AS SIGNED` in the recorder's copy. It is a data-backfill query
-   over an empty table and defines no column, so the schema is unaffected — but without the patch
-   the migration aborts before adding `users.main_character_id`, which `UserResource` emits.
+   `INT` is MariaDB's). Patched to `AS SIGNED` by
+   `recorder/patches/0001-seat-web-cast-signed-for-mysql-8.patch`, which `bootstrap-legacy.sh`
+   applies. It is a data-backfill query over an empty table and defines no column, so the schema is
+   unaffected — but without the patch the migration aborts before adding `users.main_character_id`,
+   which `UserResource` emits, and seven later migrations then fail in a cascade that names
+   `users.id` rather than the `CAST`. **[20.10]** This used to say "patched in the recorder's copy",
+   which described a file nobody else had; see B58 above.
 2. **`balance_buckets` is not applied** (1 of 472). It seeds ESI job-scheduling buckets and
    touches no table this corpus reads.
 3. **The SDE is not imported.** SeAT's `invTypes`/`invGroups`/`solar_systems` tables come from
@@ -90,6 +123,18 @@ reproducible exactly — but each value is there to break something if the shim 
 * **An empty collection.** `character.assets.empty` pins `"data":[]` with `"from":null`,
   `"to":null`, `"total":0` — never `"data":null`. Phase 18 found that an empty success is easy to
   mistake for a failure, and the shim is where that mistake would be silent.
+* **Row ORDER, measured rather than inferred. [Phase 20.10]** Every other collection here holds
+  one row, which pins field names, order, types and formatting and **cannot pin the order of the
+  rows themselves**. `corporation.structures` now holds two structures inserted in *descending*
+  `structure_id` order, and one of them carries two services inserted in *non-alphabetical* order,
+  so insertion order and primary-key order disagree in two places at once. Legacy returns both in
+  **ascending key order** — confirming that its unordered `->paginate()` is an InnoDB
+  clustered-index scan, which is what the shim had been inferring from `character.corporation-history`
+  alone. Do not "tidy" these fixtures into insertion order: the disagreement is the measurement.
+* **A relation with actual elements. [Phase 20.10]** The same two services also pin the *element
+  shape* of a `HasMany` — `{"name":…,"state":…}`, two keys. Before this, `services` was recorded as
+  `[]` and `corporation.structures` was classified unservable because byte-identity cannot be
+  claimed from a field the corpus never exercised. It is servable; the recording is what settled it.
 * **A real second page.** 20 wallet-journal rows against a page size of 15, recorded at
   `?page=1` and `?page=2`, so `prev`/`next`/`from`/`to`/`last_page` are all exercised with
   non-degenerate values.

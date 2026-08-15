@@ -1,0 +1,32 @@
+Subject: [seat-web] CAST(... AS SIGNED) so the migration runs on MySQL 8.4
+
+testdata/legacy-api-v2/README.md has described this patch since Phase 19 as
+"patched to `AS SIGNED` in the recorder's copy". The recorder's copy is a
+clone of eveseat/web that is NOT tracked in this repository, so the patch
+existed only on whichever machine last ran the recorder — and Phase 20.10
+found that a fresh clone at the pinned commit gets 464 of 472 migrations,
+not the documented 471.
+
+`CAST(x AS INT)` is MariaDB's spelling; MySQL wants `SIGNED`. The query is a
+data backfill over an empty table and defines no column, so the schema is
+unaffected — but without the patch the migration aborts BEFORE adding
+`users.main_character_id`, and seven later migrations fail in a cascade
+around `users.id` / `refresh_tokens.user_id` that looks nothing like its
+cause. That is exactly the kind of thing a README sentence loses and a
+committed, automatically-applied patch does not.
+
+Applied by bootstrap-legacy.sh, idempotently.
+
+diff --git a/src/database/migrations/2019_11_12_220840_drop_groups_table.php b/src/database/migrations/2019_11_12_220840_drop_groups_table.php
+index ceaf30bf..509a7969 100644
+--- a/src/database/migrations/2019_11_12_220840_drop_groups_table.php
++++ b/src/database/migrations/2019_11_12_220840_drop_groups_table.php
+@@ -265,7 +265,7 @@ class DropGroupsTable extends Migration
+                         $join->where('user_settings.name', 'main_character_id');
+                     })
+                     ->whereNotNull('user_settings.value')
+-                    ->selectRaw('users.group_id, users.id, users.character_owner_hash, CAST(user_settings.value AS INT)'));
++                    ->selectRaw('users.group_id, users.id, users.character_owner_hash, CAST(user_settings.value AS SIGNED)'));
+
+         // fetch duplicated users which are not related to main character
+         $entries = DB::table('mig_groups')

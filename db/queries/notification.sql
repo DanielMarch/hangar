@@ -38,6 +38,21 @@ SELECT * FROM app.character_notification
  ORDER BY sent_at DESC, notification_id DESC
  LIMIT sqlc.arg(page_size);
 
+-- name: ListCharacterNotificationsByCharacter :many
+-- PHASE 20.10 — the /api/v2 shim's character.notifications route. Same
+-- reasoning as ListMailHeadersByCharacter: the keyset page above serves
+-- /api/v1 and cannot serve a PHP-paginated legacy collection.
+--
+-- ORDER BY notification_id is an INFERENCE and is marked as one. Legacy's
+-- getNotifications also calls `->paginate()` with no orderBy, but
+-- `character_notifications` DOES have a primary key — `$table->increments('id')`
+-- — so its clustered-index order is a MySQL auto-increment HANGAR has no
+-- column for and cannot reproduce. That surrogate is not on the wire
+-- (NotificationResource forgets `id`), so it blocks only the ROW ORDER of a
+-- multi-row page, not the route; notification_id is the closest stable
+-- proxy. The recording holds one row and cannot distinguish the two.
+SELECT * FROM app.character_notification WHERE character_id = $1 ORDER BY notification_id;
+
 -- name: ListUnparseableCharacterNotifications :many
 -- The unknown-types board's YAML-parse-failure view (Principle 14 applied
 -- to a whole payload shape, not just one field — see 00035's header).

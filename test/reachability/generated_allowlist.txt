@@ -95,6 +95,12 @@ DeregisterReplica
 # GetLatestSdeImport LEFT this group in Phase 20.5: `hangar admin sde-status`,
 # `hangar admin import-sde --if-changed` and the boot-time SDE report all read
 # it (B22).
+# ListMailRecipients LEFT it in Phase 20.10: the /api/v2 shim's character.mail
+# route renders each recipient as a legacy entity object, so the query finally
+# has the caller it was written for. Worth noting WHICH surface closed it —
+# /api/v1's mail endpoints still do not read recipients, so the compatibility
+# shim is currently the only thing that exposes them, and a future /api/v1 mail
+# detail screen is still owed.
 CreateCharacterNote
 CreateSquadApplication
 GetAsset
@@ -108,7 +114,6 @@ ListAssetsByRootLocation
 ListInvalidCharacterTokens
 ListKillmailAttackers
 ListKillmailItems
-ListMailRecipients
 RecordApiTokenAccess
 
 # Writers with no production caller. PHASE 20.7 (B48) emptied most of this

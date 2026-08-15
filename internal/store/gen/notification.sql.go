@@ -11,6 +11,53 @@ import (
 	"time"
 )
 
+const listCharacterNotificationsByCharacter = `-- name: ListCharacterNotificationsByCharacter :many
+SELECT character_id, notification_id, sent_at, sender_id, sender_type, type, text, is_read, payload, parse_failed FROM app.character_notification WHERE character_id = $1 ORDER BY notification_id
+`
+
+// PHASE 20.10 — the /api/v2 shim's character.notifications route. Same
+// reasoning as ListMailHeadersByCharacter: the keyset page above serves
+// /api/v1 and cannot serve a PHP-paginated legacy collection.
+//
+// ORDER BY notification_id is an INFERENCE and is marked as one. Legacy's
+// getNotifications also calls `->paginate()` with no orderBy, but
+// `character_notifications` DOES have a primary key — `$table->increments('id')`
+// — so its clustered-index order is a MySQL auto-increment HANGAR has no
+// column for and cannot reproduce. That surrogate is not on the wire
+// (NotificationResource forgets `id`), so it blocks only the ROW ORDER of a
+// multi-row page, not the route; notification_id is the closest stable
+// proxy. The recording holds one row and cannot distinguish the two.
+func (q *Queries) ListCharacterNotificationsByCharacter(ctx context.Context, characterID int64) ([]AppCharacterNotification, error) {
+	rows, err := q.db.Query(ctx, listCharacterNotificationsByCharacter, characterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppCharacterNotification
+	for rows.Next() {
+		var i AppCharacterNotification
+		if err := rows.Scan(
+			&i.CharacterID,
+			&i.NotificationID,
+			&i.SentAt,
+			&i.SenderID,
+			&i.SenderType,
+			&i.Type,
+			&i.Text,
+			&i.IsRead,
+			&i.Payload,
+			&i.ParseFailed,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCharacterNotificationsPage = `-- name: ListCharacterNotificationsPage :many
 SELECT character_id, notification_id, sent_at, sender_id, sender_type, type, text, is_read, payload, parse_failed FROM app.character_notification
  WHERE character_id = $1

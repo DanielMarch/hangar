@@ -198,8 +198,8 @@
         "path": "/api/v2/corporation/structures/98000001",
         "query": [],
         "status": 200,
-        "bytes": 751,
-        "sha256": "73b729669413e040c1b505eb5e6df95598b361a3050f0394421e46af51509aea"
+        "bytes": 1235,
+        "sha256": "db91a5d37a86f1b54df88cc604248c08a5de22e002bf5ab4e81393b4123aa4e5"
     },
     {
         "name": "corporation.wallet-journal",

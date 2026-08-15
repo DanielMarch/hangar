@@ -44,6 +44,23 @@ web/test-results/
 # generated AND tracked: Principle 10 requires CI to diff them so a schema drift
 # is a build failure rather than a runtime surprise. Do not add them here.
 
+# ── the Gate 7 corpus recorder's vendored legacy sources ─────────────────────
+# testdata/legacy-api-v2/recorder/ is committed BECAUSE the recording has to be
+# reproducible, but the four eveseat repositories it runs are NOT vendored here:
+# they are cloned at the exact commits testdata/legacy-api-v2/README.md pins,
+# which is what makes the pin verifiable rather than a claim about a directory
+# somebody could have edited. Same for composer's vendor tree and the
+# dependency-ready marker run.sh drops.
+testdata/legacy-api-v2/recorder/seat-api/
+testdata/legacy-api-v2/recorder/seat-eveapi/
+testdata/legacy-api-v2/recorder/seat-services/
+testdata/legacy-api-v2/recorder/seat-web/
+testdata/legacy-api-v2/recorder/vendor/
+testdata/legacy-api-v2/recorder/.deps-ready
+# record.php writes here, never over responses/ — the diff between the two is
+# the review step, so the run output itself is not an artefact.
+testdata/legacy-api-v2/recorder/out/
+
 # ── local data ───────────────────────────────────────────────────────────────
 /data/
 /tmp/

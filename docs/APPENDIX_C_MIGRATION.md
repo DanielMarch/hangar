@@ -105,8 +105,8 @@ cannot fix this for you.
 | Legacy controller | Status | HANGAR equivalent |
 | :-- | :-- | :-- |
 | `AllianceController` | **shimmed** | `/api/v1/alliances/*` |
-| `CharacterController` | **partly shimmed** — 7 of 15 routes | `/api/v1/characters/*` |
-| `CorporationController` | **partly shimmed** — 5 of 11 routes | `/api/v1/corporations/*` |
+| `CharacterController` | **partly shimmed** — 9 of 15 routes | `/api/v1/characters/*` |
+| `CorporationController` | **partly shimmed** — 6 of 11 routes | `/api/v1/corporations/*` |
 | `KillmailsController` | **not yet shimmed** | `/api/v1/{characters,corporations}/{id}/killmails` |
 | `RoleController` | **410 Gone — breaking** | `/api/v1/admin/roles`, `/api/v1/admin/scopes` |
 | `RoleLookupController` | **410 Gone — breaking** | `/api/v1/admin/users/{id}`, `/api/v1/me` |
@@ -114,7 +114,7 @@ cannot fix this for you.
 | `UserController` | **501 — not translatable** | `/api/v1/admin/users`, `/api/v1/me` |
 | `ApiController` | n/a | framework base class, no routes |
 
-Shimmed today, byte-identical to recorded legacy responses — **13 of 34**:
+Shimmed today, byte-identical to recorded legacy responses — **16 of 34**:
 
 ```
 GET /api/v2/alliance/contacts/{alliance_id}
@@ -130,6 +130,9 @@ GET /api/v2/character/skill-queue/{character_id}        [added in Phase 20.9]
 GET /api/v2/corporation/industry/{corporation_id}       [added in Phase 20.9]
 GET /api/v2/corporation/market-orders/{corporation_id}  [added in Phase 20.9]
 GET /api/v2/corporation/member-tracking/{corporation_id} [added in Phase 20.9]
+GET /api/v2/character/mail/{character_id}                [added in Phase 20.10]
+GET /api/v2/character/notifications/{character_id}       [added in Phase 20.10]
+GET /api/v2/corporation/structures/{corporation_id}      [added in Phase 20.10]
 ```
 
 ### The per-route classification is the authority **[Phase 20.6]**
@@ -165,10 +168,29 @@ them was **already being called in production** by the `/api/v1` route serving t
 (defect **B55**). Eight are now served and byte-verified against the corpus; the ninth,
 `corporation.structures`, turned out to have a different and real blocker.
 
-The blocker survives, narrowed to the four routes it was always true of: **assets, contracts,
-mail and notifications**, whose store queries genuinely are keyset pages (`LIMIT` plus a cursor
-predicate) because `OFFSET` is prohibited (SRS §6). Those four still need a full-set query and
-corpus fixtures.
+**And in Phase 20.10 it turned out to be wrong for four more (defect B57) — worse, because those
+four cannot be served at all.** 20.9 narrowed the blocker to six routes and called them verified
+per route. They were verified against the *store*: "is this relation really only a keyset page?"
+— yes, for all six. The question not asked was the one that decides whether a reason is the *real*
+blocker: **"and if the full-set query existed, would the route then be servable?"** For four of
+the six the answer is no, permanently:
+
+* **`character.assets`, `corporation.assets`** — `map_id` and `map_name` are real persisted
+  columns on legacy's asset tables, holding SeAT's own location-resolution denormalisation.
+  `app.asset` has neither. The recording is decisive rather than silent: `character.assets` row
+  **two** carries `map_id: 30000142` and `map_name: "Jita"`, so a constant `null` is provably
+  wrong. This was already in §7's table of fields the shim cannot reproduce — while the route's
+  own reason told clients to wait.
+* **`character.contracts`, `corporation.contracts`** — `contract_details.price` is a MySQL
+  `double`, the same column type as `character_wallet_journals.amount`, and the corpus carries the
+  same divergence: the fixture seeds `9007199254740993.01`, which parses to the float64
+  `9007199254740994`, and the recording says `9007199254741000` — three ulps apart. That is
+  exactly the conflict settled in 20.7, and it is equally unfixable here.
+
+So the cost of a *true but not load-bearing* reason is not cosmetic: `pending` means "wait for a
+release", and four routes were promising one that could never ship — two of them contradicting
+this very document. **Only two routes ever needed the full-set query, and both are served as of
+Phase 20.10.** Nothing carries `reasonNoKeysetWindow` now.
 
 The `pending` reasons worth naming, because none of them is "nobody wrote it yet":
 
@@ -180,14 +202,14 @@ The `pending` reasons worth naming, because none of them is "nobody wrote it yet
   this route servable — two blockers minus one is one. Note also that the old text here claimed
   `total_sp` "could be summed from `app.character_skill`"; it could not. ESI's total *includes*
   unallocated points, so the sum differs from the total by exactly the number that was missing.
-* **`corporation.structures`** is no longer blocked on the store. It is blocked on `services`:
-  legacy's is a `HasMany` onto `corporation_structure_services` and HANGAR's is a `jsonb` array of
-  ESI `{name, state}` objects, and `fixtures.php` seeds **no services at all** — so the recording
-  holds `[]` and does not pin the element shape. Byte-identity cannot be claimed from a field the
-  corpus never exercised, and a structure with services online is the common case, not the corner.
-  Closing it needs a **re-recording**, not more code. (Its two `reinforce_weekday` fields are
-  already settled: the live ESI spec has no such properties, so no current installation of either
-  system can hold a value for them.)
+* ~~**`corporation.structures`**~~ — **SERVED as of Phase 20.10.** 20.9 refused to serve it because
+  `fixtures.php` seeded no services, so the recording held `[]` and never pinned the element shape;
+  it said the fix was a re-recording rather than more code. The re-recording was made, and the
+  element is `{"name":…,"state":…}` — two keys, exactly what
+  `app.corporation_structure.services` holds. The judgement was right even though its prediction
+  was not: `Schema::create('corporation_structure_services')` declares a `corporation_id` that the
+  model does not hide, which reads as a third key, and **a later migration drops that column**. The
+  schema had to be read out of the migrated database, not off the migration that created the table.
 * **`character.wallet-transactions`, `corporation.wallet-journal`, `corporation.wallet-transactions`**
   lead with SeAT's own MySQL auto-increment key (`id` / `internal_id`), a SeAT-internal surrogate
   HANGAR has no column for — the same class as `attacker_hash` in §7.
@@ -341,7 +363,8 @@ things in those bytes have no HANGAR source, and are recorded here rather than h
 | `user_id` | character sheet | **[Phase 20.6]** A legacy MySQL integer. `app.character.user_id` is a `uuid` (§4.1) — the same identifier-space break that makes `UserController` unshimmable, inside an otherwise reproducible route. Emitting the uuid breaks every client parsing it as an integer; synthesising an integer invents an id nobody stored. |
 | ~~`skillpoints.total_sp`, `skillpoints.unallocated_sp`~~ | character sheet | **[CLOSED in Phase 20.9, B56]** HANGAR ingested both on every skills sync and persisted neither. `app.character_skill_summary` now holds them and `GET /api/v1/characters/{id}/skills/summary` returns them. The 20.6 note that `total_sp` "could be summed from `app.character_skill`" was wrong — ESI's total includes unallocated points. `character.sheet` remains unshimmable on `user_id` alone. |
 | `station_id` | **corporation** industry jobs | **[Phase 20.9]** Reproduced as a constant `null`, which is the *legacy* value. ESI names this field `station_id` on `/characters/{id}/industry/jobs` and `location_id` on `/corporations/{id}/industry/jobs`; SeAT mirrored both, so its corporation table has a hidden `location_id` and a vestigial `station_id` no sync ever writes. HANGAR normalised them into one `NOT NULL` column — which is the better schema, and exactly why byte-identity requires emitting legacy's dead one. `/api/v1` has the real value. |
-| `services` | corporation structures | **[Phase 20.9]** Not a missing source — an **unpinned** one. Legacy's is a `HasMany` onto `corporation_structure_services`; HANGAR's is a `jsonb` array of ESI `{name, state}`. `fixtures.php` seeds no services, so the recording holds `[]` and the element shape was never captured. This is why `corporation.structures` is still `pending` despite every other field being reproducible. |
+| ~~`services`~~ | corporation structures | **[CLOSED in Phase 20.10]** Was an **unpinned** source, not a missing one: `fixtures.php` seeded no services, so the recording held `[]`. Re-recorded with two services present — the element is `{name, state}`, exactly what HANGAR's `jsonb` holds — and `corporation.structures` is now served. Legacy orders them by the `(structure_id, name)` key, not by ESI's order, so the shim sorts by name. |
+| `map_id`, `map_name` **block both asset routes** | asset rows | **[Phase 20.10]** Listed above as unreproducible since Phase 19, but `character.assets` and `corporation.assets` were classified as merely *pending a store query* until B57. They are unservable: row two of `character.assets` carries real values (`30000142`, `"Jita"`), so the null a HANGAR-backed response would emit is provably wrong. |
 | the resolved entity `name` | every embedded `{entity_id, …}` object | **[Phase 20.6]** Legacy resolved these from its `universe_names` table and the corpus was recorded with that table empty, so every entity in every recording reads `"Unknown"`. HANGAR usually **knows** the name and deliberately does not use it here: the shim's contract is byte-identity with the recorded response, and `/api/v1` has always served the resolved name. Same rule the SDE `type` object already followed. |
 
 The corpus is recorded against an installation with no SDE imported — a real, supported state —

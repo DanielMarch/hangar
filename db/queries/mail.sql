@@ -23,6 +23,22 @@ SELECT * FROM app.mail_header
  ORDER BY sent_at DESC, mail_id DESC
  LIMIT sqlc.arg(page_size);
 
+-- name: ListMailHeadersByCharacter :many
+-- PHASE 20.10 — the /api/v2 shim's character.mail route.
+--
+-- The keyset page above cannot serve it: legacy loaded the whole relation and
+-- paginated in PHP, and OFFSET is prohibited here (SRS §6), so the shim reads
+-- the ordered set and slices in Go (v2shim.Window). This is the query B55's
+-- nine routes turned out to ALREADY have and these four genuinely did not.
+--
+-- ORDER BY mail_id, not by sent_at: legacy's CharacterController::getMail
+-- calls `->paginate()` with NO orderBy (verified against eveseat/api at the
+-- commit testdata/legacy-api-v2/README.md pins), so MySQL returns the
+-- clustered-index scan. `mail_headers` has no declared primary key after
+-- 2019_10_30_131410 dropped character_id, so InnoDB clusters on the first
+-- UNIQUE NOT NULL index, which is the one 2018_01_05_112025 added on mail_id.
+SELECT * FROM app.mail_header WHERE character_id = $1 ORDER BY mail_id;
+
 -- name: UpsertMailBody :one
 INSERT INTO app.mail_body AS t (character_id, mail_id, body) VALUES ($1,$2,$3)
 ON CONFLICT (character_id, mail_id) DO UPDATE SET body = EXCLUDED.body, updated_at = now()
@@ -47,7 +63,13 @@ ON CONFLICT (character_id, mail_id, recipient_id) DO NOTHING
 RETURNING *;
 
 -- name: ListMailRecipients :many
-SELECT * FROM app.mail_recipient WHERE character_id = $1 AND mail_id = $2;
+-- ORDER BY added in Phase 20.10. It had none, so the row order was whatever
+-- Postgres chose and could differ between two calls for the same mail — not
+-- a defect anything had noticed, but the /api/v2 shim renders these into a
+-- JSON array whose order IS the bytes, and an unordered read cannot be
+-- byte-compared. recipient_id matches both HANGAR's primary key and the
+-- (mail_id, recipient_id) unique index legacy clusters this table on.
+SELECT * FROM app.mail_recipient WHERE character_id = $1 AND mail_id = $2 ORDER BY recipient_id;
 
 -- name: UpsertMailLabel :one
 INSERT INTO app.mail_label AS t (character_id, label_id, name, color, unread_count) VALUES ($1,$2,$3,$4,$5)

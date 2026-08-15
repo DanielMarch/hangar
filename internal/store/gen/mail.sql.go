@@ -56,6 +56,52 @@ func (q *Queries) InsertMailRecipient(ctx context.Context, arg InsertMailRecipie
 	return i, err
 }
 
+const listMailHeadersByCharacter = `-- name: ListMailHeadersByCharacter :many
+SELECT character_id, mail_id, from_id, subject, sent_at, is_read, labels, updated_at FROM app.mail_header WHERE character_id = $1 ORDER BY mail_id
+`
+
+// PHASE 20.10 — the /api/v2 shim's character.mail route.
+//
+// The keyset page above cannot serve it: legacy loaded the whole relation and
+// paginated in PHP, and OFFSET is prohibited here (SRS §6), so the shim reads
+// the ordered set and slices in Go (v2shim.Window). This is the query B55's
+// nine routes turned out to ALREADY have and these four genuinely did not.
+//
+// ORDER BY mail_id, not by sent_at: legacy's CharacterController::getMail
+// calls `->paginate()` with NO orderBy (verified against eveseat/api at the
+// commit testdata/legacy-api-v2/README.md pins), so MySQL returns the
+// clustered-index scan. `mail_headers` has no declared primary key after
+// 2019_10_30_131410 dropped character_id, so InnoDB clusters on the first
+// UNIQUE NOT NULL index, which is the one 2018_01_05_112025 added on mail_id.
+func (q *Queries) ListMailHeadersByCharacter(ctx context.Context, characterID int64) ([]AppMailHeader, error) {
+	rows, err := q.db.Query(ctx, listMailHeadersByCharacter, characterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppMailHeader
+	for rows.Next() {
+		var i AppMailHeader
+		if err := rows.Scan(
+			&i.CharacterID,
+			&i.MailID,
+			&i.FromID,
+			&i.Subject,
+			&i.SentAt,
+			&i.IsRead,
+			&i.Labels,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMailHeadersPage = `-- name: ListMailHeadersPage :many
 SELECT character_id, mail_id, from_id, subject, sent_at, is_read, labels, updated_at FROM app.mail_header
  WHERE character_id = $1 AND (sent_at, mail_id) < ($2::timestamptz, $3::bigint)

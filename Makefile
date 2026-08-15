@@ -270,7 +270,7 @@ check-reachability:  ## B20 class (Phase 20.1) — every subsystem has a product
 # that changes with every commit — so the artefact would land in a new
 # directory each time and the committed evidence would never be updated, only
 # accumulated. Pass GATE_VERSION=v1.0.0 at release time.
-GATE_VERSION ?= phase-20.9
+GATE_VERSION ?= phase-20.10
 
 .PHONY: gate4-evidence
 gate4-evidence: ## (Phase 20.6) Emit docs/gate-evidence/$(GATE_VERSION)/gate4 — non-zero exit means the gate is not met

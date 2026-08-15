@@ -713,6 +713,19 @@ type Querier interface {
 	ListCharacterIntelEdges(ctx context.Context, sourceCharacterID int64) ([]AppCharacterIntelEdge, error)
 	ListCharacterLoyaltyPoints(ctx context.Context, characterID int64) ([]AppCharacterLoyaltyPoint, error)
 	ListCharacterNotes(ctx context.Context, characterID int64) ([]AppCharacterNote, error)
+	// PHASE 20.10 — the /api/v2 shim's character.notifications route. Same
+	// reasoning as ListMailHeadersByCharacter: the keyset page above serves
+	// /api/v1 and cannot serve a PHP-paginated legacy collection.
+	//
+	// ORDER BY notification_id is an INFERENCE and is marked as one. Legacy's
+	// getNotifications also calls `->paginate()` with no orderBy, but
+	// `character_notifications` DOES have a primary key — `$table->increments('id')`
+	// — so its clustered-index order is a MySQL auto-increment HANGAR has no
+	// column for and cannot reproduce. That surrogate is not on the wire
+	// (NotificationResource forgets `id`), so it blocks only the ROW ORDER of a
+	// multi-row page, not the route; notification_id is the closest stable
+	// proxy. The recording holds one row and cannot distinguish the two.
+	ListCharacterNotificationsByCharacter(ctx context.Context, characterID int64) ([]AppCharacterNotification, error)
 	// ── DEFECT B46 (PHASE 20.6) ──────────────────────────────────────────────
 	// This one never returned 500, which is why it outlived the three that did:
 	// a single timestamptz argument types correctly, so it compiled and ran. It
@@ -944,6 +957,20 @@ type Querier interface {
 	// (*int32) and the callers subtract where the nil case is explicit.
 	ListLedgerDivergence(ctx context.Context) ([]ListLedgerDivergenceRow, error)
 	ListLiveReplicas(ctx context.Context, liveThreshold time.Duration) ([]AppEsiReplica, error)
+	// PHASE 20.10 — the /api/v2 shim's character.mail route.
+	//
+	// The keyset page above cannot serve it: legacy loaded the whole relation and
+	// paginated in PHP, and OFFSET is prohibited here (SRS §6), so the shim reads
+	// the ordered set and slices in Go (v2shim.Window). This is the query B55's
+	// nine routes turned out to ALREADY have and these four genuinely did not.
+	//
+	// ORDER BY mail_id, not by sent_at: legacy's CharacterController::getMail
+	// calls `->paginate()` with NO orderBy (verified against eveseat/api at the
+	// commit testdata/legacy-api-v2/README.md pins), so MySQL returns the
+	// clustered-index scan. `mail_headers` has no declared primary key after
+	// 2019_10_30_131410 dropped character_id, so InnoDB clusters on the first
+	// UNIQUE NOT NULL index, which is the one 2018_01_05_112025 added on mail_id.
+	ListMailHeadersByCharacter(ctx context.Context, characterID int64) ([]AppMailHeader, error)
 	// ── DEFECT B46 (PHASE 20.6) ──────────────────────────────────────────────
 	// Identical to the two wallet keyset queries: an uncast row comparison made
 	// sqlc generate `BeforeMailID time.Time`, the call site passed the same

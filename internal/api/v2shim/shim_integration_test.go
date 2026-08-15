@@ -256,6 +256,74 @@ func corpusListFixture(t testing.TB, s *store.Store, corpID, charID int64) {
 	})
 	require.NoError(t, err)
 
+	// ── mail ─────────────────────────────────────────────────────────────
+	// HANGAR's app.mail_header is CHARACTER-SCOPED and legacy's mail_headers
+	// is not — migration 2019_10_30_131410 moved per-character state out to
+	// mail_recipients and dropped character_id from the header. The seeded
+	// character is the recording's recipient, which is the same set legacy's
+	// `whereHas('recipients') orWhere('from')` returns for it.
+	subject := "Re: fleet"
+	sender := int64(90000002)
+	_, err = s.UpsertMailHeader(ctx, gen.UpsertMailHeaderParams{
+		CharacterID: charID, MailID: 7001, FromID: &sender, Subject: &subject,
+		SentAt: at("2026-07-29T18:00:00Z"), Labels: []int64{1},
+	})
+	require.NoError(t, err)
+	_, err = s.UpsertMailBody(ctx, charID, 7001, "<p>See you at the gate.</p>")
+	require.NoError(t, err)
+	_, err = s.InsertMailRecipient(ctx, gen.InsertMailRecipientParams{
+		CharacterID: charID, MailID: 7001, RecipientID: charID, RecipientType: "character",
+	})
+	require.NoError(t, err)
+
+	// ── notifications ────────────────────────────────────────────────────
+	// `Text` is the RAW YAML and it is what the shim reads — see
+	// translate_notifications.go on why `Payload` cannot be. Payload is
+	// seeded too, with its keys in the order Postgres will NOT give back, so
+	// a future implementation that switched to reading it fails loudly here
+	// instead of passing by luck.
+	notificationText := "solarsystemID: 30000142\nstructureID: 1000000000004\n"
+	notificationSender := int64(98000001)
+	notificationSenderType := "corporation"
+	notRead := false
+	_, err = s.UpsertCharacterNotification(ctx, gen.UpsertCharacterNotificationParams{
+		CharacterID: charID, NotificationID: 900001, SentAt: at("2026-07-28T09:00:00Z"),
+		SenderID: &notificationSender, SenderType: &notificationSenderType,
+		Type: "StructureUnderAttack", Text: &notificationText, IsRead: &notRead,
+		Payload: json.RawMessage(`{"solarsystemID":30000142,"structureID":1000000000004}`),
+	})
+	require.NoError(t, err)
+
+	// ── corporation structures ───────────────────────────────────────────
+	// Seeded in the SAME order fixtures.php inserts them — ...004 then
+	// ...003 — so this fixture reproduces the disagreement between insertion
+	// order and key order that the Phase 20.10 re-recording exists to
+	// measure. If the shim ever stopped ordering by structure_id, the byte
+	// comparison would catch it here rather than on a customer's page 2.
+	//
+	// Services are seeded "Market Hub" then "Clone Bay", also matching
+	// fixtures.php, and the recording returns them the other way round.
+	profileFour, profileThree := int32(1), int32(2)
+	hourFour, hourThree := int16(18), int16(4)
+	stateFour, stateThree := "shield_vulnerable", "armor_reinforce"
+	fuelExpires := at("2026-09-15T06:00:00Z")
+	for _, structure := range []gen.UpsertCorporationStructureParams{
+		{
+			CorporationID: corpID, StructureID: 1000000000004, TypeID: 587, SystemID: 30000142,
+			ProfileID: &profileFour, State: &stateFour, ReinforceHour: &hourFour,
+			Services: json.RawMessage(`[]`),
+		},
+		{
+			CorporationID: corpID, StructureID: 1000000000003, TypeID: 587, SystemID: 30000142,
+			ProfileID: &profileThree, State: &stateThree, ReinforceHour: &hourThree,
+			FuelExpires: &fuelExpires,
+			Services:    json.RawMessage(`[{"name":"Market Hub","state":"online"},{"name":"Clone Bay","state":"offline"}]`),
+		},
+	} {
+		_, err = s.UpsertCorporationStructure(ctx, structure)
+		require.NoError(t, err)
+	}
+
 	// ── member tracking ──────────────────────────────────────────────────
 	shipType := int32(587)
 	location := int64(60003760)

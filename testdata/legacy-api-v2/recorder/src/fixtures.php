@@ -272,6 +272,30 @@ function seedFixtures(): void
     ]);
 
     // ── structures ───────────────────────────────────────────────────────
+    // TWO structures, inserted in DESCENDING structure_id order, and the
+    // second one carries SERVICES. Both of those are deliberate (Phase 20.10).
+    //
+    // WHY TWO, IN THIS ORDER. Every other collection in this file has exactly
+    // one row, which pins field names, field order, types and formatting and
+    // CANNOT pin ROW order — a one-row collection has only one arrangement.
+    // The shim infers primary-key order from the corporation-history
+    // recording, which is the only two-row collection here. Inserting
+    // ...004 before ...003 makes insertion order and primary-key order
+    // DISAGREE, so this recording distinguishes them instead of being
+    // consistent with both.
+    //
+    // WHY SERVICES. `services` is a HasMany onto corporation_structure_services
+    // and the fixture seeded none, so the recording held `[]` and the ELEMENT
+    // SHAPE was never captured — which is why corporation.structures was
+    // classified unservable in 20.9 on evidence the corpus did not contain.
+    // The model hides structure_id/created_at/updated_at, and the TABLE has
+    // no corporation_id at all — the create migration declared one and a
+    // later migration dropped it, which is why the schema had to be read out
+    // of MySQL rather than off the `Schema::create` call. The element is
+    // therefore {name, state}, which is exactly what HANGAR's jsonb holds.
+    //
+    // Two services on one structure, in non-alphabetical insertion order, so
+    // the element ORDER inside the array is pinned too.
     DB::table('corporation_structures')->insert([
         ['corporation_id' => 98000001, 'structure_id' => 1000000000004, 'type_id' => 587,
             'system_id' => 30000142, 'profile_id' => 1, 'fuel_expires' => null,
@@ -279,6 +303,18 @@ function seedFixtures(): void
             'state' => 'shield_vulnerable', 'reinforce_weekday' => null, 'reinforce_hour' => 18,
             'next_reinforce_weekday' => null, 'next_reinforce_hour' => null,
             'next_reinforce_apply' => null, 'created_at' => $now, 'updated_at' => $now],
+        ['corporation_id' => 98000001, 'structure_id' => 1000000000003, 'type_id' => 587,
+            'system_id' => 30000142, 'profile_id' => 2, 'fuel_expires' => '2026-09-15 06:00:00',
+            'state_timer_start' => null, 'state_timer_end' => null, 'unanchors_at' => null,
+            'state' => 'armor_reinforce', 'reinforce_weekday' => null, 'reinforce_hour' => 4,
+            'next_reinforce_weekday' => null, 'next_reinforce_hour' => null,
+            'next_reinforce_apply' => null, 'created_at' => $now, 'updated_at' => $now],
+    ]);
+    DB::table('corporation_structure_services')->insert([
+        ['structure_id' => 1000000000003, 'name' => 'Market Hub',
+            'state' => 'online', 'created_at' => $now, 'updated_at' => $now],
+        ['structure_id' => 1000000000003, 'name' => 'Clone Bay',
+            'state' => 'offline', 'created_at' => $now, 'updated_at' => $now],
     ]);
 
     // ── killmails ────────────────────────────────────────────────────────
