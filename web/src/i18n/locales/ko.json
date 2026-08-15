@@ -292,6 +292,7 @@
       "userKey": "사용자 키",
       "maxTokens": "최대 토큰",
       "localRemaining": "로컬 잔량",
+      "localAtReading": "측정 시 로컬",
       "serverRemaining": "서버 잔량",
       "divergence": "편차",
       "serverObservedAt": "서버 관측",

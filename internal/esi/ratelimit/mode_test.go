@@ -103,7 +103,7 @@ func (s *fakeStore) EvictOldestLedgerEntries(ctx context.Context, group, userKey
 
 func (s *fakeStore) DeleteLedgerEntryByID(ctx context.Context, entryID uuid.UUID) error { return nil }
 
-func (s *fakeStore) RecordServerLedgerReading(ctx context.Context, group, userKey string, serverRemaining *int32) error {
+func (s *fakeStore) RecordServerLedgerReading(ctx context.Context, arg gen.RecordServerLedgerReadingParams) error {
 	return nil
 }
 

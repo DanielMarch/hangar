@@ -172,8 +172,30 @@ SELECT entry_id, cost FROM app.esi_ledger_entry
 DELETE FROM app.esi_ledger_entry WHERE entry_id = $1;
 
 -- name: RecordServerLedgerReading :exec
+-- PHASE 20.4. Writes BOTH operands of esi_ledger_divergence in one
+-- statement, under the bucket lock the reconciler already holds, because
+-- §1.3's quantity is a difference and a difference between two moments is
+-- not a measurement — see migration 00042 for the readings that forced
+-- this, and ListLedgerDivergence below for what now consumes the pair.
+--
+-- local_remaining is the caller's PRE-CORRECTION availability: the number
+-- reconcileAction is about to judge against server_remaining, computed one
+-- statement earlier from SumSettledLedgerEntryCost inside this same
+-- transaction. Storing the post-correction value instead would make the
+-- gauge read ~0 by construction, since making the two agree is the whole
+-- purpose of the statement that follows.
+--
+-- It is also measured against the ceiling the RECONCILER was given — the
+-- server's own X-Ratelimit-Limit when it sent one — rather than against
+-- the stored max_tokens ListLedgerDivergence used to use. Those agree
+-- since Phase 20.3, but the server's reading and the ceiling it is a
+-- remainder of arrived in the same response, and pairing them is one less
+-- thing that can drift.
 UPDATE app.esi_ledger_bucket
-   SET server_remaining = $3, server_observed_at = now(), updated_at = now()
+   SET server_remaining = $3,
+       local_remaining_at_reading = sqlc.arg(local_remaining),
+       server_observed_at = now(),
+       updated_at = now()
  WHERE rate_limit_group = $1 AND user_key = $2;
 
 -- ---- solo/clustered mode flush (§5.6 — both transitions must not lose or
@@ -206,21 +228,36 @@ UPDATE app.esi_ledger_bucket
 -- installation, and Gate 1.3 becomes a measure of concurrency rather than
 -- of ledger accuracy.
 --
--- The subtraction itself is deliberately NOT done here. server_remaining
--- is nullable — the server has said nothing about this bucket yet — and
--- sqlc's static analysis types `abs(... - b.server_remaining)` as a
--- non-null bigint however the expression is cast or wrapped, so scanning a
--- genuine NULL would fail at runtime. Collapsing "never observed" into
--- "zero divergence" to dodge that would be the exact empty-versus-
--- unavailable confusion SRS §6 forbids: zero divergence is a healthy
--- reading, no reading is not. The two operands come back typed (int64 and
--- *int32) and internal/api/v1 does the subtraction where the nil case is
--- explicit.
+-- ── PHASE 20.4: local_consumed/local_remaining ARE NO LONGER THE GAUGE ───
+-- They are computed HERE, at query time, and the row's server_remaining
+-- was stored by whichever response last carried the header. Subtracting
+-- them measures how much has been consumed since that response, which is
+-- throughput; the 40-55 readings in migration 00042 are what that looks
+-- like on a healthy installation under per-bucket concurrency.
+--
+-- b.local_remaining_at_reading is the fix: the local half as it stood at
+-- the instant server_remaining was written, under the same lock (see
+-- RecordServerLedgerReading). §1.3's divergence is that pair's difference
+-- and nothing else. The live columns stay in the result because the ADMIN
+-- BOARD wants them — "the ledger holds 47 right now, and the last time we
+-- compared, we and the server agreed" are two different operator
+-- questions, and answering only the second would hide current headroom.
+--
+-- The subtraction itself is deliberately NOT done here. Both stored
+-- operands are nullable — the server has said nothing about this bucket
+-- yet — and sqlc's static analysis types `abs(... - b.server_remaining)`
+-- as a non-null bigint however the expression is cast or wrapped, so
+-- scanning a genuine NULL would fail at runtime. Collapsing "never
+-- observed" into "zero divergence" to dodge that would be the exact
+-- empty-versus-unavailable confusion SRS §6 forbids: zero divergence is a
+-- healthy reading, no reading is not. The operands come back typed
+-- (*int32) and the callers subtract where the nil case is explicit.
 SELECT b.rate_limit_group,
        b.user_key,
        b.max_tokens,
        b."window",
        b.server_remaining,
+       b.local_remaining_at_reading,
        b.server_observed_at,
        b.updated_at,
        coalesce(e.local_consumed, 0)::bigint AS local_consumed,

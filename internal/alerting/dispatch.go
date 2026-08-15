@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -40,9 +41,49 @@ type Dispatcher struct {
 	Policy   RetryPolicy
 	// ClaimSize bounds one pass; zero selects DefaultClaimSize.
 	ClaimSize int32
-	Now       func() time.Time
-	Log       *slog.Logger
+	// Observer, when set, is told the outcome of every delivery this pump
+	// settles — Phase 20.4's alert_delivery_total. Nil is a valid pump
+	// (every test uses one); see DeliveryObserver.
+	Observer DeliveryObserver
+	Now      func() time.Time
+	Log      *slog.Logger
 }
+
+// DeliveryObserver receives one call per SETTLED delivery, with the channel
+// kind it was for and what happened to it.
+//
+// An interface rather than a *telemetry.AlertDeliveries so internal/
+// alerting does not import internal/telemetry — the same direction rule
+// internal/esi.Observer follows for the Gate 1 counters, and for the same
+// reason: the pump must be constructible and testable without a Prometheus
+// registry.
+//
+// ── WHY SETTLED, NOT ATTEMPTED ───────────────────────────────────────────
+// Gate 3.1's accounting identity is over TERMINAL outcomes: an alert is
+// dropped if it was generated and neither delivered nor dead-lettered. A
+// delivery that failed and will be retried has not reached a terminal
+// state, and counting the attempt as a failure would make the counter a
+// measure of channel flakiness rather than of alert fate. `retried` is
+// therefore its own outcome and not a failure — it says "this one is
+// still owed", which is exactly the third possibility §3.1 admits.
+type DeliveryObserver interface {
+	ObserveAlertDelivery(kind, outcome string)
+}
+
+// Delivery outcomes reported to a DeliveryObserver. They match
+// telemetry.Alert* deliberately — the metric's label values and the pump's
+// vocabulary must not be two lists that can drift.
+const (
+	OutcomeSent         = "sent"
+	OutcomeRetried      = "retried"
+	OutcomeDeadLettered = "dead_lettered"
+	// KindUnknown labels a delivery settled before its channel row could
+	// be read — the row was deleted between enqueue and claim. The
+	// delivery still has a fate and must still be counted; what it does
+	// not have is a knowable kind, and calling it "smtp" to avoid an
+	// awkward label value would be a lie in a metric.
+	KindUnknown = "unset"
+)
 
 // TickResult summarises one pass, for logging and for tests.
 type TickResult struct {
@@ -161,21 +202,22 @@ func (d *Dispatcher) deliver(ctx context.Context, s *store.Store, g deliveryGrou
 
 	channelRow, err := s.GetAlertChannel(ctx, g.ChannelID)
 	if err != nil {
-		return d.settleAll(ctx, s, g, fmt.Errorf("reading channel %s: %w", g.ChannelID, err), now)
+		// No channel row, so no knowable kind — see KindUnknown.
+		return d.settleAll(ctx, s, g, KindUnknown, fmt.Errorf("reading channel %s: %w", g.ChannelID, err), now)
 	}
 	if !channelRow.Enabled {
 		// Disabled between enqueue and delivery. Dead-lettering (rather
 		// than leaving it pending forever, or quietly marking it sent) is
 		// the honest outcome: the alert was not delivered, and §4.4 says
 		// that must be visible.
-		return d.settleAll(ctx, s, g, &channels.PermanentError{
+		return d.settleAll(ctx, s, g, channelRow.Kind, &channels.PermanentError{
 			Reason: fmt.Sprintf("channel %q (%s) is disabled", channelRow.Name, channelRow.Kind),
 		}, now)
 	}
 
 	channel, err := d.channelFor(channelRow)
 	if err != nil {
-		return d.settleAll(ctx, s, g, &channels.PermanentError{Reason: "building channel", Err: err}, now)
+		return d.settleAll(ctx, s, g, channelRow.Kind, &channels.PermanentError{Reason: "building channel", Err: err}, now)
 	}
 
 	msg := d.message(g)
@@ -186,7 +228,7 @@ func (d *Dispatcher) deliver(ctx context.Context, s *store.Store, g deliveryGrou
 				"alert_type", g.AlertType, "channel", channelRow.Name, "kind", channelRow.Kind,
 				"events", len(g.Events), "error", err)
 		}
-		return d.settleAll(ctx, s, g, err, now)
+		return d.settleAll(ctx, s, g, channelRow.Kind, err, now)
 	}
 
 	// One send, every delivery in the group marked sent: a coalesced
@@ -202,13 +244,35 @@ func (d *Dispatcher) deliver(ctx context.Context, s *store.Store, g deliveryGrou
 			continue
 		}
 		sent++
+		d.observe(channelRow.Kind, OutcomeSent)
 	}
 	return sent, 0, 0
+}
+
+// observe reports one settled delivery to the DeliveryObserver, if there is
+// one. It is called only where the database write SUCCEEDED, so the counter
+// can never claim an outcome the table does not also record.
+func (d *Dispatcher) observe(kind, outcome string) {
+	if d.Observer == nil {
+		return
+	}
+	d.Observer.ObserveAlertDelivery(kind, outcome)
 }
 
 // message builds the channel-agnostic Message for a group. Each channel
 // truncates it to its own limit (§4.4's "different size limits"), which is
 // why the lines are handed over as a slice rather than a finished body.
+//
+// ── PHASE 20.4: A GROUP OF ONE IS RENDERED, NOT FOLDED ───────────────────
+// render.Line folds the generic key/value listing onto ONE line, because a
+// roll-up of forty events must list one line per event. render.Render is
+// the same chain without the folding, and its doc comment has said since
+// Phase 14 that it is "the full body for a message carrying a single
+// event" — it simply had no caller, so every single-event alert went out
+// as a one-line `key value; key value; key value` squash of what should
+// have been a readable listing. That is most of the alerts on a normal
+// installation, and every alert that matters urgently: a structure comes
+// under attack once, not forty times in five minutes.
 func (d *Dispatcher) message(g deliveryGroup) channels.Message {
 	summary := g.AlertType
 	if entry, ok := catalogue.ByName(g.AlertType); ok && entry.Summary != "" {
@@ -216,8 +280,16 @@ func (d *Dispatcher) message(g deliveryGroup) channels.Message {
 	}
 
 	lines := make([]string, 0, len(g.Events))
-	for _, event := range g.Events {
-		lines = append(lines, render.Line(event.AlertType, event.Payload))
+	if len(g.Events) == 1 {
+		event := g.Events[0]
+		// Split back into lines so each channel still applies its own size
+		// limit per line, as Message.Lines' contract requires — Render's
+		// output is a multi-line listing, not a body.
+		lines = append(lines, strings.Split(strings.TrimRight(render.Render(event.AlertType, event.Payload), "\n"), "\n")...)
+	} else {
+		for _, event := range g.Events {
+			lines = append(lines, render.Line(event.AlertType, event.Payload))
+		}
 	}
 
 	return channels.Message{
@@ -263,7 +335,7 @@ func (d *Dispatcher) mentionFor(ctx context.Context, s *store.Store, g deliveryG
 // failed group. Each row is judged on its OWN attempts count: a delivery
 // that has already failed four times dead-letters on this pass even though
 // a sibling that just joined the group gets another try.
-func (d *Dispatcher) settleAll(ctx context.Context, s *store.Store, g deliveryGroup, cause error, now time.Time) (sent, retried, dead int) {
+func (d *Dispatcher) settleAll(ctx context.Context, s *store.Store, g deliveryGroup, kind string, cause error, now time.Time) (sent, retried, dead int) {
 	for _, delivery := range g.Deliveries {
 		decision := d.Policy.Decide(int(delivery.Attempts), delivery.CreatedAt, cause, now)
 		if err := Settle(ctx, s, delivery.DeliveryID, decision); err != nil {
@@ -274,8 +346,10 @@ func (d *Dispatcher) settleAll(ctx context.Context, s *store.Store, g deliveryGr
 		}
 		if decision.DeadLetter {
 			dead++
+			d.observe(kind, OutcomeDeadLettered)
 		} else {
 			retried++
+			d.observe(kind, OutcomeRetried)
 		}
 	}
 	return 0, retried, dead

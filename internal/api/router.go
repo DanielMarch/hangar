@@ -10,6 +10,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
+	"github.com/hangar-project/hangar/internal/alerting"
 	"github.com/hangar-project/hangar/internal/api/middleware"
 	"github.com/hangar-project/hangar/internal/api/v2shim"
 	"github.com/hangar-project/hangar/internal/provisioning"
@@ -47,6 +48,16 @@ type Deps struct {
 	// spec-only build path (cmd/hangar/openapi.go) and in tests, and every
 	// handler that needs it says so with a 500 rather than panicking.
 	Urgent *provisioning.Urgent
+
+	// Alerts is §4.4's emitter, for the handful of handlers whose action IS
+	// a domain event worth alerting on (Phase 20.4, defect B25 — the
+	// `domain_event` third of the alert catalogue, which until then had no
+	// producer anywhere).
+	//
+	// Nil in the spec-only build path and in tests, and every user checks:
+	// an installation whose administrator advanced the ESI pin must still
+	// have advanced it even if nothing was listening.
+	Alerts *alerting.Emitter
 }
 
 // NewAPI builds the Huma API bound to mux, with SRS §6's session-resolving

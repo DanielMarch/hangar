@@ -20,38 +20,6 @@ internal/crypto.SealWebhookSecret
 # B24 (closed by Phase 20.5) — webhook HMAC secret generation — the missing §4.9 configuration surface
 internal/crypto.NewWebhookSecret
 
-# B25 (closed by Phase 20.4) — alert catalogue: threshold set and per-domain counts, read only by tests
-internal/alerting/catalogue.CountByDomain
-internal/alerting/catalogue.Names
-internal/alerting/catalogue.SeededTotal
-internal/alerting/catalogue.SkyhookNames
-internal/alerting/catalogue.ThresholdSourceRoutes
-internal/alerting/catalogue.Thresholds
-internal/alerting/catalogue.ValidateThresholds
-
-# B25 (closed by Phase 20.4) — alert generation: Emitter, dedupe fingerprints, coalescing, dead-letter count
-internal/alerting.CoalesceKey.Due
-internal/alerting.CoalesceKey.String
-internal/alerting.DeadLetterCount
-internal/alerting.Emitter.Emit
-internal/alerting.Emitter.IngestNotification
-internal/alerting.Emitter.now
-internal/alerting.Emitter.window
-internal/alerting.Fingerprint.Hash
-internal/alerting.NewCoalesceKey
-internal/alerting.NotificationFingerprint
-internal/alerting.Routing.IsEmpty
-internal/alerting.SemanticFields
-internal/alerting.ThresholdFingerprint
-internal/alerting.canonicalScalar
-internal/alerting.escapePipe
-internal/alerting.nullableString
-internal/alerting.writeLengthPrefixed
-
-# B25 (closed by Phase 20.4) — alert message renderer, including the generic fallback Gate 3.2 requires
-internal/alerting/render.HasTemplate
-internal/alerting/render.Render
-
 # B30 (closed by Phase 20.5) — ESI route handler implemented but never dispatched by any worker
 internal/sync/handlers.ParseAssetNames
 internal/sync/handlers.ParseCalendarAttendees
@@ -105,6 +73,38 @@ internal/api/v2shim.numericString
 # predicate, would be the allowlist wagging the codebase.
 internal/scopes.Set.HasAll
 
+# RECLASSIFIED in Phase 20.4. B25 wired the rest of the alerting stack — the
+# Emitter, both fingerprint constructors, SemanticFields, the coalescing key,
+# DeadLetterCount, render.Render, and catalogue.Thresholds/ThresholdSourceRoutes
+# all have production callers now. The six below do not, and each is a
+# MEASUREMENT rather than a mechanism:
+#
+# ValidateThresholds is §4.4's rule verbatim — "a threshold alert whose source
+# route is not in the sync set is a BUILD-TIME error". A build-time check has no
+# production caller by definition; `make check-alert-sources` is its caller, and
+# giving it a second one inside cmd/hangar would not make the build safer, it
+# would make a passing build depend on a process starting. Its runtime
+# counterpart — "the route is in the sync set but THIS installation is not
+# polling it" — is a different question and IS wired, in
+# alerting.Evaluator.reportUnpollableThresholds.
+#
+# The four counters are Gate 4's parity arithmetic over a MEASURED baseline
+# (docs/BASELINE.md §4: 54 alert types across 8 domains, 5 of them Skyhook).
+# Nothing in a running installation needs to count its own catalogue; the tests
+# that assert the count against the measurement are the whole point of the
+# count existing.
+internal/alerting/catalogue.CountByDomain
+internal/alerting/catalogue.Names
+internal/alerting/catalogue.SeededTotal
+internal/alerting/catalogue.SkyhookNames
+internal/alerting/catalogue.ValidateThresholds
+# HasTemplate says so in its own doc comment: it exists so a test can prove the
+# GENERIC FALLBACK is the path being exercised rather than a per-type template
+# quietly doing the work — Gate 3.2's condition. Production always walks the
+# chain (render.Render/render.Line), which needs no predicate; a caller that
+# branched on this would be choosing a renderer the chain already chooses.
+internal/alerting/render.HasTemplate
+
 # Unused helpers, test doubles, and API published for callers outside this
 # binary. Each is a deliberate keep, not a gap.
 
@@ -122,7 +122,7 @@ internal/events.DeadLetterBoard  # dead-letter query awaiting its admin endpoint
 internal/events.EventID  # helper of the Recorder double
 internal/events.KnownTypes  # closed event-type vocabulary, asserted by tests
 internal/events.ParseSignatureHeader  # as Verify — consumer-side, not called by the sender
-internal/events.PendingCount  # outbox depth query awaiting the alert_dead_letter_depth metric (20.4)
+internal/events.PendingCount  # CORRECTED IN 20.4. It was listed as "awaiting the alert_dead_letter_depth metric (20.4)"; that attribution was wrong. This counts UNDISPATCHED §4.9 WEBHOOK OUTBOX events (app.outbox_event), not alert deliveries. alert_dead_letter_depth is a gauge over app.alert_delivery and 20.4 wired it to alerting.DeadLetterCount, which is the only source that could have been right. This remains a genuine unwired admin-surface query — a webhook-outbox backlog gauge would be a real and useful metric, but it is named by no gate, and 04_RELEASE_GATES.md rule 7 is about not declaring metrics ahead of their wiring, not about inventing ones nobody asked for.
 internal/events.Recorder.Len  # test-facing accessor on the in-memory Recorder double
 internal/events.Verify  # signature verification published for CONSUMERS of HANGAR webhooks; deploy/verify-webhook-signature.sh is the shipped equivalent
 internal/provisioning/drivers/teamspeak.Unescape  # TS3 wire decoder, symmetric with Escape; the WebQuery driver parses JSON, so only Escape is on the live path

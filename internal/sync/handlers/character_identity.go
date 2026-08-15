@@ -65,7 +65,34 @@ func ParseCharacterSheet(body []byte) (CharacterSheetDTO, error) {
 // use, per their own doc comments, means an existing real row is never
 // overwritten by an empty placeholder). Phase 8/9 fill in the real
 // name/ticker.
+//
+// ── PHASE 20.4: THIS ROUTE IS GATE 2 TRIGGER ROW 6'S PRODUCER ────────────
+// Writing app.character.corporation_id is how HANGAR learns a character has
+// LEFT a corporation, and until now nothing acted on it: `grep -rln
+// provisioning internal/sync` returned nothing, so a character who left the
+// corporation that granted their Discord roles kept them until the next
+// nightly bulk reconcile, against §2.1's 60-second p99 bound. The previous
+// affiliation is therefore read BEFORE the write and compared after — see
+// AffiliationChangedHook in hooks.go for why internal/rbac's hook does not
+// and cannot cover this.
 func SyncCharacterSheet(ctx context.Context, s *store.Store, characterID int64, dto CharacterSheetDTO) (SyncResult, error) {
+	// Read first, write second. One extra SELECT per character-sheet sync —
+	// the cheapest of this handler's several round trips, on a route with a
+	// long TTL — buys the ONE thing the write itself destroys: what the
+	// affiliation used to be. Threading the old values out of the UPDATE's
+	// RETURNING instead would need a CTE and a wider generated row type,
+	// for a saving that is not measurable here.
+	//
+	// A character with no row yet has no previous affiliation, which is not
+	// a departure. Any other error is left to the write below to report, so
+	// this read cannot invent a new failure mode for a handler that already
+	// has to survive a half-populated database.
+	var previousCorporationID, previousAllianceID *int64
+	if existing, err := s.GetCharacter(ctx, characterID); err == nil {
+		previousCorporationID = existing.CorporationID
+		previousAllianceID = existing.AllianceID
+	}
+
 	if err := s.UpsertCorporationStub(ctx, dto.CorporationID, "", ""); err != nil {
 		return SyncResult{}, fmt.Errorf("handlers: stubbing corporation %d for character %d: %w", dto.CorporationID, characterID, err)
 	}
@@ -132,5 +159,37 @@ func SyncCharacterSheet(ctx context.Context, s *store.Store, characterID int64, 
 		}
 		return SyncResult{}, fmt.Errorf("handlers: syncing character sheet: %w", err)
 	}
+
+	// The sheet changed. Whether the AFFILIATION changed is a separate
+	// question — most sheet updates are a security status or a title — so
+	// the hook is only offered a change that actually moved one of the two,
+	// rather than being handed every sheet write to filter for itself.
+	if err := notifyAffiliationChange(ctx, AffiliationChange{
+		CharacterID:           characterID,
+		PreviousCorporationID: previousCorporationID,
+		CorporationID:         dto.CorporationID,
+		PreviousAllianceID:    previousAllianceID,
+		AllianceID:            dto.AllianceID,
+	}); err != nil {
+		return SyncResult{}, err
+	}
 	return SyncResult{RowsAffected: 1}, nil
+}
+
+// notifyAffiliationChange offers a real corporation or alliance move to
+// AffiliationChangedHook. A first sighting (no previous corporation
+// recorded) is not a move, and neither is a sheet update that left both
+// unchanged.
+func notifyAffiliationChange(ctx context.Context, change AffiliationChange) error {
+	if AffiliationChangedHook == nil {
+		return nil
+	}
+	if !change.CorporationChanged() && !change.AllianceChanged() {
+		return nil
+	}
+	if err := AffiliationChangedHook(ctx, change); err != nil {
+		return fmt.Errorf("handlers: revoking entitlements after character %d changed affiliation: %w",
+			change.CharacterID, err)
+	}
+	return nil
 }

@@ -60,6 +60,7 @@ import (
 	"github.com/hangar-project/hangar/internal/rbac"
 	"github.com/hangar-project/hangar/internal/sso"
 	"github.com/hangar-project/hangar/internal/store"
+	"github.com/hangar-project/hangar/internal/sync/handlers"
 )
 
 // newInsertOnlyRiverClient builds a River client that can enqueue and can
@@ -86,7 +87,7 @@ func newInsertOnlyRiverClient(pool *pgxpool.Pool) (*river.Client[pgx.Tx], error)
 // It is called by BOTH `serve` and `work`, with each process's own River
 // client. The hooks it sets are package-level or struct-level seams that
 // were previously set in exactly one of the two.
-func wireRevocationTriggers(riverClient *river.Client[pgx.Tx]) *provisioning.Urgent {
+func wireRevocationTriggers(riverClient *river.Client[pgx.Tx], pool store.Pool) *provisioning.Urgent {
 	urgent := &provisioning.Urgent{River: riverClient}
 
 	// Wires internal/rbac's PermissionsChangedHook (internal/rbac/hook.go)
@@ -104,6 +105,34 @@ func wireRevocationTriggers(riverClient *river.Client[pgx.Tx]) *provisioning.Urg
 	// during startup, before any request is served.
 	rbac.PermissionsChangedHook = func(ctx context.Context, s *store.Store, userID uuid.UUID) error {
 		return urgent.HandleUserChangeTx(ctx, s, userID, time.Now(), "rbac_change")
+	}
+
+	// ── PHASE 20.4: §2.3 TRIGGER ROW 6, "Corporation / alliance departure"
+	//
+	// The row had NO producer at all — `grep -rln provisioning internal/sync`
+	// was empty — and it is not reachable through the hook above, because a
+	// departure is not an RBAC mutation. CCP changed a fact about the world,
+	// handlers.SyncCharacterSheet wrote the new app.character.corporation_id,
+	// nothing recomputed, and a character who had left the corporation that
+	// granted their Discord roles kept them until the next nightly bulk
+	// reconcile — against §2.1's 60-second p99 bound.
+	//
+	// Wired HERE rather than in work.go, even though the sync handlers only
+	// ever run in `work` today, for exactly the reason this file exists: a
+	// trigger wired into one role's boot sequence is a trigger the next role
+	// silently does not have, which is the defect 20.3 found and this
+	// function was created to make structurally impossible. `serve` setting
+	// a hook it never fires costs one assignment.
+	//
+	// The reason string distinguishes the two moves in app.provisioning_audit
+	// so an operator reading the audit can tell a corp departure from an
+	// alliance one without joining back to the character's history.
+	handlers.AffiliationChangedHook = func(ctx context.Context, change handlers.AffiliationChange) error {
+		reason := "alliance_departure"
+		if change.CorporationChanged() {
+			reason = "corporation_departure"
+		}
+		return urgent.HandleCharacterChange(ctx, pool, change.CharacterID, reason)
 	}
 
 	return urgent
@@ -127,7 +156,7 @@ type revocationNotifier struct {
 }
 
 func (n revocationNotifier) NotifyRevocation(ctx context.Context, characterID int64, reason string) {
-	if err := n.urgent.HandleCharacterTokenChange(ctx, n.pool, characterID, reason); err != nil {
+	if err := n.urgent.HandleCharacterChange(ctx, n.pool, characterID, reason); err != nil {
 		n.logger.ErrorContext(ctx,
 			"provisioning: urgent revocation could not be enqueued — the token state HAS changed, so this "+
 				"user's platform groups are now stale until the next bulk reconcile",
@@ -155,7 +184,7 @@ func notifyScopesReduced(urgent *provisioning.Urgent, pool store.Pool, logger *s
 			"sso: a login reduced this character's granted scope set — entitlements derived from the "+
 				"withdrawn scopes are being revoked",
 			"character_id", characterID, "removed_scopes", removed)
-		if err := urgent.HandleCharacterTokenChange(ctx, pool, characterID, "scopes_reduced"); err != nil {
+		if err := urgent.HandleCharacterChange(ctx, pool, characterID, "scopes_reduced"); err != nil {
 			logger.ErrorContext(ctx,
 				"provisioning: urgent revocation after a scope reduction could not be enqueued — this "+
 					"user's platform groups are now stale until the next bulk reconcile",

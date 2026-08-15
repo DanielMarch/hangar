@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -362,8 +363,23 @@ func TestUnrecognisedTypeUsesGenericRenderer(t *testing.T) {
 
 	sent := recorder.sent()
 	require.Len(t, sent, 1)
-	body := sent[0].Lines[0]
-	// The generic key/value renderer produced this, not a template.
+	// PHASE 20.4: the whole body, not Lines[0].
+	//
+	// A message carrying a SINGLE event now renders through render.Render —
+	// the multi-line generic listing — rather than render.Line's folded
+	// one-liner, so the generic renderer's fields arrive as several Lines
+	// instead of one. That is the point of the change (render.Render's own
+	// doc comment has described it as "the full body for a message carrying
+	// a single event" since Phase 14; it simply had no caller), and it is
+	// visible here as an assertion that had to stop reading Lines[0] and
+	// start reading the body.
+	//
+	// What the assertion MEANS is unchanged and is the thing Gate 3.2 asks
+	// for: every field of a payload no template understands is rendered
+	// somewhere in the message rather than dropped.
+	body := strings.Join(sent[0].Lines, "\n")
+	require.Greater(t, len(sent[0].Lines), 1,
+		"a single-event message must carry the generic renderer's multi-line listing, not a folded one-liner")
 	require.Contains(t, body, "mysteriousField: 42")
 	require.Contains(t, body, "whoKnows: a value CCP invented after this build shipped")
 	require.Contains(t, body, "innerA: alpha", "nested fields must render too")

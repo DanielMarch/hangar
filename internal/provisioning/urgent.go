@@ -34,6 +34,53 @@ type Urgent struct {
 	River *river.Client[pgx.Tx]
 }
 
+// EnqueuePlatformReconcile queues a full reconcile of one platform —
+// Phase 20.4's answer to Gate 2 trigger row 8, "Admin platform lockdown".
+//
+// ── THE SPECIFICATION QUESTION, AND HOW IT IS SETTLED ────────────────────
+// §2.3's matrix marks the lockdown row "✓ must enqueue urgent" and does not
+// say what should be enqueued. Phase 20.3 recorded the dilemma rather than
+// guessing: a lockdown FREEZES outbound provisioning, so enqueueing
+// revocations the freeze would then refuse to perform is either exactly
+// wrong or precisely the point.
+//
+// It is settled as follows, and the settlement turns on what a freeze
+// MEANS rather than on what is convenient to implement.
+//
+// LOCKING enqueues nothing. A freeze is "stop touching this platform", not
+// "revoke everybody". Reading it as the latter would mean an operator
+// containing a compromised bot token also, silently, queued the removal of
+// every group every member holds — a far larger and less reversible act
+// than the one they asked for, performed at the worst possible moment.
+// Entitlement changes that occur DURING the freeze still enqueue from
+// their own triggers, still attempt, and are recorded
+// OutcomeSkippedLockedDown with actual_groups untouched, so each stays
+// visible on the exposure board with its true age. That is §2.4 condition
+// 2.3's requirement for a platform that is down, applied to the case where
+// it is down on purpose.
+//
+// UNLOCKING enqueues this: one full reconcile of the platform, urgently.
+// Everything that changed while the platform was frozen is owed the moment
+// the freeze lifts, and an operator who has just declared an incident over
+// must not have to wait for the nightly bulk pass to find out whether
+// their platform is correct again. That is the transition where "must
+// enqueue urgent" is both true and right.
+//
+// It goes to provision-bulk rather than provision-urgent because the unit
+// of work is a whole platform, not one user — the same choice B32's
+// entitlement-rule deletion made, and for the same reason §9.2 gives
+// provision-urgent its own worker pool: a platform-wide sweep must never
+// be able to starve a single user's revocation.
+func (u *Urgent) EnqueuePlatformReconcile(ctx context.Context, platformID uuid.UUID) error {
+	if u == nil || u.River == nil {
+		return fmt.Errorf("provisioning: enqueueing reconcile for platform %s: no river client", platformID)
+	}
+	if _, err := u.River.Insert(ctx, BulkJobArgs{PlatformID: platformID}, nil); err != nil {
+		return fmt.Errorf("provisioning: enqueueing reconcile for platform %s: %w", platformID, err)
+	}
+	return nil
+}
+
 // HandleUserChange opens its own transaction and recomputes/enqueues for
 // userID — the entry point for triggers that don't already have one open
 // (SSO token invalidation/owner-hash-change hooks, an admin's manual
@@ -120,11 +167,23 @@ func (u *Urgent) HandleUserChangeTx(ctx context.Context, s *store.Store, userID 
 	return nil
 }
 
-// HandleCharacterTokenChange is the character-scoped entry point for the
-// two SSO-layer triggers 01_ARCHITECTURE.md §9.2 names by ID rather than
-// by user: token invalidation and an `owner` hash change
-// (internal/sso.Refresher's OnInvalidGrant/OnOwnerHashChanged hooks,
-// wired in cmd/hangar). Both fire AFTER the token-invalidating transaction
+// HandleCharacterChange is the character-scoped entry point for the
+// triggers 01_ARCHITECTURE.md §9.2 names by character ID rather than by
+// user: token invalidation and an `owner` hash change
+// (internal/sso.Refresher's OnInvalidGrant/OnOwnerHashChanged hooks), a
+// login that reduced a character's granted scopes, and — since Phase 20.4
+// — §2.3 trigger row 6, a character leaving the corporation or alliance
+// that its entitlements were derived from
+// (internal/sync/handlers.AffiliationChangedHook). All are wired in
+// cmd/hangar/revocation.go.
+//
+// PHASE 20.4 renamed this from HandleCharacterTokenChange. The body was
+// never token-specific — it resolves the character's user and recomputes,
+// with `reason` carrying what actually happened — and the old name made
+// the affiliation trigger look like it needed a second, near-identical
+// method. It did not.
+//
+// The two SSO triggers fire AFTER the token-invalidating transaction
 // has already committed (internal/sso/refresh.go's existing Phase 5
 // shape — out of Phase 11's file list to change), so this necessarily
 // opens its OWN transaction rather than joining one that no longer exists
@@ -136,7 +195,7 @@ func (u *Urgent) HandleUserChangeTx(ctx context.Context, s *store.Store, userID 
 // state at evaluation time regardless (entitlement.GatherWorldState), so
 // this window costs at most one extra recompute cycle's latency, never a
 // missed revocation.
-func (u *Urgent) HandleCharacterTokenChange(ctx context.Context, pool store.Pool, characterID int64, reason string) error {
+func (u *Urgent) HandleCharacterChange(ctx context.Context, pool store.Pool, characterID int64, reason string) error {
 	s := store.New(pool)
 	char, err := s.GetCharacter(ctx, characterID)
 	if err != nil {

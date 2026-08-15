@@ -292,6 +292,7 @@
       "userKey": "Clé utilisateur",
       "maxTokens": "Jetons max",
       "localRemaining": "Restant local",
+      "localAtReading": "Local à la lecture",
       "serverRemaining": "Restant serveur",
       "divergence": "Divergence",
       "serverObservedAt": "Serveur observé",

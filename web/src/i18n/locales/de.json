@@ -292,6 +292,7 @@
       "userKey": "Benutzerschlüssel",
       "maxTokens": "Max. Token",
       "localRemaining": "Lokal verbleibend",
+      "localAtReading": "Lokal bei Messung",
       "serverRemaining": "Server verbleibend",
       "divergence": "Abweichung",
       "serverObservedAt": "Server beobachtet",

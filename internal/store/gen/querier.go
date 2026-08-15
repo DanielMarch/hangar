@@ -181,6 +181,23 @@ type Querier interface {
 	CompleteSessionLogin(ctx context.Context, sessionID uuid.UUID, userID uuid.NullUUID, expiresAt time.Time) error
 	CountAlertTypesByDomain(ctx context.Context) ([]CountAlertTypesByDomainRow, error)
 	CountDeadLetterAlertDeliveries(ctx context.Context) (int64, error)
+	// PHASE 20.4. §4.4 makes "a threshold alert whose source route is not in
+	// the SYNC SET" a build-time error, and internal/alerting/catalogue's
+	// ValidateThresholds enforces exactly that at build time. This is its
+	// RUNTIME counterpart, and it catches a different failure the build cannot
+	// see: the route is in the sync set, in the catalogue, not blocked by the
+	// pin — and this particular installation has no ENABLED subscription to
+	// it, because no character has granted the scope it needs.
+	//
+	// The threshold then generates zero alerts on an installation where
+	// nothing is wrong with the threshold, which is indistinguishable from
+	// "everything is fine" and is the exact confusion §4.4 legislates against
+	// one sentence earlier. The evaluator reports it once, loudly, at startup.
+	//
+	// Returns one row per requested path, INCLUDING paths with a count of
+	// zero: the caller needs to know which ones are missing, and a query that
+	// silently omitted them would answer the wrong question.
+	CountEnabledSubscriptionsForRoutePaths(ctx context.Context, upstreamPaths []string) ([]CountEnabledSubscriptionsForRoutePathsRow, error)
 	// Cheap operational visibility into L2 size — useful for the admin
 	// observability surface (Phase 18) without needing a full table scan tool.
 	CountEsiCacheEntries(ctx context.Context) (int64, error)
@@ -709,8 +726,38 @@ type Querier interface {
 	ListEsiRouteRoles(ctx context.Context, routeID uuid.UUID) ([]string, error)
 	ListEsiRouteScopes(ctx context.Context, routeID uuid.UUID) ([]string, error)
 	ListEsiRoutes(ctx context.Context) ([]AppEsiRoute, error)
+	// corporation.contract.expiring — §4.4's own worked example of a
+	// threshold alert ("expiring contracts"), over
+	// /corporations/{corporation_id}/contracts.
+	//
+	// Unlike the fuel thresholds this one deliberately does NOT include
+	// subjects that have already crossed: an expired contract is not "about to
+	// expire", it is finished, and an alert about it is advice nobody can act
+	// on. The alert exists to give an operator time to extend or fulfil.
+	//
+	// status is filtered to 'outstanding' because a contract that has been
+	// accepted, completed, cancelled or rejected has an expiry date that is no
+	// longer meaningful. It is an OPEN VOCABULARY value compared verbatim
+	// (Principle 14) — HANGAR does not enumerate CCP's status values, it just
+	// knows which one means "still waiting".
+	ListExpiringCorporationContracts(ctx context.Context, within time.Duration) ([]ListExpiringCorporationContractsRow, error)
 	// The exposure board: desired and actual groups disagree.
 	ListExposedProvisioningStates(ctx context.Context, platformID uuid.UUID) ([]AppProvisioningState, error)
+	// corporation.member.inactive — HANGAR's equivalent of the upstream's
+	// observer-computed `inactive_member`, over
+	// /corporations/{corporation_id}/membertracking.
+	//
+	// logoff_date is both the boundary and the re-arm token, which is the
+	// neatest case of the four: the member logs in, ESI reports a new
+	// logoff_date when they leave, and the next crossing is a genuinely new
+	// occurrence with a genuinely new fingerprint.
+	//
+	// NULL logoff_date is excluded. It means membertracking has never seen
+	// this character log off — a brand-new member, or one whose session
+	// history predates the corporation's tracking — and reading it as
+	// "inactive since the beginning of time" would put every new recruit on
+	// the inactive list.
+	ListInactiveCorporationMembers(ctx context.Context, inactiveFor time.Duration) ([]ListInactiveCorporationMembersRow, error)
 	ListIndustryJobsByOwner(ctx context.Context, ownerKind string, ownerID int64) ([]AppIndustryJob, error)
 	ListInsurancePrices(ctx context.Context, typeID int32) ([]AppInsurancePrice, error)
 	// Backed by the partial index on (valid) WHERE NOT valid.
@@ -750,16 +797,30 @@ type Querier interface {
 	// installation, and Gate 1.3 becomes a measure of concurrency rather than
 	// of ledger accuracy.
 	//
-	// The subtraction itself is deliberately NOT done here. server_remaining
-	// is nullable — the server has said nothing about this bucket yet — and
-	// sqlc's static analysis types `abs(... - b.server_remaining)` as a
-	// non-null bigint however the expression is cast or wrapped, so scanning a
-	// genuine NULL would fail at runtime. Collapsing "never observed" into
-	// "zero divergence" to dodge that would be the exact empty-versus-
-	// unavailable confusion SRS §6 forbids: zero divergence is a healthy
-	// reading, no reading is not. The two operands come back typed (int64 and
-	// *int32) and internal/api/v1 does the subtraction where the nil case is
-	// explicit.
+	// ── PHASE 20.4: local_consumed/local_remaining ARE NO LONGER THE GAUGE ───
+	// They are computed HERE, at query time, and the row's server_remaining
+	// was stored by whichever response last carried the header. Subtracting
+	// them measures how much has been consumed since that response, which is
+	// throughput; the 40-55 readings in migration 00042 are what that looks
+	// like on a healthy installation under per-bucket concurrency.
+	//
+	// b.local_remaining_at_reading is the fix: the local half as it stood at
+	// the instant server_remaining was written, under the same lock (see
+	// RecordServerLedgerReading). §1.3's divergence is that pair's difference
+	// and nothing else. The live columns stay in the result because the ADMIN
+	// BOARD wants them — "the ledger holds 47 right now, and the last time we
+	// compared, we and the server agreed" are two different operator
+	// questions, and answering only the second would hide current headroom.
+	//
+	// The subtraction itself is deliberately NOT done here. Both stored
+	// operands are nullable — the server has said nothing about this bucket
+	// yet — and sqlc's static analysis types `abs(... - b.server_remaining)`
+	// as a non-null bigint however the expression is cast or wrapped, so
+	// scanning a genuine NULL would fail at runtime. Collapsing "never
+	// observed" into "zero divergence" to dodge that would be the exact
+	// empty-versus-unavailable confusion SRS §6 forbids: zero divergence is a
+	// healthy reading, no reading is not. The operands come back typed
+	// (*int32) and the callers subtract where the nil case is explicit.
 	ListLedgerDivergence(ctx context.Context) ([]ListLedgerDivergenceRow, error)
 	ListLiveReplicas(ctx context.Context, liveThreshold time.Duration) ([]AppEsiReplica, error)
 	ListMailHeadersPage(ctx context.Context, arg ListMailHeadersPageParams) ([]AppMailHeader, error)
@@ -895,6 +956,69 @@ type Querier interface {
 	// membership grant".
 	ListSquadsForUser(ctx context.Context, userID uuid.NullUUID) ([]uuid.UUID, error)
 	ListStandings(ctx context.Context, ownerKind string, ownerID int64) ([]AppStanding, error)
+	// corporation.starbase.fuel_low. §4.4 names the starbase DETAIL route,
+	// and Phase 8.1 wired the fan-out for exactly this: app.starbase_detail
+	// .fuels is `[{"type_id": N, "quantity": M}]` and is the only place the
+	// fuel bay's contents land.
+	//
+	// A starbase burns fuel blocks at a rate that depends on its tower size,
+	// which lives in the SDE and is not read here, so this threshold is over
+	// the QUANTITY REMAINING rather than over an expiry timestamp. That
+	// difference is why the caller buckets the quantity to build a re-arm
+	// token instead of using it directly — see internal/alerting/threshold.go.
+	//
+	// jsonb_array_length > 0 is the empty-versus-unavailable guard and it is
+	// load-bearing: app.starbase_detail.fuels DEFAULTS to '[]', so every
+	// starbase whose detail fan-out has not run yet would otherwise sum to
+	// zero and be reported as a tower about to go dark. "We have not fetched
+	// the fuel bay" and "the fuel bay is empty" must not be the same reading.
+	ListStarbasesLowOnFuel(ctx context.Context, below int64) ([]ListStarbasesLowOnFuelRow, error)
+	// app.corporation_structure / starbase_detail / corporation_member_tracking
+	// / contract, read as THRESHOLD SOURCES — Phase 20.4, defect B25.
+	//
+	// 00_SRS_v3.1.md §4.4's third alert category is `threshold`: an alert
+	// HANGAR computes for itself by watching synced data cross a boundary,
+	// rather than one CCP sends or one HANGAR's own platform raises. The
+	// catalogue has declared four of them since Phase 14 —
+	// corporation.structure.fuel_low, corporation.starbase.fuel_low,
+	// corporation.member.inactive and corporation.contract.expiring — each
+	// with the source route §4.4 requires it to declare. Nothing evaluated
+	// them, which is why internal/alerting.ThresholdFingerprint had no
+	// production caller and why Gate 3's "all three categories" could not be
+	// satisfied by a live installation.
+	//
+	// ── WHAT EVERY QUERY HERE MUST RETURN, AND WHY ───────────────────────────
+	// Each returns the subject's identity, the value that crossed the
+	// boundary, and — critically — the RE-ARM TOKEN: the field whose change
+	// means "this is a new occurrence, alert again". ThresholdFingerprint
+	// calls it `bucket`, and it is what stops a threshold alert firing once
+	// per evaluation pass forever. For fuel it is the expiry timestamp (a
+	// refuel moves it); for an inactive member it is their last logoff (a
+	// logon moves it); for a contract it is its expiry (a new contract has a
+	// new one). None of them is the time of the EVALUATION, which would defeat
+	// deduplication entirely — see internal/alerting/dedupe.go.
+	//
+	// ── "NO DATA" IS NEVER "ZERO" ────────────────────────────────────────────
+	// Each query excludes subjects it has no reading for rather than treating
+	// a missing value as a boundary crossing. A structure with a NULL
+	// fuel_expires has not been observed to be low on fuel; a starbase whose
+	// detail fan-out has not run yet has an EMPTY fuels array, not an empty
+	// fuel bay. SRS §6's empty-versus-unavailable rule is not only about API
+	// responses.
+	// corporation.structure.fuel_low. §4.4 names
+	// /corporations/{corporation_id}/structures as the source route, and
+	// app.corporation_structure.fuel_expires is what that route delivers.
+	//
+	// Structures whose fuel has ALREADY run out are included, deliberately: a
+	// structure that went dark is the most severe reading this threshold has,
+	// and excluding it would mean the alert stops exactly when it matters
+	// most. It does not re-alert, because fuel_expires — the re-arm token —
+	// does not move again until somebody refuels.
+	//
+	// NULL fuel_expires is excluded: a structure the corporation cannot see
+	// fuel for (no Station_Manager role, or a structure type that reports
+	// none) is not a structure with no fuel.
+	ListStructuresLowOnFuel(ctx context.Context, within time.Duration) ([]ListStructuresLowOnFuelRow, error)
 	ListUnacknowledgedEsiScopes(ctx context.Context) ([]AppEsiScope, error)
 	ListUnacknowledgedNotificationTypes(ctx context.Context) ([]AppNotificationUnknownType, error)
 	ListUnacknowledgedOpenVocabulary(ctx context.Context, vocabulary string) ([]AppOpenVocabulary, error)
@@ -1009,7 +1133,26 @@ type Querier interface {
 	RecordProvisioningAudit(ctx context.Context, arg RecordProvisioningAuditParams) (AppProvisioningAudit, error)
 	// ---- security log (append-only) ----
 	RecordSecurityLogEntry(ctx context.Context, arg RecordSecurityLogEntryParams) error
-	RecordServerLedgerReading(ctx context.Context, rateLimitGroup string, userKey string, serverRemaining *int32) error
+	// PHASE 20.4. Writes BOTH operands of esi_ledger_divergence in one
+	// statement, under the bucket lock the reconciler already holds, because
+	// §1.3's quantity is a difference and a difference between two moments is
+	// not a measurement — see migration 00042 for the readings that forced
+	// this, and ListLedgerDivergence below for what now consumes the pair.
+	//
+	// local_remaining is the caller's PRE-CORRECTION availability: the number
+	// reconcileAction is about to judge against server_remaining, computed one
+	// statement earlier from SumSettledLedgerEntryCost inside this same
+	// transaction. Storing the post-correction value instead would make the
+	// gauge read ~0 by construction, since making the two agree is the whole
+	// purpose of the statement that follows.
+	//
+	// It is also measured against the ceiling the RECONCILER was given — the
+	// server's own X-Ratelimit-Limit when it sent one — rather than against
+	// the stored max_tokens ListLedgerDivergence used to use. Those agree
+	// since Phase 20.3, but the server's reading and the ceiling it is a
+	// remainder of arrived in the same response, and pairing them is one less
+	// thing that can drift.
+	RecordServerLedgerReading(ctx context.Context, arg RecordServerLedgerReadingParams) error
 	RecordSync304(ctx context.Context, subscriptionID uuid.UUID, nextDueAt time.Time) error
 	RecordSync403(ctx context.Context, subscriptionID uuid.UUID) error
 	RecordSyncSuccess(ctx context.Context, arg RecordSyncSuccessParams) error

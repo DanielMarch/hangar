@@ -26,7 +26,7 @@ type Store interface {
 	InsertSyntheticLedgerEntry(ctx context.Context, rateLimitGroup string, userKey string, cost int16) error
 	EvictOldestLedgerEntries(ctx context.Context, rateLimitGroup string, userKey string, maxEvict int32) ([]gen.EvictOldestLedgerEntriesRow, error)
 	DeleteLedgerEntryByID(ctx context.Context, entryID uuid.UUID) error
-	RecordServerLedgerReading(ctx context.Context, rateLimitGroup string, userKey string, serverRemaining *int32) error
+	RecordServerLedgerReading(ctx context.Context, arg gen.RecordServerLedgerReadingParams) error
 	FlushLedgerEntriesForBucket(ctx context.Context, rateLimitGroup string, userKey string) ([]gen.AppEsiLedgerEntry, error)
 	BulkInsertLedgerEntry(ctx context.Context, arg gen.BulkInsertLedgerEntryParams) error
 	ListLedgerBuckets(ctx context.Context) ([]gen.AppEsiLedgerBucket, error)
@@ -274,8 +274,25 @@ func (l *LedgerClustered) Reconcile(ctx context.Context, group, userKey string, 
 		localAvailable := maxTokens - int(used)
 
 		inject, evictTarget, needsEvict := reconcileAction(maxTokens, localAvailable, serverRemaining)
+
+		// PHASE 20.4: both operands of esi_ledger_divergence, written
+		// together, under the lock taken above, BEFORE the correction that
+		// follows makes them agree. localAvailable is the same number
+		// reconcileAction has just judged — that is the whole point. It is
+		// floored at zero to match the reader's `greatest(..., 0)`
+		// convention: a bucket that has over-consumed is out of headroom,
+		// not in negative headroom, and the two readers must not disagree
+		// about that at the boundary.
+		//
+		// Writing this AFTER the evict/inject below would store a pair that
+		// agrees by construction — see db/queries/esi_ledger.sql's
+		// RecordServerLedgerReading and migration 00042.
 		remaining32 := int32(serverRemaining)
-		if err := q.RecordServerLedgerReading(ctx, group, userKey, &remaining32); err != nil {
+		local32 := int32(max(localAvailable, 0))
+		if err := q.RecordServerLedgerReading(ctx, gen.RecordServerLedgerReadingParams{
+			RateLimitGroup: group, UserKey: userKey,
+			ServerRemaining: &remaining32, LocalRemaining: &local32,
+		}); err != nil {
 			return fmt.Errorf("record server reading: %w", err)
 		}
 

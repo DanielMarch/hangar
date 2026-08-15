@@ -292,6 +292,7 @@
       "userKey": "Cheie utilizator",
       "maxTokens": "Jetoane maxime",
       "localRemaining": "Rămas local",
+      "localAtReading": "Local la citire",
       "serverRemaining": "Rămas pe server",
       "divergence": "Divergență",
       "serverObservedAt": "Server observat",

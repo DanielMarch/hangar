@@ -70,6 +70,30 @@ type EmitRequest struct {
 	Fingerprint func(Target) Fingerprint
 	// Register, when non-nil, creates the app.alert_type row first.
 	Register *Registration
+
+	// TargetFilter, when non-nil, drops routed targets this occurrence is
+	// not FOR. Nil (the default) routes to every target with an enabled
+	// rule, which is the right behaviour for the notification path: a
+	// routing rule is an AUDIENCE — "who should hear about this alert
+	// type" — and a CCP notification arriving for one character is
+	// something the whole audience subscribed to.
+	//
+	// ── PHASE 20.4: WHY A THRESHOLD NEEDS ONE AND A NOTIFICATION DOES NOT ─
+	// A threshold alert has a SUBJECT that a notification does not:
+	// corporation.structure.fuel_low is about one structure belonging to
+	// one corporation. Routing resolves by alert TYPE only
+	// (ListAlertRoutingRulesForType), so on an installation serving two
+	// corporations a rule targeting `corporation:98000001` would otherwise
+	// receive the other corporation's fuel alerts — with no way to tell,
+	// since the payload names a structure id and nothing else.
+	//
+	// The filter is deliberately narrow: it can only remove targets whose
+	// kind carries an entity id that CONTRADICTS the subject's owner. A
+	// `user`, `squad` or `installation` target is an audience with no
+	// ownership claim to contradict, and is never filtered — an operator
+	// who routes fuel alerts to the installation's own operators means all
+	// of them, not none of them.
+	TargetFilter func(Target) bool
 }
 
 // EmitResult reports what one emit did. Every field is observable by a
@@ -200,10 +224,19 @@ func (e *Emitter) Emit(ctx context.Context, req EmitRequest) (EmitResult, error)
 			// app.alert_event without bound for types nobody wants.
 			return nil
 		}
-		result.Routed = true
-
 		window := e.window()
 		for _, target := range routing.Targets {
+			if req.TargetFilter != nil && !req.TargetFilter(target) {
+				continue
+			}
+			// Set inside the loop, after the filter, so Routed answers "did
+			// THIS occurrence reach anybody" rather than "does anyone
+			// subscribe to this type". A threshold whose every target was
+			// another corporation's is not routed, and reporting it as
+			// routed would make an operator's "why did I get nothing"
+			// unanswerable from the result alone.
+			result.Routed = true
+
 			key := NewCoalesceKey(target, req.AlertType, occurredAt, window)
 			coalesceKey := key.String()
 

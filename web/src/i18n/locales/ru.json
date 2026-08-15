@@ -292,6 +292,7 @@
       "userKey": "Ключ пользователя",
       "maxTokens": "Максимум токенов",
       "localRemaining": "Локальный остаток",
+      "localAtReading": "Локально на момент замера",
       "serverRemaining": "Остаток сервера",
       "divergence": "Расхождение",
       "serverObservedAt": "Сервер наблюдался",

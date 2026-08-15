@@ -62,7 +62,15 @@ func (w *UrgentWorker) Work(ctx context.Context, job *river.Job[UrgentJobArgs]) 
 	}
 
 	driver, driverErr := w.Drivers.Lookup(audit.PlatformID.String())
-	actual, outcome, callErr := applyToDriver(ctx, driver, driverErr, link, audit.GroupsAdded, audit.GroupsRemoved)
+	// PHASE 20.4, Gate 2 trigger row 8. app.platform.locked_down is read
+	// HERE, at the moment of the outbound call, and not at enqueue time.
+	// That is the whole point of an incident freeze: a revocation enqueued
+	// a second before the operator hit the switch must not go out, and one
+	// enqueued during the freeze must go out the moment it lifts. Testing
+	// the flag where the job is CREATED would give the opposite behaviour
+	// on both counts.
+	lockedDown := PlatformIsLockedDown(ctx, s, audit.PlatformID)
+	actual, outcome, callErr := applyToDriver(ctx, driver, driverErr, lockedDown, link, audit.GroupsAdded, audit.GroupsRemoved)
 
 	var errStr *string
 	if callErr != nil {

@@ -33,6 +33,21 @@ const (
 	KindDiscordWebhook = "discord_webhook"
 )
 
+// KnownKinds is the closed channel-kind vocabulary, for a caller that must
+// enumerate it — Phase 20.4's telemetry.NewAlertDeliveries pre-initialises
+// alert_delivery_total for every (kind, outcome) pair, because a CounterVec
+// with no observations exports NO SERIES AT ALL and an alerting subsystem
+// that has delivered nothing yet would otherwise be indistinguishable from
+// one that is not wired.
+//
+// Closed, and legitimately so, unlike a CCP vocabulary: these three are
+// app.alert_channel.kind's CHECK constraint, which is HANGAR's own schema.
+// Principle 14 governs vocabularies external systems own; it does not
+// require pretending not to know our own.
+func KnownKinds() []string {
+	return []string{KindSMTP, KindSlackWebhook, KindDiscordWebhook}
+}
+
 // Message is one rendered alert delivery, before any channel-specific
 // formatting. It carries the roll-up in PIECES rather than as a finished
 // string because each channel has a different size limit (§4.4) and must
@@ -49,9 +64,13 @@ type Message struct {
 	// Header is the roll-up's first body line (render.Header) — the
 	// summary plus the event count when more than one event coalesced.
 	Header string
-	// Lines is one rendered line per coalesced event, oldest first, so a
-	// truncation drops the most recent tail rather than the first thing
-	// that happened.
+	// Lines is the body, oldest first, so a truncation drops the most
+	// recent tail rather than the first thing that happened.
+	//
+	// One line per coalesced event in a roll-up. A message carrying a
+	// SINGLE event instead carries that event's full multi-line rendering
+	// (render.Render) — see alerting.Dispatcher.message — so Lines is not
+	// interchangeable with the event count. Count below is.
 	Lines []string
 	// Mention is app.alert_routing_rule.mention, verbatim: an open
 	// vocabulary of platform-specific strings ("<!here>", "<@&123>",
@@ -59,8 +78,9 @@ type Message struct {
 	// channel decides where to put it, and an unrecognised value is
 	// delivered as text rather than rejected (Principle 14).
 	Mention string
-	// Count is len(Lines) before any truncation — what "and N more"
-	// counts against.
+	// Count is how many alert EVENTS this message carries — 1 for a
+	// single alert, 40 for §4.4's worked coalescing example. It is what
+	// the header's "(N events)" reports.
 	Count int
 }
 

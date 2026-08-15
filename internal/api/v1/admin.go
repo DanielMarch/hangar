@@ -24,7 +24,9 @@ package v1
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -507,7 +509,8 @@ func advancePinHandler(deps api.Deps) func(context.Context, *AdvancePinIn) (*Ite
 		if userID, ok := userIDFromCtx(ctx); ok {
 			actor = userID.String()
 		}
-		row, _, err := catalogue.AdvancePin(ctx, deps.Store, newPin, actor, time.Now())
+		oldPin, _ := catalogue.GetPin(ctx, deps.Store)
+		row, diff, err := catalogue.AdvancePin(ctx, deps.Store, newPin, actor, time.Now())
 		if err != nil {
 			// A candidate newer than D_max is the administrator asking for
 			// something ESI has not published — a 422 on their input, not a
@@ -528,9 +531,68 @@ func advancePinHandler(deps api.Deps) func(context.Context, *AdvancePinIn) (*Ite
 		}
 		target := catalogue.FormatDate(newPin)
 		_ = apimw.Audit(ctx, deps.Store, actorID, "admin.esi.pin_advanced", &target, "", map[string]any{"new_pin": target})
+		raisePinAdvancedAlert(ctx, deps, oldPin, newPin, diff)
 
 		data := rowOf(row)
 		return &ItemOut{Body: api.Item[map[string]any]{Data: &data, Sync: api.Sync{}}}, nil
+	}
+}
+
+// raisePinAdvancedAlert emits §4.4's `hangar.platform.esi_pin_advanced`
+// domain event — Phase 20.4, and the DOMAIN-EVENT third of defect B25.
+//
+// ── WHY THIS PARTICULAR EVENT ────────────────────────────────────────────
+// The alert catalogue has carried seven `platform` domain events since
+// Phase 1a and nothing raised any of them. This one is the most consequential
+// of the seven and the only one whose trigger is an administrator's
+// deliberate act: advancing the compatibility pin changes which ESI routes
+// the WHOLE INSTALLATION may call, in both directions. §4.4 lists it as a
+// default-enabled alert precisely because the people who need to know are
+// not necessarily the person who clicked the button.
+//
+// ── WHY SemanticFields IS THE RIGHT FINGERPRINT HERE ─────────────────────
+// A CCP notification has notification_id and a threshold has a subject, so
+// both have a natural identity. A domain event has neither, and hashing
+// the payload's SERIALISATION would be unstable across process restarts
+// (Go randomises map iteration order) — the failure mode dedupe.go's
+// header calls "the worst possible", because it looks fine in a unit test.
+// SemanticFields names the fields that ARE the identity: the pin moved
+// from one date to another, and that pair re-arms the alert by itself,
+// since the next advance necessarily has a different `to`.
+//
+// A failure to raise the alert does NOT fail the request. The pin has
+// already moved and the audit row is already written; refusing the
+// administrator's action after the fact because a notification could not
+// be queued would be the tail wagging the dog. It is logged.
+func raisePinAdvancedAlert(ctx context.Context, deps api.Deps, oldPin, newPin time.Time, diff catalogue.RouteDiff) {
+	if deps.Alerts == nil {
+		return
+	}
+	payload, err := json.Marshal(map[string]any{
+		"from":             catalogue.FormatDate(oldPin),
+		"to":               catalogue.FormatDate(newPin),
+		"routes_unblocked": len(diff.NewlyUnblocked),
+		"routes_blocked":   len(diff.NewlyBlocked),
+		"routes_unchanged": diff.Unchanged,
+	})
+	if err != nil {
+		return
+	}
+	const alertType = "hangar.platform.esi_pin_advanced"
+	if _, err := deps.Alerts.Emit(ctx, alerting.EmitRequest{
+		AlertType:  alertType,
+		Payload:    payload,
+		OccurredAt: time.Now(),
+		Fingerprint: func(target alerting.Target) alerting.Fingerprint {
+			fields := alerting.SemanticFields(payload, "from", "to")
+			fields["target_kind"] = target.Kind
+			fields["target_ref"] = target.Ref
+			return alerting.Fingerprint{AlertType: alertType, Fields: fields}
+		},
+	}); err != nil {
+		slog.WarnContext(ctx, "alerting: the ESI compatibility pin advanced but its alert could not be raised — "+
+			"the pin HAS moved; only the notification was lost",
+			"old_pin", catalogue.FormatDate(oldPin), "new_pin", catalogue.FormatDate(newPin), "error", err)
 	}
 }
 
@@ -646,6 +708,24 @@ func auditAdminAction(ctx context.Context, deps api.Deps, action, target string)
 // that bucket. Zero divergence is a healthy reading; no reading is not a
 // reading, and collapsing them would hide a bucket whose headers have
 // stopped arriving behind a wall of reassuring zeroes.
+//
+// ── PHASE 20.4: THE SUBTRACTION'S OPERANDS ───────────────────────────────
+// `divergence` is (local_remaining_at_reading − server_remaining): the pair
+// the reconciler wrote together under the bucket lock. It is NOT computed
+// from `local_remaining`, which this row also carries and which is summed
+// live at request time — subtracting a live count from a stored snapshot
+// measures how much has been consumed since the last reconcile, which on
+// this installation read 40-55 on healthy buckets against a Gate 1.3
+// tolerance of 1 (migration 00042 has the readings).
+//
+// Both numbers stay on the row on purpose. `local_remaining` answers "how
+// much headroom is there right now", `divergence` answers "how far apart
+// were we and CCP the last time both were known", and an operator watching
+// a rate-limit dashboard needs both. The board is also the ONE reader that
+// deliberately does not apply the telemetry collector's freshness rule: a
+// stale reading is shown with `server_observed_at` beside it, because
+// "nothing has been heard from this bucket in 90 seconds" is a thing an
+// operator must be able to see and a gauge cannot say.
 func ledgerDivergenceHandler(deps api.Deps) func(context.Context, *EmptyIn) (*CollectionOut, error) {
 	return func(ctx context.Context, _ *EmptyIn) (*CollectionOut, error) {
 		rows, err := deps.Store.ListLedgerDivergence(ctx)
@@ -654,11 +734,11 @@ func ledgerDivergenceHandler(deps api.Deps) func(context.Context, *EmptyIn) (*Co
 		}
 		data := rowSliceOf(rows)
 		for i, r := range rows {
-			if r.ServerRemaining == nil {
+			if r.ServerRemaining == nil || r.LocalRemainingAtReading == nil {
 				data[i]["divergence"] = nil
 				continue
 			}
-			d := r.LocalRemaining - int64(*r.ServerRemaining)
+			d := int64(*r.LocalRemainingAtReading) - int64(*r.ServerRemaining)
 			if d < 0 {
 				d = -d
 			}
@@ -808,6 +888,21 @@ func replaceRoleGrantsHandler(deps api.Deps) func(context.Context, *UpdateScopes
 // incident freeze added in Phase 15.1 (see
 // 00040_phase15_1_defect_closure.sql for why this is a column of its own
 // rather than a reuse of app.platform.enabled).
+//
+// ── PHASE 20.4: GATE 2 TRIGGER ROW 8, SETTLED ────────────────────────────
+// §2.3's matrix marks this row "must enqueue urgent" without saying what.
+// Phase 20.3 recorded the question rather than guessing on a security
+// control. The settlement — locking enqueues nothing, unlocking enqueues a
+// full platform reconcile — is argued in full on
+// provisioning.Urgent.EnqueuePlatformReconcile, which is where the next
+// reader will be standing when they ask why.
+//
+// The other half of the settlement is not here at all, and it is the
+// larger half: the freeze is now ENFORCED, in
+// provisioning.applyToDriver, because it previously was not. Until 20.4
+// nothing anywhere read app.platform.locked_down — this handler wrote it,
+// the UI displayed it, the audit trail recorded it, and both worker paths
+// carried on calling the platform's driver regardless.
 func lockdownHandler(deps api.Deps) func(context.Context, *LockdownIn) (*ItemOut, error) {
 	return func(ctx context.Context, in *LockdownIn) (*ItemOut, error) {
 		platformID, err := parseUUID(in.ID)
@@ -836,6 +931,31 @@ func lockdownHandler(deps api.Deps) func(context.Context, *LockdownIn) (*ItemOut
 		}
 		target := platformID.String()
 		_ = apimw.Audit(ctx, deps.Store, actor.UUID, "admin.platform."+outcome, &target, "", map[string]any{"reason": in.Body.Reason})
+
+		// UNLOCKING is the transition that owes work. Everything that
+		// changed while the platform was frozen was recorded
+		// skipped_locked_down and left on the exposure board; this is what
+		// closes it, without waiting for the nightly pass.
+		//
+		// A failure to enqueue does NOT fail the request, and that is a
+		// deliberate asymmetry with B32's rule deletion (which refuses
+		// outright when deps.Urgent is nil). Unfreezing is the SAFE
+		// direction: the operator has ended an incident, and refusing to
+		// record that because a queue insert failed would leave the
+		// platform frozen — a worse outcome than a reconcile that starts
+		// on its own schedule instead. It is logged as a real problem
+		// rather than swallowed.
+		if !in.Body.LockedDown && deps.Urgent != nil {
+			if err := deps.Urgent.EnqueuePlatformReconcile(ctx, platformID); err != nil {
+				// slog.Default: cmd/hangar's newLogger installs the
+				// configured handler as the default at boot, and Deps
+				// carries no logger of its own.
+				slog.WarnContext(ctx,
+					"provisioning: platform unfrozen but its catch-up reconcile could not be enqueued — "+
+						"entitlement changes made during the freeze stay on the exposure board until the next bulk pass",
+					"platform_id", target, "error", err)
+			}
+		}
 
 		data := rowOf(row)
 		return &ItemOut{Body: api.Item[map[string]any]{Data: &data, Sync: api.Sync{}}}, nil

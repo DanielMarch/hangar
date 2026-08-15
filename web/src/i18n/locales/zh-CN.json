@@ -292,6 +292,7 @@
       "userKey": "用户键",
       "maxTokens": "最大令牌",
       "localRemaining": "本地剩余",
+      "localAtReading": "读数时本地值",
       "serverRemaining": "服务端剩余",
       "divergence": "偏差",
       "serverObservedAt": "服务端观测时间",

@@ -292,6 +292,7 @@
       "userKey": "ユーザーキー",
       "maxTokens": "最大トークン",
       "localRemaining": "ローカル残量",
+      "localAtReading": "計測時ローカル",
       "serverRemaining": "サーバー残量",
       "divergence": "乖離",
       "serverObservedAt": "サーバー観測時刻",

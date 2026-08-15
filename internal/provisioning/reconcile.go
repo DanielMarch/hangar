@@ -37,6 +37,14 @@ func ReconcilePlatform(ctx context.Context, pool store.Pool, drivers *Drivers, p
 	}
 	driver, driverErr := drivers.Lookup(platformID.String()) // may be ErrNoDriver — handled per user below
 
+	// PHASE 20.4. Read ONCE per pass, not per user: a freeze applied
+	// halfway through a reconcile takes effect on the next pass, which is
+	// the same race any concurrent admin edit already has against a batch
+	// job (see the rules comment above), and re-reading the platform row
+	// per user would add a query per link for a value that is an incident
+	// switch flipped by hand.
+	lockedDown := PlatformIsLockedDown(ctx, ro, platformID)
+
 	links, err := ro.ListAllProvisioningStatesForPlatform(ctx, platformID)
 	if err != nil {
 		return fmt.Errorf("provisioning: listing links for platform %s: %w", platformID, err)
@@ -44,7 +52,7 @@ func ReconcilePlatform(ctx context.Context, pool store.Pool, drivers *Drivers, p
 
 	var firstErr error
 	for _, link := range links {
-		if err := reconcileOneUser(ctx, pool, rules, refByID, driver, driverErr, link, now()); err != nil {
+		if err := reconcileOneUser(ctx, pool, rules, refByID, driver, driverErr, lockedDown, link, now()); err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -56,7 +64,7 @@ func ReconcilePlatform(ctx context.Context, pool store.Pool, drivers *Drivers, p
 	return firstErr
 }
 
-func reconcileOneUser(ctx context.Context, pool store.Pool, rules []entitlement.Rule, refByID map[uuid.UUID]string, driver Driver, driverErr error, link gen.AppProvisioningState, eventAt time.Time) error {
+func reconcileOneUser(ctx context.Context, pool store.Pool, rules []entitlement.Rule, refByID map[uuid.UUID]string, driver Driver, driverErr error, lockedDown bool, link gen.AppProvisioningState, eventAt time.Time) error {
 	return store.WithTx(ctx, pool, func(ctx context.Context, s *store.Store) error {
 		world, err := entitlement.GatherWorldState(ctx, s, link.UserID)
 		if err != nil {
@@ -82,7 +90,7 @@ func reconcileOneUser(ctx context.Context, pool store.Pool, rules []entitlement.
 			return fmt.Errorf("provisioning: recording reconcile audit for user %s platform %s: %w", link.UserID, link.PlatformID, err)
 		}
 
-		actual, outcome, callErr := applyToDriver(ctx, driver, driverErr, link, added, removed)
+		actual, outcome, callErr := applyToDriver(ctx, driver, driverErr, lockedDown, link, added, removed)
 
 		errStr := (*string)(nil)
 		if callErr != nil {
@@ -112,6 +120,23 @@ const (
 	OutcomePartialFailure  = "partial_failure"
 	OutcomeFailed          = "failed"
 	OutcomeSkippedUnlinked = "skipped_unlinked"
+	// OutcomeSkippedLockedDown is Phase 20.4's, and it is the outcome that
+	// makes app.platform.locked_down mean anything.
+	//
+	// ── THE FINDING ──────────────────────────────────────────────────────
+	// Phase 15.1 added the column, the endpoint, the audit trail and the
+	// admin UI. Migration 00040 describes it as "the incident switch: it
+	// stops all outbound provisioning for the platform". Nothing read it.
+	// `ListEnabledPlatforms` filters on `enabled` alone; UrgentWorker.Work
+	// looks the driver up and calls it; reconcileOneUser does the same. An
+	// administrator freezing a compromised Discord integration got an
+	// audit entry saying they had frozen it, a UI badge saying it was
+	// frozen, and a platform that carried on being written to.
+	//
+	// A security control that records its own operation and does not
+	// perform it is worse than one that is absent, because the absent one
+	// does not tell the operator the incident is contained.
+	OutcomeSkippedLockedDown = "skipped_locked_down"
 )
 
 // KnownOutcomes is that set, in the order a dashboard reads best.
@@ -124,7 +149,23 @@ const (
 // useful reading, and its absence is the misleading one. Pre-initialising
 // every label value makes an idle installation say so.
 func KnownOutcomes() []string {
-	return []string{OutcomeSuccess, OutcomePartialFailure, OutcomeFailed, OutcomeSkippedUnlinked}
+	return []string{OutcomeSuccess, OutcomePartialFailure, OutcomeFailed, OutcomeSkippedUnlinked, OutcomeSkippedLockedDown}
+}
+
+// PlatformIsLockedDown reports whether outbound provisioning for this
+// platform is frozen. A platform that cannot be read is treated as NOT
+// frozen: the freeze is an explicit administrative act recorded in a
+// column, and inferring one from a failed query would turn a transient
+// database error into a silent installation-wide provisioning halt.
+//
+// A missing platform row IS treated as not frozen for the same reason —
+// and the driver lookup that follows will fail honestly on its own.
+func PlatformIsLockedDown(ctx context.Context, s *store.Store, platformID uuid.UUID) bool {
+	platform, err := s.GetPlatform(ctx, platformID)
+	if err != nil {
+		return false
+	}
+	return platform.LockedDown
 }
 
 // applyToDriver drives the platform for one user's added/removed groups,
@@ -133,12 +174,26 @@ func KnownOutcomes() []string {
 // group set (link.ActualGroups plus every add that succeeded, minus every
 // remove that succeeded) — never the target set outright, since that would
 // silently claim success a partial failure didn't earn.
-func applyToDriver(ctx context.Context, driver Driver, driverErr error, link gen.AppProvisioningState, added, removed []string) (actual []string, outcome string, err error) {
+func applyToDriver(ctx context.Context, driver Driver, driverErr error, lockedDown bool, link gen.AppProvisioningState, added, removed []string) (actual []string, outcome string, err error) {
 	actualSet := make(map[string]bool, len(link.ActualGroups))
 	for _, g := range link.ActualGroups {
 		actualSet[g] = true
 	}
 
+	if lockedDown {
+		// Phase 20.4. Deliberately BEFORE the unlinked and driver checks:
+		// a frozen platform must not be touched, examined or reasoned
+		// about further, and "frozen" is a more specific and more
+		// actionable answer than either of the two below.
+		//
+		// actual_groups is returned UNCHANGED — nothing was granted or
+		// revoked — so the exposure stays visible on the exposure board,
+		// with its true age, for exactly as long as the freeze lasts.
+		// That is §2.4 condition 2.3's requirement ("revocations still
+		// owed remain visible with their true age") applied to the one
+		// case where the platform is down on purpose.
+		return link.ActualGroups, OutcomeSkippedLockedDown, nil
+	}
 	if link.RemoteIdentity == nil {
 		return link.ActualGroups, OutcomeSkippedUnlinked, nil
 	}

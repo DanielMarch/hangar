@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/hangar-project/hangar/internal/alerting/channels"
 	"github.com/hangar-project/hangar/internal/crypto"
 	"github.com/hangar-project/hangar/internal/provisioning"
 	"github.com/hangar-project/hangar/internal/store"
@@ -75,11 +76,19 @@ func runWork(ctx context.Context) error {
 	// registered on it.
 	revocationLatency := telemetry.NewRevocationLatency(provisioning.KnownOutcomes()...)
 
+	// Phase 20.4: Gate 3's metrics, and for the same reason — the outbox
+	// PUMP runs here and nowhere else, so this is the only process in which
+	// alert_delivery_total can move or alert_dead_letter_depth means
+	// anything. Registering them on `serve` would export a settled-delivery
+	// counter from a process that settles none.
+	alertDeliveries := telemetry.NewAlertDeliveries(channels.KnownKinds()...)
+
 	// Phase 20.1 (B36). `work` is the process that actually calls ESI, so
 	// it is the one whose esi_ledger_mode reading answers Gate 1.8. It has
 	// no other HTTP listener, which is why the metrics endpoint is its own.
 	stopMetrics := startMetricsListener(ctx, cfg.MetricsAddr,
-		buildMetricsRegistry(s, governor1, counters, revocationLatency, cfg.ESI.ErrorLimitMax, logger), logger)
+		buildMetricsRegistry(s, governor1, counters, revocationLatency, alertDeliveries, deadLetterDepth{s},
+			cfg.ESI.ErrorLimitMax, logger), logger)
 	defer stopMetrics()
 
 	syncPolicy := sync.PolicyConfig{TTLFloor: cfg.ESI.TTLFloor, BackoffCap: cfg.Sync.BackoffCap}
@@ -137,12 +146,12 @@ func runWork(ctx context.Context) error {
 	// §9.2's revocation triggers this process can observe. Shared with
 	// `serve` since Phase 20.3 — see cmd/hangar/revocation.go for what was
 	// wrong with wiring them here only.
-	urgent := wireRevocationTriggers(riverClient)
+	urgent := wireRevocationTriggers(riverClient, pool)
 
 	// Token invalidation and owner-hash-change are §9.2's other two named
 	// triggers — internal/sso.Refresher already exposes exactly these two
 	// hooks (Phase 5), previously unset. See
-	// internal/provisioning/urgent.go's HandleCharacterTokenChange doc
+	// internal/provisioning/urgent.go's HandleCharacterChange doc
 	// comment for why this necessarily opens its own transaction rather
 	// than the SSO token write's.
 	//
@@ -180,7 +189,14 @@ func runWork(ctx context.Context) error {
 	if err := ensureDefaultAlertChannels(ctx, cfg, pool, logger); err != nil {
 		return err
 	}
-	dispatcher := buildAlertDispatcher(cfg, pool, logger)
+	dispatcher := buildAlertDispatcher(cfg, pool, alertDeliveries, logger)
+
+	// Phase 20.4 (B25): the pump finally has producers. The notification
+	// hook fires from the sync handlers this process runs; the threshold
+	// evaluator is its own ticker. See cmd/hangar/alerting.go.
+	emitter := buildAlertEmitter(cfg, pool)
+	wireAlertGeneration(emitter, logger)
+	thresholds := buildThresholdEvaluator(cfg, pool, emitter, logger)
 
 	// Phase 19: §4.9's webhook pump, alongside the alert pump and for the
 	// same reasons — a short idempotent sweep of a table, not worth a River
@@ -194,6 +210,7 @@ func runWork(ctx context.Context) error {
 	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go runAlertDispatcher(sigCtx, dispatcher, cfg.Alerting.DispatchInterval, logger)
+	go runThresholdEvaluator(sigCtx, thresholds, cfg.Alerting.ThresholdInterval, logger)
 	go runWebhookDispatcher(sigCtx, webhooks, cfg.Alerting.DispatchInterval, logger)
 	hb.Run(sigCtx)
 	return nil

@@ -135,7 +135,7 @@ func runServe(ctx context.Context) error {
 	// `serve` builds no ESI gateway (only `work` does), so it contributes
 	// the replica and divergence gauges and no ledger mode.
 	stopMetrics := startMetricsListener(hbCtx, cfg.MetricsAddr,
-		buildMetricsRegistry(store.New(pool), nil, nil, nil, cfg.ESI.ErrorLimitMax, logger), logger)
+		buildMetricsRegistry(store.New(pool), nil, nil, nil, nil, nil, cfg.ESI.ErrorLimitMax, logger), logger)
 	defer stopMetrics()
 
 	mux := http.NewServeMux()
@@ -177,7 +177,7 @@ func runServe(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	urgent := wireRevocationTriggers(insertOnlyRiver)
+	urgent := wireRevocationTriggers(insertOnlyRiver, pool)
 	lifecycle := buildTokenLifecycle(s, urgent, pool, logger)
 
 	flow, err := buildSSOFlow(ctx, cfg, pool, s, keyring, lifecycle, urgent, logger)
@@ -192,7 +192,12 @@ func runServe(ctx context.Context) error {
 	// finds none, and does so forever.
 	go runSubscriptionReconciler(hbCtx, s, logger)
 
-	deps := api.Deps{Store: s, Pool: pool, SSO: flow, Urgent: urgent}
+	// Phase 20.4 (B25): `serve` is the process that performs the one
+	// administrative action §4.4 declares a default-enabled DOMAIN EVENT
+	// for — advancing the ESI compatibility pin. It produces alert events
+	// into the shared outbox; `work` still owns the pump that delivers
+	// them, and therefore owns Gate 3's delivery metrics.
+	deps := api.Deps{Store: s, Pool: pool, SSO: flow, Urgent: urgent, Alerts: buildAlertEmitter(cfg, pool)}
 	api.Version = version
 	hapi := api.NewAPI(mux, deps)
 	v1.RegisterAll(hapi, deps)

@@ -292,6 +292,7 @@
       "userKey": "Gebruikersleutel",
       "maxTokens": "Maks. tekens",
       "localRemaining": "Plaaslik oor",
+      "localAtReading": "Plaaslik by lesing",
       "serverRemaining": "Bediener oor",
       "divergence": "Afwyking",
       "serverObservedAt": "Bediener waargeneem",

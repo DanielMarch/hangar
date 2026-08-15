@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/hangar-project/hangar/internal/alerting"
 	"github.com/hangar-project/hangar/internal/esi/ratelimit"
 	"github.com/hangar-project/hangar/internal/store"
 	"github.com/hangar-project/hangar/internal/telemetry"
@@ -42,11 +43,20 @@ import (
 // subsystem that is not there, which is precisely the reading 20.1's
 // lesson forbids. `serve` produces revocation TRIGGERS and reports none of
 // their latencies; `work` consumes them and reports all of them.
+// deliveries and deadLetters are likewise nil in every process but `work`,
+// and for exactly the same reason: the alert outbox PUMP runs only there.
+// alert_delivery_total counts deliveries a pump SETTLED, so exporting it
+// from `serve` would publish a permanent zero from a process that settles
+// none — the reading 20.1's lesson forbids, and the reading B25 itself
+// consisted of. `work` produces and delivers alerts and reports both;
+// `serve` produces none and reports neither.
 func buildMetricsRegistry(
 	s *store.Store,
 	gateway *ratelimit.Governor1,
 	counters *telemetry.GatewayCounters,
 	revocations *telemetry.RevocationLatency,
+	deliveries *telemetry.AlertDeliveries,
+	deadLetters telemetry.DeadLetterDepthSource,
 	errorLimitMax int,
 	logger *slog.Logger,
 ) *prometheus.Registry {
@@ -56,14 +66,26 @@ func buildMetricsRegistry(
 	if gateway != nil {
 		mode = governorMode{gateway}
 	}
-	reg.MustRegister(telemetry.NewGatewayCollector(
+	gatewayCollector := telemetry.NewGatewayCollector(
 		s, mode, ledgerDivergence{s}, errorBudget{s: s, max: errorLimitMax}, telemetry.LiveThreshold, logger,
-	))
+	)
+	reg.MustRegister(gatewayCollector)
 	if counters != nil {
 		reg.MustRegister(counters)
 	}
 	if revocations != nil {
 		reg.MustRegister(revocations)
+	}
+	if deliveries != nil {
+		reg.MustRegister(deliveries)
+	}
+	if deadLetters != nil {
+		// The scrape-error counter is SHARED, not duplicated: two
+		// collectors exporting a metric family of the same name is a
+		// duplicate-descriptor error rather than a merge, so the gateway
+		// collector owns hangar_metric_scrape_errors_total and everything
+		// else increments it. See GatewayCollector.ScrapeErrors.
+		reg.MustRegister(telemetry.NewAlertCollector(deadLetters, gatewayCollector.ScrapeErrors(), logger))
 	}
 	return reg
 }
@@ -135,9 +157,16 @@ type governorMode struct{ g *ratelimit.Governor1 }
 func (m governorMode) Mode() string { return string(m.g.Mode()) }
 
 // ledgerDivergence adapts the store's generated ListLedgerDivergence rows
-// to telemetry.DivergenceRow, converting the nullable server reading from
-// *int32 to *int64 and preserving its nil-ness — nil means "the server has
-// not been heard from for this bucket", which must not become a zero.
+// to telemetry.DivergenceRow, converting the two nullable readings from
+// *int32 to *int64 and preserving their nil-ness — nil means "the server
+// has not been heard from for this bucket", which must not become a zero.
+//
+// PHASE 20.4: it carries the STORED pair
+// (local_remaining_at_reading, server_remaining) and no longer the live
+// LocalRemaining the query still returns for the admin board. That row
+// field is deliberately left unread here: the gauge's operands must both
+// come from the reconciler's own instant, and reading the live one is the
+// exact defect this phase fixed.
 type ledgerDivergence struct{ s *store.Store }
 
 func (d ledgerDivergence) LedgerDivergence(ctx context.Context) ([]telemetry.DivergenceRow, error) {
@@ -148,8 +177,7 @@ func (d ledgerDivergence) LedgerDivergence(ctx context.Context) ([]telemetry.Div
 	out := make([]telemetry.DivergenceRow, 0, len(rows))
 	for _, row := range rows {
 		converted := telemetry.DivergenceRow{
-			Group:          row.RateLimitGroup,
-			LocalRemaining: row.LocalRemaining,
+			Group: row.RateLimitGroup,
 			// Both required for the freshness rule — see
 			// telemetry.DivergenceRow.ObservedAt. Omitting them does not
 			// produce a wrong number, it produces NO samples at all, which
@@ -162,9 +190,34 @@ func (d ledgerDivergence) LedgerDivergence(ctx context.Context) ([]telemetry.Div
 			server := int64(*row.ServerRemaining)
 			converted.ServerRemaining = &server
 		}
+		if row.LocalRemainingAtReading != nil {
+			local := int64(*row.LocalRemainingAtReading)
+			converted.LocalAtReading = &local
+		}
 		out = append(out, converted)
 	}
 	return out, nil
+}
+
+// deadLetterDepth adapts internal/alerting's dead-letter count to
+// telemetry.DeadLetterDepthSource — the adapter exists so internal/telemetry
+// does not import internal/alerting, the same inversion governorMode avoids
+// for internal/esi/ratelimit.
+//
+// It reports ok=true with a depth of zero for an empty board, and that is
+// correct rather than a violation of the nil-is-not-zero rule: an EMPTY
+// dead-letter queue is a real, healthy, fully-known reading — the query
+// ran and counted nothing. What must never become zero is a reading that
+// could not be TAKEN, which is the error branch, and which produces no
+// sample at all.
+type deadLetterDepth struct{ s *store.Store }
+
+func (d deadLetterDepth) DeadLetterDepth(ctx context.Context) (int64, bool, error) {
+	n, err := alerting.DeadLetterCount(ctx, d.s)
+	if err != nil {
+		return 0, false, err
+	}
+	return n, true, nil
 }
 
 // errorBudget adapts app.esi_error_budget to telemetry.ErrorBudgetReader,

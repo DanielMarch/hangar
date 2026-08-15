@@ -292,6 +292,7 @@
       "userKey": "User key",
       "maxTokens": "Max tokens",
       "localRemaining": "Local remaining",
+      "localAtReading": "Local at reading",
       "serverRemaining": "Server remaining",
       "divergence": "Divergence",
       "serverObservedAt": "Server observed",

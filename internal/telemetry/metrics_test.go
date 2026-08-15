@@ -66,10 +66,10 @@ func freshReading(rows []DivergenceRow) []DivergenceRow {
 // that group's maximum — which is also exactly what Gate 1.3 measures.
 func TestLedgerDivergenceIsPerGroupMaximum(t *testing.T) {
 	collector := NewGatewayCollector(nil, nil, stubDivergence{rows: freshReading([]DivergenceRow{
-		{Group: "market", LocalRemaining: 100, ServerRemaining: int64p(99)},  // 1
-		{Group: "market", LocalRemaining: 100, ServerRemaining: int64p(93)},  // 7  <- max
-		{Group: "market", LocalRemaining: 100, ServerRemaining: int64p(100)}, // 0
-		{Group: "corp", LocalRemaining: 50, ServerRemaining: int64p(52)},     // 2 (absolute)
+		{Group: "market", LocalAtReading: int64p(100), ServerRemaining: int64p(99)},  // 1
+		{Group: "market", LocalAtReading: int64p(100), ServerRemaining: int64p(93)},  // 7  <- max
+		{Group: "market", LocalAtReading: int64p(100), ServerRemaining: int64p(100)}, // 0
+		{Group: "corp", LocalAtReading: int64p(50), ServerRemaining: int64p(52)},     // 2 (absolute)
 	})}, nil, LiveThreshold, quietLogger())
 
 	expected := `
@@ -90,11 +90,34 @@ esi_ledger_divergence{group="market"} 7
 // a reassuring zero — which is the healthiest-looking value on the gauge.
 func TestBucketWithNoServerReadingEmitsNoSample(t *testing.T) {
 	collector := NewGatewayCollector(nil, nil, stubDivergence{rows: []DivergenceRow{
-		{Group: "silent", LocalRemaining: 100, ServerRemaining: nil},
+		{Group: "silent", LocalAtReading: int64p(100), ServerRemaining: nil},
 	}}, nil, LiveThreshold, quietLogger())
 
 	if n := testutil.CollectAndCount(collector, "esi_ledger_divergence"); n != 0 {
 		t.Errorf("a bucket with no server reading produced %d samples, want 0 — a null reading must not become a zero", n)
+	}
+}
+
+// TestBucketWithNoLocalReadingEmitsNoSample is the OTHER half of the same
+// rule, and it is new in Phase 20.4 because the local half only became a
+// stored, nullable value in this phase (migration 00042).
+//
+// It has two real sources, not just a theoretical one: a bucket carried
+// across the migration keeps its server_remaining and has no paired local
+// reading until the next reconcile, and `solo` mode reconciles in process
+// and writes neither column. In both cases the honest answer is "no
+// reading", and it must not be reported as a divergence equal to the whole
+// server reading — which is what subtracting a zeroed nil would produce,
+// and which would look exactly like a catastrophically broken ledger.
+func TestBucketWithNoLocalReadingEmitsNoSample(t *testing.T) {
+	now := time.Now()
+	collector := NewGatewayCollector(nil, nil, stubDivergence{rows: []DivergenceRow{
+		{Group: "premigration", ServerRemaining: int64p(97), LocalAtReading: nil, ObservedAt: &now, Window: time.Minute},
+	}}, nil, LiveThreshold, quietLogger())
+
+	if n := testutil.CollectAndCount(collector, "esi_ledger_divergence"); n != 0 {
+		t.Errorf("a bucket with a server reading but no paired local reading produced %d samples, want 0 — "+
+			"half a pair is not a measurement", n)
 	}
 }
 
@@ -197,7 +220,7 @@ func TestNilSourcesDoNotPanic(t *testing.T) {
 func TestStaleServerReadingEmitsNoSample(t *testing.T) {
 	stale := time.Now().Add(-20 * time.Minute)
 	collector := NewGatewayCollector(nil, nil, stubDivergence{rows: []DivergenceRow{
-		{Group: "idle", LocalRemaining: 300, ServerRemaining: int64p(127), ObservedAt: &stale, Window: 15 * time.Minute},
+		{Group: "idle", LocalAtReading: int64p(300), ServerRemaining: int64p(127), ObservedAt: &stale, Window: 15 * time.Minute},
 	}}, nil, LiveThreshold, quietLogger())
 
 	if n := testutil.CollectAndCount(collector, "esi_ledger_divergence"); n != 0 {
@@ -213,7 +236,7 @@ func TestStaleServerReadingEmitsNoSample(t *testing.T) {
 func TestReadingInsideTheWindowStillCounts(t *testing.T) {
 	recent := time.Now().Add(-30 * time.Second)
 	collector := NewGatewayCollector(nil, nil, stubDivergence{rows: []DivergenceRow{
-		{Group: "busy", LocalRemaining: 300, ServerRemaining: int64p(299), ObservedAt: &recent, Window: 15 * time.Minute},
+		{Group: "busy", LocalAtReading: int64p(300), ServerRemaining: int64p(299), ObservedAt: &recent, Window: 15 * time.Minute},
 	}}, nil, LiveThreshold, quietLogger())
 
 	expected := `
@@ -223,5 +246,104 @@ esi_ledger_divergence{group="busy"} 1
 `
 	if err := testutil.CollectAndCompare(collector, strings.NewReader(expected), "esi_ledger_divergence"); err != nil {
 		t.Error(err)
+	}
+}
+
+// ── PHASE 20.4: GATE 3'S METRICS ─────────────────────────────────────────
+
+// TestAlertDeliveryTotalExportsEveryLabelPairAtZero is 20.3's lesson,
+// applied one phase later to a CounterVec instead of a HistogramVec: a Vec
+// with no observations exports NO SERIES AT ALL, so a `/metrics` scrape of
+// an installation whose alerting is wired but quiet is byte-for-byte
+// identical to one where it is not wired.
+//
+// That is not a hypothetical. It is exactly what B25 looked like from
+// outside for two years, and it is why every (kind, outcome) pair is
+// pre-initialised.
+func TestAlertDeliveryTotalExportsEveryLabelPairAtZero(t *testing.T) {
+	deliveries := NewAlertDeliveries("smtp", "slack_webhook", "discord_webhook")
+
+	// 4 kinds (three real plus "unset") x 3 outcomes.
+	if n := testutil.CollectAndCount(deliveries, "alert_delivery_total"); n != 12 {
+		t.Errorf("alert_delivery_total exported %d series before any delivery, want 12 — "+
+			"a quiet alerting subsystem must be distinguishable from an unwired one", n)
+	}
+}
+
+// TestAlertDeliveryTotalCountsWhatTheDispatcherSettles pins the label
+// vocabulary itself: the pump's outcome constants and this metric's label
+// values must be one list, not two that can drift.
+func TestAlertDeliveryTotalCountsWhatTheDispatcherSettles(t *testing.T) {
+	deliveries := NewAlertDeliveries("slack_webhook")
+	deliveries.ObserveAlertDelivery("slack_webhook", AlertDelivered)
+	deliveries.ObserveAlertDelivery("slack_webhook", AlertDelivered)
+	deliveries.ObserveAlertDelivery("slack_webhook", AlertDeadLettered)
+	// A delivery settled before its channel row could be read still has a
+	// fate and must still be counted.
+	deliveries.ObserveAlertDelivery("", AlertRetried)
+
+	expected := `
+# HELP alert_delivery_total Alert deliveries settled by the outbox pump, by channel kind and outcome. 04_RELEASE_GATES.md §3.1: an alert is DROPPED only if it was generated and neither delivered nor dead-lettered — dead-lettering is a visible outcome, not a loss, which is why it is a label value here rather than a separate metric.
+# TYPE alert_delivery_total counter
+alert_delivery_total{kind="slack_webhook",outcome="dead_lettered"} 1
+alert_delivery_total{kind="slack_webhook",outcome="retried"} 0
+alert_delivery_total{kind="slack_webhook",outcome="sent"} 2
+alert_delivery_total{kind="unset",outcome="dead_lettered"} 0
+alert_delivery_total{kind="unset",outcome="retried"} 1
+alert_delivery_total{kind="unset",outcome="sent"} 0
+`
+	if err := testutil.CollectAndCompare(deliveries, strings.NewReader(expected), "alert_delivery_total"); err != nil {
+		t.Error(err)
+	}
+}
+
+// stubDeadLetters is a DeadLetterDepthSource double.
+type stubDeadLetters struct {
+	depth int64
+	ok    bool
+	err   error
+}
+
+func (s stubDeadLetters) DeadLetterDepth(context.Context) (int64, bool, error) {
+	return s.depth, s.ok, s.err
+}
+
+// TestDeadLetterDepthReportsAnEmptyBoardAsZero draws the line the
+// nil-is-not-zero rule actually draws. An EMPTY dead-letter board is a
+// real, fully-known reading: the query ran and counted nothing, and an
+// operator watching this gauge wants to see the zero.
+func TestDeadLetterDepthReportsAnEmptyBoardAsZero(t *testing.T) {
+	collector := NewAlertCollector(stubDeadLetters{depth: 0, ok: true}, nil, quietLogger())
+
+	expected := `
+# HELP alert_dead_letter_depth Alert deliveries currently on the dead-letter board: generated, attempted, permanently not delivered, and visible to an administrator who can requeue them. 04_RELEASE_GATES.md §3.1 counts these as a delivered outcome rather than a drop. No sample is emitted when the count cannot be read — an unreadable board is not an empty one.
+# TYPE alert_dead_letter_depth gauge
+alert_dead_letter_depth 0
+`
+	if err := testutil.CollectAndCompare(collector, strings.NewReader(expected), "alert_dead_letter_depth"); err != nil {
+		t.Error(err)
+	}
+}
+
+// TestDeadLetterDepthEmitsNoSampleWhenItCannotBeRead is the other side: a
+// board nobody could read is not a board with nothing on it. Reporting
+// zero here would tell an operator their alerting is healthy at the exact
+// moment the database stopped answering.
+func TestDeadLetterDepthEmitsNoSampleWhenItCannotBeRead(t *testing.T) {
+	collector := NewAlertCollector(stubDeadLetters{err: errors.New("connection refused")}, nil, quietLogger())
+
+	if n := testutil.CollectAndCount(collector, "alert_dead_letter_depth"); n != 0 {
+		t.Errorf("an unreadable dead-letter board produced %d samples, want 0 — "+
+			"a missing reading is never a zero", n)
+	}
+}
+
+// TestAlertCollectorWithNoSourceIsSilent covers the process-role split:
+// `serve` runs no outbox pump, so it reports nothing about dead letters
+// rather than a permanent zero from a subsystem it does not run.
+func TestAlertCollectorWithNoSourceIsSilent(t *testing.T) {
+	collector := NewAlertCollector(nil, nil, quietLogger())
+	if n := testutil.CollectAndCount(collector, "alert_dead_letter_depth"); n != 0 {
+		t.Errorf("a process with no dead-letter source produced %d samples, want 0", n)
 	}
 }

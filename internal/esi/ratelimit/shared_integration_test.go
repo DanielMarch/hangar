@@ -214,6 +214,85 @@ func TestClusteredDivergenceIsZeroForAReservedBucket(t *testing.T) {
 		maxTokens, consumed, localRemaining, serverRemaining)
 }
 
+// TestDivergenceOperandsDescribeOneInstant is Phase 20.4's regression test
+// for the third instance of "a subtraction whose operands describe
+// different moments is not a measurement".
+//
+// It reproduces the live-installation reading directly, without needing
+// concurrency to do it: reconcile once (so the ledger and the server
+// agree), then let more requests settle before the next reconcile — which
+// is exactly what happens between two scrapes on a busy bucket. The OLD
+// computation (live local count minus stored server reading) then reports
+// 2 per settled request on a bucket in perfect health; the paired columns
+// report 0, because they were written together.
+//
+// Both quantities are computed here from raw SQL rather than through the
+// telemetry collector, so the test pins what the DATABASE holds and cannot
+// be satisfied by a Go-side change that leaves the stored pair wrong.
+func TestDivergenceOperandsDescribeOneInstant(t *testing.T) {
+	pool := newMigratedPool(t)
+	ctx := context.Background()
+	ledger := ratelimit.NewLedgerClustered(pool)
+
+	req := ratelimit.AcquireRequest{
+		Group: "char-detail", UserKey: "char:sameinstant",
+		MaxTokens: 100, AdmissionMaxTokens: 100,
+		Window: 15 * time.Minute, RequestTimeout: 30 * time.Second,
+	}
+	settle := func(n int) {
+		t.Helper()
+		for i := 0; i < n; i++ {
+			res, err := ledger.Acquire(ctx, req)
+			require.NoError(t, err)
+			require.NoError(t, ledger.Settle(ctx, res, ratelimit.Cost2XX, time.Now()))
+		}
+	}
+
+	// Two settled requests, then the response that carries the header:
+	// the server agrees, and the reconcile stores both halves together.
+	settle(2)
+	require.NoError(t, ledger.Reconcile(ctx, req.Group, req.UserKey, 100, 96))
+
+	// Eight more responses settle before anything reconciles again. On the
+	// live installation this is simply the next few hundred milliseconds.
+	settle(8)
+
+	var serverRemaining, localAtReading int32
+	var liveLocalRemaining int64
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT b.server_remaining, b.local_remaining_at_reading,
+		       greatest(b.max_tokens - coalesce((SELECT sum(e.cost) FROM app.esi_ledger_entry e
+		                  WHERE e.rate_limit_group = b.rate_limit_group
+		                    AND e.user_key = b.user_key
+		                    AND e.state != 'reserved'), 0), 0)::bigint
+		  FROM app.esi_ledger_bucket b
+		 WHERE b.rate_limit_group = $1 AND b.user_key = $2`,
+		req.Group, req.UserKey).Scan(&serverRemaining, &localAtReading, &liveLocalRemaining))
+
+	// The defect, still reproducible on demand. If this assertion ever
+	// starts failing it means the live count and the stored reading have
+	// stopped diverging, which would make the rest of this test vacuous —
+	// so it is asserted rather than merely described.
+	stale := liveLocalRemaining - int64(serverRemaining)
+	if stale < 0 {
+		stale = -stale
+	}
+	require.Greater(t, stale, int64(1),
+		"the live-versus-snapshot subtraction should still be reproducibly wrong: "+
+			"live_local=%d server=%d", liveLocalRemaining, serverRemaining)
+
+	// The fix: the stored pair was written in one statement under the
+	// bucket lock, so it describes one instant and reports the truth.
+	paired := int64(localAtReading) - int64(serverRemaining)
+	if paired < 0 {
+		paired = -paired
+	}
+	require.LessOrEqual(t, paired, int64(1),
+		"Gate 1.3 tolerance over the reconcile-time pair: local_at_reading=%d server_remaining=%d "+
+			"(live local count was %d, which is what the old computation used)",
+		localAtReading, serverRemaining, liveLocalRemaining)
+}
+
 // TestClusteredReservationSurvivesReplicaCrash (roadmap exit criterion): a
 // killed replica's reservations expire (at the request timeout) and are
 // reclaimed — charged the worst case, never freed — by the next acquire.

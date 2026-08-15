@@ -722,13 +722,16 @@ type AppEsiErrorBudget struct {
 }
 
 type AppEsiLedgerBucket struct {
-	RateLimitGroup   string
-	UserKey          string
-	MaxTokens        int32
-	Window           time.Duration
+	RateLimitGroup string
+	UserKey        string
+	MaxTokens      int32
+	Window         time.Duration
+	// Last authoritative X-Ratelimit-Remaining. Paired with local_remaining_at_reading, written in the same statement so the two describe one instant. Phase 20.4.
 	ServerRemaining  *int32
 	ServerObservedAt *time.Time
 	UpdatedAt        time.Time
+	// HANGAR's own remaining headroom as it stood at the instant server_remaining was recorded, under the same bucket lock — BEFORE the reconciliation correction. The other operand of esi_ledger_divergence (04_RELEASE_GATES.md §1.3). NULL means no reading, which is not a divergence of zero. Phase 20.4.
+	LocalRemainingAtReading *int32
 }
 
 type AppEsiLedgerEntry struct {

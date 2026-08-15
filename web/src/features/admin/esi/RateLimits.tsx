@@ -1,12 +1,29 @@
 // Governor 1's ledger dashboard, and Governor 2's error budget beside it.
 //
-// LEDGER DIVERGENCE IS THE HEADLINE. `divergence` is |local_remaining -
-// server_remaining| per bucket — the same quantity Gate 1.3 measures
-// (`max(esi_ledger_divergence) over the run <= 1, per group`). Sustained
-// divergence is the early warning that the cluster-shared ledger and
-// ESI's own X-Ratelimit-Remaining have drifted apart, which is a Gate 1
-// failure in the making, so it leads the screen rather than sitting in a
-// column the operator has to scroll to.
+// LEDGER DIVERGENCE IS THE HEADLINE. `divergence` is the same quantity
+// Gate 1.3 measures (`max(esi_ledger_divergence) over the run <= 1, per
+// group`). Sustained divergence is the early warning that the
+// cluster-shared ledger and ESI's own X-Ratelimit-Remaining have drifted
+// apart, which is a Gate 1 failure in the making, so it leads the screen
+// rather than sitting in a column the operator has to scroll to.
+//
+// ── PHASE 20.4: WHICH TWO COLUMNS THE DIVERGENCE IS THE DIFFERENCE OF ────
+// It is |local_at_reading - server_remaining|, NOT |local_remaining -
+// server_remaining|, and the table shows all three so the arithmetic is
+// legible rather than something the operator has to take on trust.
+//
+//   local_remaining    what the ledger holds RIGHT NOW, summed live
+//   local_at_reading   what it held at the instant the server reading
+//                      below was recorded, written in the same statement
+//   server_remaining   the last X-Ratelimit-Remaining CCP sent
+//
+// The first and third describe different moments; subtracting them
+// measures how much has been consumed since the last reconcile, which read
+// 40-55 on healthy buckets on the live installation against a tolerance of
+// 1. The second and third describe one moment, which is what makes their
+// difference a measurement at all. `local_remaining` stays on the screen
+// because current headroom is a real operator question — it is just not
+// this one.
 //
 // A null divergence means the server has said nothing about that bucket
 // yet — rendered as "not observed", never as zero. Zero divergence is a
@@ -51,6 +68,7 @@ export function RateLimits() {
     textColumn("user_key", t("admin.rateLimits.userKey")),
     numberColumn("max_tokens", t("admin.rateLimits.maxTokens")),
     numberColumn("local_remaining", t("admin.rateLimits.localRemaining")),
+    numberColumn("local_remaining_at_reading", t("admin.rateLimits.localAtReading")),
     numberColumn("server_remaining", t("admin.rateLimits.serverRemaining")),
     {
       id: "divergence",

@@ -46,6 +46,15 @@ func ParseCharacterNotifications(body []byte) ([]CharacterNotificationDTO, error
 //     RecordUnknownNotificationType so an operator can see it, using the
 //     same board the roadmap calls "the unknown-types board" rather than
 //     inventing a second one for this specific failure mode.
+//
+// ── PHASE 20.4 (B25): THIS IS WHERE ALERTS COME FROM ─────────────────────
+// Every notification this loop actually WRITES is offered to
+// NotificationObservedHook, which Phase 20.4 wires to internal/alerting's
+// ingest path. Before that, §4.4's whole delivery pipeline — dedupe,
+// coalescing, routing, the outbox pump, three channel drivers,
+// dead-lettering — was built, tested, admin-visible and had nothing
+// whatsoever to deliver: the Dispatcher ran every fifteen seconds against
+// an empty table. See hooks.go for the seam's shape and its error policy.
 func SyncCharacterNotifications(ctx context.Context, s *store.Store, characterID int64, notifications []CharacterNotificationDTO) (SyncResult, error) {
 	for _, n := range notifications {
 		if err := s.RecordOpenVocabularyValue(ctx, "notification_type", n.Type); err != nil {
@@ -60,16 +69,37 @@ func SyncCharacterNotifications(ctx context.Context, s *store.Store, characterID
 		}
 
 		text := n.Text
-		if _, err := s.UpsertCharacterNotification(ctx, gen.UpsertCharacterNotificationParams{
+		written, err := s.UpsertCharacterNotification(ctx, gen.UpsertCharacterNotificationParams{
 			CharacterID: characterID, NotificationID: n.NotificationID, SentAt: n.Timestamp,
 			SenderID: &n.SenderID, SenderType: &n.SenderType, Type: n.Type, Text: &text,
 			IsRead: n.IsRead, Payload: payload, ParseFailed: parseFailed,
-		}); ignoreUnchanged(err) != nil {
+		})
+		if ignoreUnchanged(err) != nil {
 			// A DB error here is a genuine infrastructure failure, distinct
 			// from a YAML-shape failure — this one DOES propagate, since
 			// Principle 14 only promises to never reject a value the
 			// EXTERNAL system sent us, not to swallow our own storage errors.
 			return SyncResult{}, fmt.Errorf("handlers: upserting notification %d for character %d: %w", n.NotificationID, characterID, err)
+		}
+		if err != nil {
+			// ignoreUnchanged swallowed pgx.ErrNoRows: the guard suppressed
+			// the write because HANGAR already had this notification, with
+			// the same read state. Nothing happened, so nothing is offered.
+			continue
+		}
+		if NotificationObservedHook == nil {
+			continue
+		}
+		// written.Payload rather than the local `payload`: the row as
+		// stored is what the renderer and the API will show, and reading it
+		// back means a future column default or trigger cannot make the
+		// alert and the stored notification disagree about their contents.
+		if err := NotificationObservedHook(ctx, ObservedNotification{
+			CharacterID: characterID, NotificationID: written.NotificationID,
+			Type: written.Type, Payload: written.Payload, OccurredAt: written.SentAt,
+		}); err != nil {
+			return SyncResult{}, fmt.Errorf("handlers: raising alert for notification %d of character %d: %w",
+				n.NotificationID, characterID, err)
 		}
 	}
 	return SyncResult{RowsAffected: int32(len(notifications))}, nil

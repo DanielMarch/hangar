@@ -99,28 +99,50 @@ type ModeSource interface {
 // very run it is measuring. Gate 1.3's bar is stated "per group", so the
 // collector aggregates to the per-group MAXIMUM, which is both what the
 // gate asks for and bounded by the number of rate-limit groups.
+// ── PHASE 20.4: BOTH OPERANDS ARE NOW STORED, AND THAT IS THE FIX ────────
+// This struct used to carry a LIVE local count (summed from
+// app.esi_ledger_entry at scrape time) beside a STORED server reading, and
+// subtracted them. It therefore reported how much had been consumed since
+// the last reconcile — throughput, not accuracy. Measured on the live
+// installation under per-bucket concurrency: char-social 55, char-detail
+// 51, corp-industry 50, char-industry 46, against a tolerance of 1, each
+// persisting 3-6 s while the ledger was in perfect health.
+//
+// The live field is GONE rather than merely unused. Leaving it here would
+// leave the wrong subtraction one keystroke away, and this is the third
+// time this defect class has been fixed — 20.2 for readings older than a
+// window, 20.2 again for reservation contamination, and now for a
+// sub-second skew that no freshness rule can resolve. Making the mistake
+// unrepresentable is the only remedy that does not depend on the next
+// reader having read this comment.
 type DivergenceRow struct {
-	Group          string
-	LocalRemaining int64
-	// ServerRemaining is nil until the server has been heard from for this
+	Group string
+
+	// LocalAtReading and ServerRemaining are the pair the reconciler wrote
+	// together, under the bucket's own lock, in one statement
+	// (app.esi_ledger_bucket.local_remaining_at_reading and
+	// .server_remaining — see RecordServerLedgerReading). They describe one
+	// instant, which is what makes their difference a measurement.
+	//
+	// Either being nil means the server has not been heard from for this
 	// bucket. Nil is NOT zero: zero divergence is a healthy reading, no
 	// reading is not a reading, and collapsing them would hide a bucket
 	// whose headers have stopped arriving behind a wall of reassuring
 	// zeroes. A nil row contributes no sample at all.
+	LocalAtReading  *int64
 	ServerRemaining *int64
 
-	// ObservedAt is when that reading arrived, and Window is the bucket's
+	// ObservedAt is when that pair was written, and Window is the bucket's
 	// floating window.
 	//
 	// ── PHASE 20.2: AN EXPIRED READING IS NOT A READING EITHER ───────────
-	// LocalRemaining is computed live at scrape time; ServerRemaining is a
-	// snapshot from the last response that carried X-Ratelimit-Remaining.
-	// Under load those are the same instant — every response settles and
-	// then reconciles the same bucket — so the comparison is exact. On an
-	// IDLE bucket it is not: local consumption ages out of the floating
-	// window by design and climbs back towards max_tokens, while the stored
-	// reading does not move, and the gauge ends up reporting most of the
-	// bucket as divergence.
+	// The freshness rule survives 20.4 unchanged, and it is not redundant
+	// with the paired columns. A pair written at the same instant still
+	// describes an instant that can recede into the past: an idle bucket's
+	// entries age out of the floating window by design, so what the ledger
+	// holds NOW has drifted arbitrarily far from what it held then, and a
+	// dashboard reporting the old difference as current would be asserting
+	// something nobody has checked.
 	//
 	// Measured on the development installation immediately after B29's
 	// wiring went live: `corp-detail` read 173 against a Gate 1.3 tolerance
@@ -129,13 +151,12 @@ type DivergenceRow struct {
 	// described different moments.
 	//
 	// A reading older than one window is therefore dropped rather than
-	// reported, on exactly the same principle as the nil case above: a
-	// subtraction whose operands describe different moments is not a
-	// measurement. Gate 1's own run is unaffected, because under sustained
-	// load every bucket is reconciled on every response. The admin dashboard
-	// still shows the stale reading WITH its age, because "nothing has been
-	// heard from this bucket in a while" is exactly what an operator needs
-	// to see and exactly what this gauge cannot express.
+	// reported, on exactly the same principle as the nil case above. Gate
+	// 1's own run is unaffected, because under sustained load every bucket
+	// is reconciled on every response. The admin dashboard still shows the
+	// stale reading WITH its age, because "nothing has been heard from this
+	// bucket in a while" is exactly what an operator needs to see and
+	// exactly what this gauge cannot express.
 	ObservedAt *time.Time
 	Window     time.Duration
 }
@@ -162,7 +183,7 @@ type ErrorBudgetReader interface {
 	ErrorBudgetRemaining(ctx context.Context) (remaining int64, ok bool, err error)
 }
 
-// gatewayCollector reports the Gate 1 metrics whose subsystems are live, by
+// GatewayCollector reports the Gate 1 metrics whose subsystems are live, by
 // reading current state at SCRAPE time rather than by counting events.
 //
 // Scrape-time collection is the right shape for these three specifically:
@@ -172,7 +193,7 @@ type ErrorBudgetReader interface {
 // database already holds. It is the wrong shape for a rate — which is why
 // esi_429_total and friends are counters owned by 20.2, incremented where
 // the response is classified, not derived here.
-type gatewayCollector struct {
+type GatewayCollector struct {
 	replicas      LedgerDivergenceSource
 	mode          ModeSource
 	divergence    DivergenceLister
@@ -187,6 +208,19 @@ type gatewayCollector struct {
 	scrapeErrors   *prometheus.CounterVec
 }
 
+// ScrapeErrors exposes hangar_metric_scrape_errors_total so that OTHER
+// scrape-time collectors in the same registry can report their own failures
+// against the one metric an operator watches, rather than each inventing a
+// name.
+//
+// This collector owns it: it Describes and Collects it, and every other
+// user only increments. Two collectors both exporting a metric family of
+// the same name is a duplicate-descriptor registration error, not a merge —
+// which is why the counter is shared by reference rather than by each
+// collector building its own. Phase 20.4's AlertCollector is the first
+// other user.
+func (c *GatewayCollector) ScrapeErrors() *prometheus.CounterVec { return c.scrapeErrors }
+
 // NewGatewayCollector builds the Phase 20.1 collector. Any of its sources
 // may be nil — a process role that does not build the ESI gateway (there
 // is currently none, but `migrate` and `openapi` are shaped that way)
@@ -198,11 +232,11 @@ func NewGatewayCollector(
 	errorBudget ErrorBudgetReader,
 	liveThreshold time.Duration,
 	log *slog.Logger,
-) prometheus.Collector {
+) *GatewayCollector {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &gatewayCollector{
+	return &GatewayCollector{
 		replicas: replicas, mode: mode, divergence: divergence, errorBudget: errorBudget,
 		liveThreshold: liveThreshold, log: log,
 		replicaCount: prometheus.NewDesc(
@@ -228,7 +262,7 @@ func NewGatewayCollector(
 	}
 }
 
-func (c *gatewayCollector) Describe(ch chan<- *prometheus.Desc) {
+func (c *GatewayCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.replicaCount
 	ch <- c.ledgerMode
 	ch <- c.ledgerDiv
@@ -241,7 +275,7 @@ func (c *gatewayCollector) Describe(ch chan<- *prometheus.Desc) {
 // itself — rather than emitting a zero, which a dashboard cannot tell from
 // a genuinely idle installation. This is the same reasoning as
 // ServerRemaining being nullable.
-func (c *gatewayCollector) Collect(ch chan<- prometheus.Metric) {
+func (c *GatewayCollector) Collect(ch chan<- prometheus.Metric) {
 	ctx, cancel := context.WithTimeout(context.Background(), scrapeTimeout)
 	defer cancel()
 
@@ -285,10 +319,10 @@ func (c *gatewayCollector) Collect(ch chan<- prometheus.Metric) {
 			maxByGroup := make(map[string]int64, len(rows))
 			now := time.Now()
 			for _, row := range rows {
-				if row.ServerRemaining == nil || !row.readingIsCurrent(now) {
+				if row.ServerRemaining == nil || row.LocalAtReading == nil || !row.readingIsCurrent(now) {
 					continue
 				}
-				d := row.LocalRemaining - *row.ServerRemaining
+				d := *row.LocalAtReading - *row.ServerRemaining
 				if d < 0 {
 					d = -d
 				}
@@ -322,7 +356,7 @@ func (c *gatewayCollector) Collect(ch chan<- prometheus.Metric) {
 // leave no durable trace: a 429 is answered, snoozed and forgotten, so
 // there is no table to read it back from at scrape time the way
 // esi_ledger_divergence has app.esi_ledger_bucket. That asymmetry is
-// spelled out on gatewayCollector above and is why these live in a separate
+// spelled out on GatewayCollector above and is why these live in a separate
 // collector rather than being bolted onto it.
 
 // GatewayCounters is the Prometheus collector behind internal/esi.Observer.
@@ -394,11 +428,13 @@ func labelOrUnset(group string) string {
 	return group
 }
 
-// readingIsCurrent reports whether the stored server reading and the live
-// local count describe the same moment closely enough to be subtracted —
-// see DivergenceRow.ObservedAt. A row with no window recorded is treated as
-// current, because the alternative is dropping every sample on a schema
-// this code cannot interpret.
+// readingIsCurrent reports whether the stored pair is recent enough to
+// still describe the bucket — see DivergenceRow.ObservedAt. Since 20.4 the
+// two operands describe the same instant by construction, so this no longer
+// guards the subtraction itself; it guards the claim that the answer is
+// CURRENT. A row with no window recorded is treated as current, because the
+// alternative is dropping every sample on a schema this code cannot
+// interpret.
 func (r DivergenceRow) readingIsCurrent(now time.Time) bool {
 	if r.ObservedAt == nil {
 		return false

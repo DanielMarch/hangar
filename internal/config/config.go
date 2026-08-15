@@ -126,6 +126,28 @@ type AlertingConfig struct {
 	// credentials — anyone holding one can post to the channel.
 	SlackWebhook   Secret
 	DiscordWebhook Secret
+
+	// ── PHASE 20.4 (B25): §4.4's THRESHOLD CATEGORY ─────────────────────
+	// ThresholdInterval is how often the threshold evaluator re-asks each
+	// of §4.4's four threshold questions of the synced data
+	// (HANGAR_ALERT_THRESHOLD_INTERVAL, 10m). It is a FLOOR ON LATENESS,
+	// not a firing rate: a threshold still crossed on the next pass
+	// deduplicates against the event the last pass wrote, so shortening
+	// this makes alerts arrive sooner and does not make them arrive more
+	// often. Zero disables the evaluator entirely, which is a valid
+	// configuration for an installation that wants only CCP's own
+	// notifications.
+	ThresholdInterval time.Duration
+	// The four margins, one per catalogue threshold. See
+	// internal/alerting.ThresholdPolicy for what each means and why its
+	// default is what it is; every zero here selects that default rather
+	// than disabling the threshold, because "0 hours of fuel remaining" is
+	// not a sensible reading of an unset variable.
+	StructureFuelWithin    time.Duration
+	StarbaseFuelBelow      int64
+	StarbaseFuelBand       int64
+	MemberInactiveFor      time.Duration
+	ContractExpiringWithin time.Duration
 }
 
 // ESIConfig governs Phase 3/4's outbound gateway: the conditional-cache
@@ -431,6 +453,11 @@ func applyDefaults(v *viper.Viper) {
 	v.SetDefault("alert_claim_size", 500)
 	v.SetDefault("alert_retry_base", "60s")
 	v.SetDefault("alert_retry_cap", "1h")
+	// Phase 20.4 — the threshold evaluator. The four margins default to 0
+	// here on purpose: internal/alerting.ThresholdPolicy owns the real
+	// defaults (and the reasoning for each), and duplicating the numbers
+	// in a second place is how the two drift apart.
+	v.SetDefault("alert_threshold_interval", "10m")
 	v.SetDefault("smtp_enabled", false)
 	v.SetDefault("smtp_port", 587)
 	v.SetDefault("smtp_from", "hangar@example.com")
@@ -610,6 +637,13 @@ func Load(v *viper.Viper) (*Config, error) {
 			SMTPTLS:          v.GetString("smtp_tls"),
 			SlackWebhook:     NewSecret(v.GetString("slack_default_webhook")),
 			DiscordWebhook:   NewSecret(v.GetString("discord_default_webhook")),
+
+			ThresholdInterval:      v.GetDuration("alert_threshold_interval"),
+			StructureFuelWithin:    v.GetDuration("alert_structure_fuel_within"),
+			StarbaseFuelBelow:      v.GetInt64("alert_starbase_fuel_below"),
+			StarbaseFuelBand:       v.GetInt64("alert_starbase_fuel_band"),
+			MemberInactiveFor:      v.GetDuration("alert_member_inactive_for"),
+			ContractExpiringWithin: v.GetDuration("alert_contract_expiring_within"),
 		},
 	}
 
