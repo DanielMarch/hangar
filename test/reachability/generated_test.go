@@ -99,7 +99,28 @@ that wired them, so the file keeps meaning "what is knowingly unused".`,
 }
 
 // readGoSources concatenates every .go file under repoRoot, skipping the
-// generated store package and (unless wantTests) _test.go files.
+// generated store package, the harness trees, and (unless wantTests)
+// _test.go files.
+//
+// ── WHY tools/ AND test/ ARE NOT PRODUCTION (PHASE 21) ───────────────────
+// The question this guard asks is "does the PRODUCT call this query?", and
+// the answer must not change because a harness mentions it. _test.go files
+// were excluded from the start for exactly that reason; tools/ and test/
+// are the same thing with a main() or without the suffix.
+//
+// Phase 21 walked into it. The Gate 2 and Gate 3 runners create platforms,
+// platform groups and alert routing rules in order to have something to
+// measure, and the moment they existed this guard declared
+// CreatePlatform, CreatePlatformGroup and CreateAlertRoutingRule "now have
+// a production caller" and demanded their removal from the allowlist. All
+// three are still exactly what the allowlist says they are: capability an
+// operator cannot reach except by writing SQL. Obeying the guard would have
+// recorded a product gap as closed because a test harness stepped in it —
+// and worse, it would have left a loophole where any dead query can be
+// revived by referencing it from a tool.
+//
+// This is the same split test/reachability's other guard already uses:
+// deadcode analyses ./cmd/hangar and skips tools/ and test/ outright.
 func readGoSources(t *testing.T, repoRoot string, wantTests bool) string {
 	t.Helper()
 	var b strings.Builder
@@ -124,6 +145,12 @@ func readGoSources(t *testing.T, repoRoot string, wantTests bool) string {
 			return nil
 		}
 		if strings.HasPrefix(rel, genDir) {
+			return nil
+		}
+		// The harness trees are not production, whether or not the file
+		// carries a _test.go suffix. See this function's header.
+		if strings.HasPrefix(rel, "tools"+string(filepath.Separator)) ||
+			strings.HasPrefix(rel, "test"+string(filepath.Separator)) {
 			return nil
 		}
 		if strings.HasSuffix(path, "_test.go") != wantTests {

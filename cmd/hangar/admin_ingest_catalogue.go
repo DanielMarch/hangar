@@ -65,7 +65,7 @@ func newAdminIngestCatalogueCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), ingestTimeout)
 			defer cancel()
 
-			result, err := ingestCatalogue(ctx, pool, logger)
+			result, err := ingestCatalogue(ctx, pool, cfg.ESI.BaseURL, logger)
 			if err != nil {
 				return fmt.Errorf("admin ingest-catalogue: %w", err)
 			}
@@ -84,11 +84,11 @@ func newAdminIngestCatalogueCmd() *cobra.Command {
 // ingestCatalogue runs one boot pass. Shared by the command above and by
 // serve's startup ingest so there is exactly one definition of what
 // "ingest the catalogue" means.
-func ingestCatalogue(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) (catalogue.BootResult, error) {
+func ingestCatalogue(ctx context.Context, pool *pgxpool.Pool, baseURL string, logger *slog.Logger) (catalogue.BootResult, error) {
 	s := store.New(pool)
 	client := &http.Client{Timeout: 60 * time.Second}
 
-	result, err := catalogue.Boot(ctx, client, s, time.Now())
+	result, err := catalogue.Boot(ctx, client, s, baseURL, time.Now())
 	if err != nil {
 		return catalogue.BootResult{}, err
 	}

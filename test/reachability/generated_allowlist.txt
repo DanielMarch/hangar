@@ -84,11 +84,34 @@ CountUnacknowledgedOpenVocabulary
 GetEsiScope
 ListUnacknowledgedOpenVocabulary
 
-# HOUSEKEEPING THAT NEVER RUNS — rows accumulate forever
+# Housekeeping. THE THREE DELETES LEFT THIS GROUP IN PHASE 21 (defect B-2):
+# DeleteExpiredSessions, DeleteExpiredEsiCacheEntries and DeleteStaleReplicas
+# are called by internal/housekeeping.Sweeper, which `serve` runs on a timer.
+# Until then none of the three had a production caller and no installation had
+# ever deleted an expired session row — personal data (ip_address, user_agent,
+# pkce_verifier) retained indefinitely.
+#
+# The heading this group used to carry — "rows accumulate forever" — was also
+# WRONG about one of its members, and the correction is worth keeping because
+# it changes what the remaining entry means. app.esi_cache_entry is bounded in
+# practice: UpsertEsiCacheEntry is keyed on cache_key and overwrites, so the
+# table tracks the number of distinct cache keys in flight (380 rows, 0
+# expired, when the pre-v1.0 audit measured it) rather than growing without
+# limit. The sweep reclaims the tail of keys nobody asks for any more.
+#
+# What is left here is not housekeeping that never runs; it is two queries
+# with no caller for two different reasons:
+#
+# CountEsiCacheEntries — operational visibility with no surface to show it on.
+#   It belongs to the admin-observability gap (N-4), not to retention: the
+#   sweeper deliberately does not call it, because a count(*) per tick would
+#   scan the table to produce a number nothing reads.
+# DeregisterReplica — graceful deregistration at shutdown, never wired. The
+#   heartbeat's own comment records why it is tolerable
+#   (internal/telemetry/replica.go): a replica that exits without deregistering
+#   ages out of the liveness window anyway, so this would only make a dead row
+#   disappear sooner than the retention sweep removes it.
 CountEsiCacheEntries
-DeleteExpiredEsiCacheEntries
-DeleteExpiredSessions
-DeleteStaleReplicas
 DeregisterReplica
 
 # Domain readers awaiting the endpoint or screen that uses them.

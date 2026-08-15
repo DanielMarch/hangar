@@ -98,6 +98,22 @@ func runServe(ctx context.Context) error {
 	}
 	go runWebhookDispatcher(hbCtx, buildWebhookDispatcher(pool, keyring, logger), cfg.Alerting.DispatchInterval, logger)
 
+	// PHASE 21 (B-2), and here for the reason immediately above rather than
+	// in `work`: the retention sweeps had no production caller anywhere,
+	// so no installation had ever deleted an expired app.session row —
+	// personal data (ip_address, user_agent, pkce_verifier) retained for
+	// every login ever served. See cmd/hangar/housekeeping.go for the
+	// ownership argument and internal/housekeeping for the windows.
+	//
+	// Built before the listener starts so an unsafe HANGAR_REPLICA_RETENTION
+	// fails the boot with a named error instead of being discovered an hour
+	// later by a sweep that deletes live replicas.
+	housekeeper, err := buildHousekeeper(cfg, store.New(pool))
+	if err != nil {
+		return err
+	}
+	go runHousekeeper(hbCtx, housekeeper, cfg.Housekeeping.Interval, logger)
+
 	// §2 "Single-process default", same reasoning as the planner above: a
 	// one-box installation must not have to run a second command before
 	// anything works. Without this, app.esi_route stays empty — and since
@@ -120,7 +136,7 @@ func runServe(ctx context.Context) error {
 		go func() {
 			ingestCtx, cancel := context.WithTimeout(hbCtx, ingestTimeout)
 			defer cancel()
-			if _, err := ingestCatalogue(ingestCtx, pool, logger); err != nil {
+			if _, err := ingestCatalogue(ingestCtx, pool, cfg.ESI.BaseURL, logger); err != nil {
 				if hbCtx.Err() == nil {
 					logger.ErrorContext(ingestCtx,
 						"hangar: esi catalogue ingest failed at startup — the route catalogue may be empty or stale; "+

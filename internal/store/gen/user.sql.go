@@ -184,16 +184,34 @@ func (q *Queries) CreateUser(ctx context.Context, displayName string) (AppUser, 
 	return i, err
 }
 
-const deleteExpiredSessions = `-- name: DeleteExpiredSessions :exec
+const deleteExpiredSessions = `-- name: DeleteExpiredSessions :execrows
 DELETE FROM app.session WHERE expires_at <= now()
 `
 
 // Flagged by sqlc's flag-delete rule for review: a session past its
 // expires_at carries no data worth a soft delete, unlike the ESI-synced
 // projections §5.1 requires soft deletes for.
-func (q *Queries) DeleteExpiredSessions(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, deleteExpiredSessions)
-	return err
+//
+// PHASE 21 (B-2). This is the RETENTION path for app.session, and until
+// this phase it had no production caller at all. The row holds ip_address,
+// user_agent and pkce_verifier, so an installation that never ran this
+// retained personal data for every login it had ever served — measured at
+// the pre-v1.0 audit, 19 of 22 rows were expired and unreachable.
+//
+// It was never an authentication hole: GetSession above filters
+// `expires_at > now()`, so an expired row cannot authenticate. The defect
+// was retention, and the fix is internal/housekeeping.Sweeper, which runs
+// this on a timer from `serve`.
+//
+// :execrows rather than :exec because the sweeper logs what it deleted. A
+// housekeeping loop that cannot say what it removed is indistinguishable
+// from one that is not running — which is the defect this closes.
+func (q *Queries) DeleteExpiredSessions(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredSessions)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteSession = `-- name: DeleteSession :exec

@@ -54,16 +54,17 @@ type Config struct {
 	// spec reveals it.
 	Locale string
 
-	DB        DatabaseConfig
-	Redis     RedisConfig
-	Crypto    CryptoConfig
-	SSO       SSOConfig
-	ESI       ESIConfig
-	Sync      SyncConfig
-	Discord   DiscordConfig
-	TeamSpeak TeamSpeakConfig
-	Mumble    MumbleConfig
-	Alerting  AlertingConfig
+	DB           DatabaseConfig
+	Redis        RedisConfig
+	Crypto       CryptoConfig
+	SSO          SSOConfig
+	ESI          ESIConfig
+	Sync         SyncConfig
+	Discord      DiscordConfig
+	TeamSpeak    TeamSpeakConfig
+	Mumble       MumbleConfig
+	Alerting     AlertingConfig
+	Housekeeping HousekeepingConfig
 }
 
 // AlertingConfig governs Phase 14's delivery pipeline (SRS §4.4). Most of
@@ -177,6 +178,31 @@ type ESIConfig struct {
 	ErrorLimitPauseAt  int
 	ErrorLimitResumeAt int
 
+	// BaseURL overrides ESI's host (HANGAR_ESI_BASE_URL). Empty — the
+	// default — means the real one, internal/esi/catalogue.EsiBaseURL.
+	//
+	// This package cannot name that constant without importing
+	// internal/esi/catalogue, which it does not do (the same reason
+	// DiscordConfig does not import the Discord driver), so the default is
+	// the EMPTY STRING rather than a second copy of the URL. cmd/hangar
+	// resolves empty to the constant, in one place, for both consumers.
+	//
+	// ── ADDED IN PHASE 21, AND WHY ───────────────────────────────────────
+	// Gate 1 is a four-hour, 5000-character load test against a recording
+	// proxy that reproduces ESI's two governors (04_RELEASE_GATES.md §1.1).
+	// The host was a compile-time constant, so there was NO WAY to point an
+	// installation at that proxy — which is a large part of why the gate
+	// had never been run: the harness existed, and nothing could aim the
+	// application at it.
+	//
+	// It is not test-only scaffolding. An operator running an ESI mirror or
+	// an egress proxy needs exactly this, and it applies to BOTH the
+	// gateway's requests and the catalogue spec fetch. A partial override
+	// — the gateway pointed at a mirror while discovery still went to
+	// evetech.net — would be worse than none, because the catalogue would
+	// describe a different server from the one being called.
+	BaseURL string
+
 	// StartupCatalogueIngest controls whether `serve` runs the route
 	// catalogue ingest in the background at startup. Default true, which is
 	// §2's "single-process default": a one-box installation must not need a
@@ -231,6 +257,31 @@ type SyncConfig struct {
 	// completes. Wiring "none" through to PlanNextDueAt's Rand parameter
 	// (e.g. a generator that always returns 0) is that phase's job.
 	Jitter string
+}
+
+// HousekeepingConfig governs the retention sweeps
+// (internal/housekeeping). Added in Phase 21 for defect B-2: the three
+// delete queries existed from the phases that created their tables and
+// none of them had a production caller, so no installation had ever
+// deleted an expired session.
+type HousekeepingConfig struct {
+	// Interval is how often the sweep runs
+	// (HANGAR_HOUSEKEEPING_INTERVAL, 1h). It is a bound on how long a row
+	// outlives its retention window, not a schedule anything depends on —
+	// every reader already filters expired rows out, so a late sweep costs
+	// disk and retention, never correctness. Zero disables the sweep,
+	// which is a supportable choice for an operator with an external
+	// janitor but is NOT the default: the default of "no janitor at all"
+	// is what B-2 was.
+	Interval time.Duration
+	// ReplicaRetention is how long a dead replica's app.esi_replica row is
+	// kept after its last heartbeat (HANGAR_REPLICA_RETENTION, 24h).
+	//
+	// It is NOT the liveness threshold and must be far larger than it —
+	// Validate rejects anything below housekeeping.MinReplicaRetention.
+	// See internal/housekeeping's Tick for why a short window here can
+	// manufacture a Governor 1 breach.
+	ReplicaRetention time.Duration
 }
 
 // DiscordConfig governs Phase 12's provisioning driver
@@ -427,6 +478,16 @@ func applyDefaults(v *viper.Viper) {
 	v.SetDefault("sync_backoff_cap", "24h")
 	v.SetDefault("sync_jitter", "full")
 
+	// PHASE 21 (B-2). One hour is chosen against what the sweep protects,
+	// not for symmetry with the other loops: the shortest retention window
+	// it enforces is a 10-minute unconsumed PKCE row, and an hour bounds
+	// how long any expired row outlives its window without making a table
+	// scan a per-minute event on an installation that has nothing to
+	// delete. The alert and webhook pumps tick in seconds because a late
+	// alert is a worse alert; a late deletion is only late.
+	v.SetDefault("housekeeping_interval", "1h")
+	v.SetDefault("replica_retention", "24h")
+
 	v.SetDefault("discord_enabled", false)
 	v.SetDefault("discord_api_version", 10)
 	v.SetDefault("discord_api_version_allowlist", "10")
@@ -582,6 +643,7 @@ func Load(v *viper.Viper) (*Config, error) {
 			ErrorLimitPauseAt:      v.GetInt("esi_error_limit_pause_at"),
 			ErrorLimitResumeAt:     v.GetInt("esi_error_limit_resume_at"),
 			StartupCatalogueIngest: v.GetBool("esi_startup_catalogue_ingest"),
+			BaseURL:                strings.TrimSuffix(strings.TrimSpace(v.GetString("esi_base_url")), "/"),
 		},
 		Sync: SyncConfig{
 			PlannerInterval: v.GetDuration("sync_planner_interval"),
@@ -589,6 +651,10 @@ func Load(v *viper.Viper) (*Config, error) {
 			ClaimLease:      v.GetDuration("sync_claim_lease"),
 			BackoffCap:      v.GetDuration("sync_backoff_cap"),
 			Jitter:          v.GetString("sync_jitter"),
+		},
+		Housekeeping: HousekeepingConfig{
+			Interval:         v.GetDuration("housekeeping_interval"),
+			ReplicaRetention: v.GetDuration("replica_retention"),
 		},
 		Discord: DiscordConfig{
 			Enabled:             v.GetBool("discord_enabled"),

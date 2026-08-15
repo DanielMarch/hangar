@@ -276,6 +276,64 @@ GATE_VERSION ?= phase-20.10
 gate4-evidence: ## (Phase 20.6) Emit docs/gate-evidence/$(GATE_VERSION)/gate4 — non-zero exit means the gate is not met
 	go run ./tools/gate4-traceability -version "$(GATE_VERSION)"
 
+# ── Gates 1, 2, 3, 6, 7 (Phase 21) ───────────────────────────────────────────
+#
+# THE REASON THESE TARGETS EXIST. Before this phase, five of the seven gates
+# had never produced a blocking artefact in the project's history. It was not
+# that they failed — nothing could run them. The Gate 1/2/3 harnesses have been
+# complete since Phases 20.2-20.4 and are exercised by their own integration
+# suites, but they were reachable ONLY from a Go test at 150-200ms durations,
+# and Gate 6's §6.2 tag-and-prove procedure and Gate 7's byte-diff report had
+# no runner at all. A gate you cannot invoke is a gate that will not be run.
+#
+# Each target is a real command with a duration and an output directory, and
+# each writes docs/gate-evidence/$(GATE_VERSION)/gateN/ with a SUMMARY.md
+# stating pass/fail and the measurement.
+#
+# ALL OF THEM NEED A THROWAWAY DATABASE. They migrate it and seed thousands of
+# rows; Gate 1 also clears app.esi_replica. The runners refuse to start unless
+# HANGAR_DB_URL names a database containing "gate" (or -force is passed) — the
+# same hazard `make ci-strict` carries, with more writing behind it. Derive the
+# URL from .env by substituting ONLY the database name; hand-writing the
+# credentials is how a run dies at "password authentication failed".
+#
+# GATE 1 WANTS A QUIET MACHINE. It measures a rate-limit ledger under
+# contention, so anything else heavy on the box is measuring apparatus rather
+# than the system. Run gate1 alone, and run its two replica counts separately —
+# §1.4 requires both N=1 (solo path) and N=3 (clustered path), recorded apart.
+.PHONY: gate1 gate1-n1 gate1-n3 gate2 gate3 gate6 gate7 gate-evidence
+
+gate1-n1: ## (Gate 1) 4h at N=1 — the solo ledger. Needs a throwaway HANGAR_DB_URL and `make build`
+	go run ./tools/gate1-load -version "$(GATE_VERSION)" -replicas 1 -duration $(GATE1_DURATION)
+
+gate1-n3: ## (Gate 1) 4h at N=3 — the clustered ledger, aggregate budget and acquire latency under contention
+	go run ./tools/gate1-load -version "$(GATE_VERSION)" -replicas 3 -duration $(GATE1_DURATION)
+
+gate1: gate1-n1 gate1-n3 ## (Gate 1) both replica counts, in sequence — 8 hours
+
+gate2: ## (Gate 2) ~1h revocation SLO: 5000 identities x 3 platforms, p99 < 60s with the bulk queue saturated
+	go run ./tools/gate2-revocation -version "$(GATE_VERSION)" -duration $(GATE2_DURATION)
+
+gate3: ## (Gate 3) 4h alert delivery integrity — the accounting identity must balance exactly
+	go run ./tools/gate3-alerts -version "$(GATE_VERSION)" -duration $(GATE3_DURATION)
+
+gate6: ## (Gate 6) §6.2's ingest-at-a-tag procedure. GATE_TAG must name the release-candidate tag
+	@if [ -z "$(GATE_TAG)" ]; then echo "GATE_TAG is required — §6.2 proves the ingest ran at a TAGGED commit with a clean tree"; exit 1; fi
+	go run ./tools/gate6-drift -version "$(GATE_VERSION)" -tag "$(GATE_TAG)"
+
+gate7: ## (Gate 7) byte-diff report over the recorded legacy corpus
+	go run ./tools/gate7-bytediff -version "$(GATE_VERSION)"
+
+GATE1_DURATION ?= 4h
+GATE2_DURATION ?= 1h
+GATE3_DURATION ?= 4h
+
+# gate-evidence runs everything that does NOT need a specially prepared host.
+# Gate 5 is deliberately absent: §5.1 requires a freshly provisioned host with
+# only Docker on it, and a make target that pretended to satisfy that from a
+# development tree would be claiming evidence it does not have.
+gate-evidence: gate4-evidence gate7 gate6 gate2 gate3 gate1 ## Every gate but 5 (which needs a clean host), in ascending cost order
+
 # ── composite ────────────────────────────────────────────────────────────────
 .PHONY: ci ci-strict
 ci: verify-generated lint test web-ci e2e check-money check-identifiers check-alert-sources check-locales check-css check-no-ice check-static-binary check-reachability ## Phase 0 exit criterion; strengthens automatically as phases land

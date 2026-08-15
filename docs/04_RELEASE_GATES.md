@@ -376,11 +376,34 @@ toolchain, no Node.
 curl -fsSLO https://raw.githubusercontent.com/hangar-project/hangar/main/docker-compose.yml
 ```
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hangar-project/hangar/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/hangar-project/hangar/main/deploy/install.sh | sh
 ```
 ```bash
 docker compose up -d
 ```
+
+#### The installer's path — decided in Phase 21 (defect B-3)
+
+This command previously read `main/install.sh`, and **that URL is a 404**: the installers have
+always been at `deploy/install.sh` and `deploy/install.bat`, so the documented three-command
+deployment could not succeed on a fresh host. The gate had never been run, which is the only
+reason it survived.
+
+The choice was to move the two installers to the repository root — preserving the shorter URL —
+or to amend this procedure. **The procedure is amended, and the installers stay in `deploy/`**:
+
+* `deploy/install.sh`'s **own header already documents `main/deploy/install.sh`**. The file that
+  would have had to move is the one place that had the path right; the 404 was a stale reference
+  in two other documents, not a misplaced installer.
+* The layout is written down in three places —`01_ARCHITECTURE.md` §5's tree and §9.1, and
+  `03_IMPLEMENTATION_ROADMAP.md`'s Phase 0 deliverables — all of which say `deploy/`. Moving the
+  files would make three documents wrong in order to make one right.
+* The URL is copy-pasted from documentation the operator is already reading, once. The repository
+  layout is read by every contributor, forever. Seven characters of URL is not worth a root
+  directory that disagrees with its own architecture document.
+
+`docker-compose.yml`'s header comment carried the same broken URL and is corrected in the same
+commit.
 
 `install.sh` generates `.env`, creates a random database password and the two 32-byte secrets,
 and prompts for exactly two values: the EVE SSO Client ID and Secret. `install.bat` is the

@@ -462,6 +462,16 @@ func TestShimByteCompatibleForAllNineControllers(t *testing.T) {
 	handler := shimServer(t, pool)
 	auth := map[string]string{"Authorization": "Bearer " + credential}
 
+	// PHASE 21: the same comparison, recorded. Gate 7's blocking artefact
+	// (§8) is "a byte-diff report over the corpus", and until this phase
+	// the comparison existed only as a passing test — a green tick is not
+	// an artefact a reviewer can read. The report is emitted from INSIDE
+	// the assertions rather than by a separate program, so it is a
+	// transcript of the verification that actually gated the release and
+	// cannot drift from it. Off unless the runner asks for it.
+	report := newGate7Report(os.Getenv("HANGAR_GATE7_EVIDENCE_DIR"))
+	t.Cleanup(func() { report.write(t) })
+
 	covered := map[string]bool{}
 	for _, route := range v2shim.Classification() {
 		route := route
@@ -478,18 +488,21 @@ func TestShimByteCompatibleForAllNineControllers(t *testing.T) {
 					"a served route with no recording cannot be byte-verified, so it is not served")
 				path := corpusPath(t, route.Corpus)
 				rec := get(t, handler, path, auth)
+				report.served(route, corpusBytes(t, route.Corpus), rec.Body.Bytes(), rec.Code)
 				require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
 				require.Equal(t, string(corpusBytes(t, route.Corpus)), rec.Body.String(),
 					"route %s is not byte-identical to its recording", route.Pattern)
 
 			case v2shim.StatusBreaking:
 				rec := get(t, handler, legacyPathFor(t, route), auth)
+				report.unserved(route, rec.Code)
 				require.Equal(t, http.StatusGone, rec.Code, "body: %s", rec.Body.String())
 				require.Contains(t, rec.Body.String(), "BREAKING CHANGE",
 					"a 410 must say what broke, not merely refuse")
 
 			case v2shim.StatusUnshimmable:
 				rec := get(t, handler, legacyPathFor(t, route), auth)
+				report.unserved(route, rec.Code)
 				require.Equal(t, http.StatusNotImplemented, rec.Code, "body: %s", rec.Body.String())
 				require.Contains(t, rec.Body.String(), "cannot be",
 					"an unshimmable route must say the break is permanent")
@@ -497,6 +510,7 @@ func TestShimByteCompatibleForAllNineControllers(t *testing.T) {
 
 			case v2shim.StatusPending:
 				rec := get(t, handler, legacyPathFor(t, route), auth)
+				report.unserved(route, rec.Code)
 				require.Equal(t, http.StatusNotImplemented, rec.Code, "body: %s", rec.Body.String())
 				require.Contains(t, rec.Body.String(), "not shimmed yet",
 					"a pending route must read as unfinished work, never as a permanent break")

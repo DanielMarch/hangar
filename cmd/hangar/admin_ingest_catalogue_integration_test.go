@@ -66,7 +66,7 @@ func TestCatalogueIngestPopulatesRoutes(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, before, "a freshly migrated database has no routes — that is the defect's starting state")
 
-	result, err := ingestCatalogue(ctx, pool, logger)
+	result, err := ingestCatalogue(ctx, pool, "", logger)
 	require.NoError(t, err)
 	require.Positive(t, result.Ingested, "the ingest must actually write routes")
 
@@ -95,7 +95,7 @@ func TestCatalogueIngestPopulatesRoutes(t *testing.T) {
 	require.Equal(t, catalogue.DefaultCompatibilityPin, catalogue.FormatDate(pin))
 
 	// Idempotent — serve runs this on every start, and every replica does.
-	second, err := ingestCatalogue(ctx, pool, logger)
+	second, err := ingestCatalogue(ctx, pool, "", logger)
 	require.NoError(t, err)
 	require.Equal(t, result.Ingested, second.Ingested)
 	require.Zero(t, second.Retired, "a re-ingest of the same spec must not retire anything")

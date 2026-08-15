@@ -91,9 +91,18 @@ func buildGateway(cfg *config.Config, pool *pgxpool.Pool, s *store.Store, logger
 
 	counters := telemetry.NewGatewayCounters()
 
+	// PHASE 21. HANGAR_ESI_BASE_URL, empty meaning the real host. Resolved
+	// here rather than defaulted in internal/config because that package
+	// does not import internal/esi/catalogue, and a literal copy of the URL
+	// in two packages is one place for them to disagree.
+	baseURL := cfg.ESI.BaseURL
+	if baseURL == "" {
+		baseURL = catalogue.EsiBaseURL
+	}
+
 	return &esi.Client{
 		HTTPClient:    httpClient,
-		BaseURL:       catalogue.EsiBaseURL,
+		BaseURL:       baseURL,
 		Cache:         cacheStore,
 		RouteBreaker:  breaker.NewRouteBreaker(breaker.DefaultRouteProbeTTL, nil),
 		EntityBreaker: breaker.NewEntityBreaker(breaker.DefaultEntityProbeTTL, nil),

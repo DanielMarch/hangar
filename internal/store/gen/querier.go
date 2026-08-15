@@ -317,14 +317,41 @@ type Querier interface {
 	DeleteEntitlementRule(ctx context.Context, ruleID uuid.UUID) (AppEntitlementRule, error)
 	// Flagged by sqlc's flag-delete rule for review: this is a cache, never a
 	// source of truth (§4.3), so an expired row has nothing worth a soft delete.
-	// Intended as a periodic housekeeping sweep (a later phase's River job);
 	// L2 reads already filter on expires_at > now() on their own, so this is
 	// disk reclamation, not a correctness dependency.
-	DeleteExpiredEsiCacheEntries(ctx context.Context) error
+	//
+	// PHASE 21 (B-2): the periodic sweep this comment anticipated is
+	// internal/housekeeping.Sweeper, run from `serve` on a timer — not a River
+	// job. A delivery-pass-shaped sweep of a table is the same shape as the
+	// alert and webhook pumps, and giving it a job row per tick would put more
+	// rows through River than it deletes.
+	//
+	// THIS TABLE WAS NEVER UNBOUNDED, and the pre-v1.0 audit corrected the
+	// claim that it was: UpsertEsiCacheEntry above is keyed on cache_key and
+	// OVERWRITES, so the row count is bounded by the number of distinct cache
+	// keys in flight (380 rows, 0 expired, on the installation that was
+	// measured). What this reclaims is the tail of keys that stopped being
+	// requested, which is real but is disk, not growth without limit.
+	DeleteExpiredEsiCacheEntries(ctx context.Context) (int64, error)
 	// Flagged by sqlc's flag-delete rule for review: a session past its
 	// expires_at carries no data worth a soft delete, unlike the ESI-synced
 	// projections §5.1 requires soft deletes for.
-	DeleteExpiredSessions(ctx context.Context) error
+	//
+	// PHASE 21 (B-2). This is the RETENTION path for app.session, and until
+	// this phase it had no production caller at all. The row holds ip_address,
+	// user_agent and pkce_verifier, so an installation that never ran this
+	// retained personal data for every login it had ever served — measured at
+	// the pre-v1.0 audit, 19 of 22 rows were expired and unreachable.
+	//
+	// It was never an authentication hole: GetSession above filters
+	// `expires_at > now()`, so an expired row cannot authenticate. The defect
+	// was retention, and the fix is internal/housekeeping.Sweeper, which runs
+	// this on a timer from `serve`.
+	//
+	// :execrows rather than :exec because the sweeper logs what it deleted. A
+	// housekeeping loop that cannot say what it removed is indistinguishable
+	// from one that is not running — which is the defect this closes.
+	DeleteExpiredSessions(ctx context.Context) (int64, error)
 	DeleteLedgerEntryByID(ctx context.Context, entryID uuid.UUID) error
 	// An order that vanished from the live page is closed/expired/cancelled; it
 	// is projected into market_order_history by the sync engine before this
@@ -366,7 +393,28 @@ type Querier interface {
 	DeleteSquad(ctx context.Context, squadID uuid.UUID) error
 	// Flagged by sqlc's flag-delete rule for review: a replica past the
 	// liveness threshold is dead by definition, not a soft-deletable entity.
-	DeleteStaleReplicas(ctx context.Context, liveThreshold time.Duration) error
+	//
+	// PHASE 21 (B-2). Called by internal/housekeeping.Sweeper. The argument is
+	// deliberately NOT the liveness threshold and is no longer named for it:
+	// it is a RETENTION window, and it must be far longer than
+	// telemetry.LiveThreshold (30s).
+	//
+	// Why the distinction is load-bearing. CountLiveReplicas above decides
+	// solo vs clustered mode. If this delete ran at the liveness threshold, a
+	// replica whose heartbeat was one second late would have its registration
+	// DELETED rather than merely not counted — and on a two-replica
+	// installation that turns a transient stall into a mode flip, where two
+	// replicas each believe they are solo and each spend the full bucket.
+	// That is a Governor 1 breach (Gate 1.1) manufactured by a housekeeping
+	// job. At a retention window two orders of magnitude above the liveness
+	// threshold, a row can only be removed long after every reader has agreed
+	// the replica is dead.
+	//
+	// Deleting a dead row is otherwise harmless to mode selection, which is
+	// why this is retention rather than correctness: CountLiveReplicas filters
+	// on the heartbeat window, so a stale row was already invisible to it.
+	// What accumulates without this is one row per force-killed process.
+	DeleteStaleReplicas(ctx context.Context, retention time.Duration) (int64, error)
 	DeleteStandingsNotIn(ctx context.Context, ownerKind string, ownerID int64, keepFromIds []int64) error
 	DeregisterReplica(ctx context.Context, replicaID uuid.UUID) error
 	// DISABLE, never delete, a subscription whose acting character no longer

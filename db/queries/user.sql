@@ -82,10 +82,25 @@ UPDATE app.session
 -- terminated session carries no data worth retaining.
 DELETE FROM app.session WHERE session_id = $1;
 
--- name: DeleteExpiredSessions :exec
+-- name: DeleteExpiredSessions :execrows
 -- Flagged by sqlc's flag-delete rule for review: a session past its
 -- expires_at carries no data worth a soft delete, unlike the ESI-synced
 -- projections §5.1 requires soft deletes for.
+--
+-- PHASE 21 (B-2). This is the RETENTION path for app.session, and until
+-- this phase it had no production caller at all. The row holds ip_address,
+-- user_agent and pkce_verifier, so an installation that never ran this
+-- retained personal data for every login it had ever served — measured at
+-- the pre-v1.0 audit, 19 of 22 rows were expired and unreachable.
+--
+-- It was never an authentication hole: GetSession above filters
+-- `expires_at > now()`, so an expired row cannot authenticate. The defect
+-- was retention, and the fix is internal/housekeeping.Sweeper, which runs
+-- this on a timer from `serve`.
+--
+-- :execrows rather than :exec because the sweeper logs what it deleted. A
+-- housekeeping loop that cannot say what it removed is indistinguishable
+-- from one that is not running — which is the defect this closes.
 DELETE FROM app.session WHERE expires_at <= now();
 
 -- ---- third-party API tokens ----

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/hangar-project/hangar/internal/i18n"
@@ -138,6 +139,18 @@ func Validate(cfg *Config) error {
 	}
 	if cfg.Alerting.ClaimSize < 1 {
 		errs = append(errs, fmt.Errorf("HANGAR_ALERT_CLAIM_SIZE must be at least 1, got %d", cfg.Alerting.ClaimSize))
+	}
+
+	// PHASE 21. Empty is the default and means the real ESI; anything else
+	// must be a URL the gateway can prefix a path with. A value like
+	// "esi.evetech.net" (no scheme) would otherwise produce a request URL
+	// that fails to parse on every single call, at run time, per route.
+	if cfg.ESI.BaseURL != "" {
+		if u, err := url.Parse(cfg.ESI.BaseURL); err != nil || u.Scheme == "" || u.Host == "" {
+			errs = append(errs, fmt.Errorf(
+				"HANGAR_ESI_BASE_URL: %q is not an absolute URL — it needs a scheme and host, e.g. https://esi.evetech.net "+
+					"(leave it empty for the real ESI)", cfg.ESI.BaseURL))
+		}
 	}
 
 	if len(errs) > 0 {

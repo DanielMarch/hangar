@@ -35,13 +35,22 @@ type BootResult struct {
 // seeded on first boot) but is NEVER advanced here — advancing it is
 // exclusively AdvancePin's job, called only from an explicit administrator
 // action in a later phase.
-func Boot(ctx context.Context, client *http.Client, store Store, now time.Time) (BootResult, error) {
+//
+// baseURL is HANGAR_ESI_BASE_URL; empty means EsiBaseURL. PHASE 21 threads
+// it here as well as through the gateway so an installation pointed at a
+// mirror — or at Gate 1's recording proxy — discovers its catalogue from
+// the same server it will then call. A catalogue describing one host while
+// the gateway talks to another is worse than no override at all.
+func Boot(ctx context.Context, client *http.Client, store Store, baseURL string, now time.Time) (BootResult, error) {
 	pin, err := GetPin(ctx, store)
 	if err != nil {
 		return BootResult{}, err
 	}
 
-	dMax, specBytes, stale, source, err := fetchSpec(ctx, client, EsiBaseURL, now)
+	if baseURL == "" {
+		baseURL = EsiBaseURL
+	}
+	dMax, specBytes, stale, source, err := fetchSpec(ctx, client, baseURL, now)
 	if err != nil {
 		return BootResult{}, fmt.Errorf("catalogue: boot: neither a live fetch nor the embedded snapshot succeeded: %w", err)
 	}

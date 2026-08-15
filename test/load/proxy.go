@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -138,8 +139,27 @@ type Proxy struct {
 	g2WindowStart time.Time
 	g2Count       int
 
-	breaches    []Breach
-	consumption []ConsumptionSample
+	breaches []Breach
+	// consumption holds the PEAK sample per bucket, not one per request.
+	//
+	// ── WHY A PEAK AND NOT A TIME SERIES (PHASE 21) ──────────────────────
+	// This used to append one sample per admitted request, which is fine
+	// for a 200ms integration test and impossible for the gate it was built
+	// for. A four-hour run at 5000 characters serves millions of requests;
+	// retaining one struct each would cost hundreds of megabytes of RSS in
+	// the harness measuring the system, and would write an
+	// aggregate-consumption.csv of the same order — an artefact nobody can
+	// read and nobody should commit.
+	//
+	// Nothing is lost, because of what the samples are FOR. Condition 1.7
+	// asks whether the proxy ever admitted a request that took a bucket's
+	// aggregate consumption above max_tokens, and §1.5 asks for "the
+	// proxy-side view of total consumption per bucket". Both are questions
+	// about the MAXIMUM per bucket, and both are answered exactly by
+	// keeping the highest sample each bucket ever reached. Memory is now
+	// bounded by the number of buckets — (group, user) pairs — rather than
+	// by the length of the run.
+	consumption map[string]ConsumptionSample
 	injector    *Injector
 	log         []InjectionRecord
 
@@ -163,6 +183,7 @@ func NewProxy(resolver RouteResolver, injector *Injector, clock func() time.Time
 	return &Proxy{
 		buckets: map[string]*bucket{}, resolver: resolver, now: clock,
 		g2WindowStart: clock(), injector: injector, served: map[int]int{},
+		consumption: map[string]ConsumptionSample{},
 	}
 }
 
@@ -212,10 +233,10 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			p.write(w, now, limit, b, http.StatusTooManyRequests, KindNone)
 			return
 		}
-		p.consumption = append(p.consumption, ConsumptionSample{
+		p.recordConsumption(ConsumptionSample{
 			At: now, Group: limit.Group, UserKey: userKeyOf(r),
 			Consumed: limit.MaxTokens - available, MaxTokens: limit.MaxTokens,
-		})
+		}, key)
 	}
 
 	kind, rec := p.injector.next(r, limit, now)
@@ -387,11 +408,31 @@ func (p *Proxy) Breaches() []Breach {
 }
 
 // Consumption returns the proxy-side aggregate-consumption samples
-// (Gate 1.7's artefact at N=3).
+// (Gate 1.7's artefact at N=3): the PEAK reading for each bucket, in a
+// stable order so two runs' artefacts can be diffed.
 func (p *Proxy) Consumption() []ConsumptionSample {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return append([]ConsumptionSample(nil), p.consumption...)
+	out := make([]ConsumptionSample, 0, len(p.consumption))
+	for _, s := range p.consumption {
+		out = append(out, s)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Group != out[j].Group {
+			return out[i].Group < out[j].Group
+		}
+		return out[i].UserKey < out[j].UserKey
+	})
+	return out
+}
+
+// recordConsumption keeps the highest reading this bucket has reached.
+// Must be called with p.mu held.
+func (p *Proxy) recordConsumption(s ConsumptionSample, key string) {
+	if current, seen := p.consumption[key]; seen && current.Consumed >= s.Consumed {
+		return
+	}
+	p.consumption[key] = s
 }
 
 // InjectionLog returns every injected condition and the response it

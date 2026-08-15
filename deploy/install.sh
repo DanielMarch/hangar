@@ -15,7 +15,21 @@
 set -eu
 
 ENV_FILE="${HANGAR_ENV_FILE:-.env}"
-EXAMPLE_URL="https://raw.githubusercontent.com/hangar-project/hangar/main/.env.example"
+
+# The template this script fills in. Overridable (PHASE 21) for two reasons,
+# both real:
+#
+#   1. A fork, a mirror, or an air-gapped installation has the file somewhere
+#      else, and hard-coding one host makes the installer unusable there.
+#   2. Gate 5 has to be RUN. §5.1's procedure is three commands against
+#      raw.githubusercontent.com, and until the repository is published those
+#      URLs 404 — including this one, which is the second fetch hiding inside
+#      command 2. Without an override the gate cannot be executed even in a
+#      substituted environment, which is how it stayed unrun.
+#
+# The default is unchanged, so the documented three-command deployment is
+# exactly what it was.
+EXAMPLE_URL="${HANGAR_ENV_EXAMPLE_URL:-https://raw.githubusercontent.com/hangar-project/hangar/main/.env.example}"
 
 if [ -f "$ENV_FILE" ]; then
   echo "install.sh: $ENV_FILE already exists — leaving it untouched." >&2

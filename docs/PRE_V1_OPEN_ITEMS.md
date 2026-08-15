@@ -1,5 +1,15 @@
 # Pre-v1.0 open items — audit at `c0b35ac`
 
+> **Status after Phase 21.** B-2 and B-3 are closed in code (see below for what each turned out to
+> be, precisely). B-1 is closed by building a runner per gate and running them: the evidence is in
+> `docs/gate-evidence/v1.0.0-rc1/`, one directory per gate, each with a `SUMMARY.md` stating
+> pass/fail and the measurement. B-4 remains open and is the operator's — it cannot be closed from
+> inside the codebase.
+>
+> Phase 21 also found one thing this audit did not: **the stock `docker-compose.yml` runs `serve`
+> only, and `serve` registers no River workers**, so on a default installation the planner enqueues
+> sync jobs that nothing consumes. See §5.
+
 **Question asked:** are Phases 0–20.11 actually complete, do all seven gates pass, and what
 blocks a v1.0 release candidate?
 
@@ -72,6 +82,29 @@ Stated precisely, so it is neither over- nor under-sold:
 **Correction needed:** a periodic housekeeping job wiring the three delete queries, with a
 documented retention window for sessions.
 
+#### Closed in Phase 21
+
+`internal/housekeeping.Sweeper`, run from **`serve`** on a timer
+(`HANGAR_HOUSEKEEPING_INTERVAL`, 1h), with the windows documented in `.env.example` and in the
+package header. The three queries left `generated_allowlist.txt` in the same commit.
+
+**The owner is `serve`, not `work`, and that is the whole point.** `work` is the natural-looking
+home — it is the background-job role. It is also the process the **stock `docker-compose.yml` does
+not run**: its only `hangar` service runs `serve`. Wiring retention into `work` would have shipped
+a janitor that never runs on a default installation, which is precisely how §4.9's webhook outbox
+shipped write-only, and `serve.go` already carries that lesson in a comment two lines above where
+the sweeper is now started.
+
+One design point worth keeping: `DeleteStaleReplicas` takes a **retention window, not the liveness
+threshold**, and the sweeper refuses to run it below a 10-minute floor. `app.esi_replica` is what
+`CountLiveReplicas` reads to choose solo or clustered mode, so deleting the registration of a
+replica whose heartbeat was merely *late* would make each survivor believe it is alone and spend
+the full ESI bucket — a Governor 1 breach (Gate 1.1) manufactured by housekeeping.
+
+The allowlist's claim that `app.esi_cache_entry` accumulates forever was **wrong** and is
+corrected rather than inherited: `UpsertEsiCacheEntry` is keyed on `cache_key` and overwrites, so
+the table is bounded by the number of distinct cache keys in flight.
+
 ### B-3 — Gate 5's documented install URL 404s *(blocking, trivial)*
 
 `04_RELEASE_GATES.md` §5.1 command 2 of 3 is:
@@ -87,6 +120,16 @@ The installers exist at **`deploy/install.sh`** and **`deploy/install.bat`**, so
 repository root (preserving the short, memorable URL the gate wants) or amend the gate procedure
 to `main/deploy/install.sh`. Not resolved here because the choice is about the product's install
 UX, not about correctness.
+
+#### Decided in Phase 21 — the installers stay in `deploy/`, the procedure is amended
+
+What settled it: **`deploy/install.sh`'s own header already documents the URL as
+`main/deploy/install.sh`.** The file that would have had to move is the one place that had the
+path right all along, so this was a stale reference in two other documents (§5.1 and
+`docker-compose.yml`'s header comment), not a misplaced installer. The layout is also written down
+as `deploy/` in `01_ARCHITECTURE.md` and `03_IMPLEMENTATION_ROADMAP.md`: moving the files would
+make three documents wrong to make one right, to save seven characters in a URL that is
+copy-pasted once. Both stale references are corrected.
 
 ### B-4 — Two operator actions outstanding, unchanged since Phase 20.8 *(blocking, external)*
 
@@ -184,6 +227,41 @@ partition would still pass. Named for what it checks; extending it is a larger p
 
 `hangar admin import-sde` resolves it. Not a defect — EFT exports render `[<type_id>]`
 placeholders and the skyhook/sovereignty-hub backfills leave columns NULL until it runs.
+
+---
+
+## 5. Found in Phase 21 — the default deployment runs no workers *(blocking)*
+
+Not in the audit above, found while building Gate 1's runner (which had to answer "which process
+actually calls ESI?"), and re-derived three ways:
+
+| Claim | Evidence |
+| :-- | :-- |
+| The stock stack runs one HANGAR process, `serve` | `docker-compose.yml`'s only `hangar` service is `command: ["serve"]`; the sole other service is the one-shot `migrate` |
+| `serve` registers **no** River workers | `river.AddWorker` appears in exactly one non-test file: `cmd/hangar/work.go`. `serve` builds a River client that is insert-only and never `Start()`ed |
+| The planner enqueues work that therefore has no consumer | `internal/sync/planner/claim.go` inserts `sync_route` jobs; the only registered Worker for that kind is `work.go`'s `DispatchWorker` |
+
+So on a default installation the planner claims due subscriptions every 5 s, enqueues River jobs,
+and **nothing ever works them**. The same holds for `provision_urgent` and `provision_bulk`.
+
+**This contradicts the architecture's own decision**, which is not ambiguous —
+`01_ARCHITECTURE.md` §2: *"[DECISION] Single-process default. Gate 5 forbids operational
+ceremony. `serve` does everything; `work`/`schedule` exist for administrators who have outgrown
+one box."* `serve`'s own cobra `Short` string says it runs an "in-process worker pool". It does
+not.
+
+It is the B20/B25 defect class again, in the largest place it can occur: a documented capability
+with no implementation in the process that is supposed to have it, invisible because every test
+constructs the worker it needs. It is also invisible to Gate 5 as §5.2 writes it — the stack comes
+up healthy, migrations run, the SPA serves, and nothing syncs.
+
+**Not fixed in Phase 21, deliberately.** The fix is to register `work.go`'s three workers and its
+queue budgets in `serve`, and that changes the behaviour of the process every gate run measures —
+so doing it after tagging the release candidate would invalidate the gate evidence this phase
+exists to produce, and doing it before would land a significant untested change inside a phase
+whose job was to measure. Release-gate rule 6 (instrumentation, and by the same argument the
+subject of the measurement, lands in a phase earlier than the run) points the same way. It needs
+its own phase, its own exit criteria and its own tests.
 
 ---
 

@@ -159,7 +159,7 @@ func TestBootSeedsPinAndIngestsLive(t *testing.T) {
 	s := newMigratedStore(t)
 	ctx := context.Background()
 
-	result, err := catalogue.Boot(ctx, http.DefaultClient, s, time.Now())
+	result, err := catalogue.Boot(ctx, http.DefaultClient, s, "", time.Now())
 	require.NoError(t, err)
 	require.Equal(t, "live", result.Source)
 	require.False(t, result.StaleSnapshot)

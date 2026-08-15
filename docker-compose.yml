@@ -4,7 +4,7 @@
 # installation in THREE commands with NO source compilation:
 #
 #   1) curl -fsSLO https://raw.githubusercontent.com/hangar-project/hangar/main/docker-compose.yml
-#   2) curl -fsSL  https://raw.githubusercontent.com/hangar-project/hangar/main/install.sh | sh
+#   2) curl -fsSL  https://raw.githubusercontent.com/hangar-project/hangar/main/deploy/install.sh | sh
 #   3) docker compose up -d
 #
 # The `hangar` service therefore PULLS a pre-built image. There is deliberately
