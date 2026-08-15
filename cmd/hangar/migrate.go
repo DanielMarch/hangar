@@ -91,7 +91,25 @@ func runMigrateUp(ctx context.Context) error {
 	if err := goose.Up(sqlDB, "migrations"); err != nil && !errors.Is(err, goose.ErrNoMigrationFiles) {
 		return fmt.Errorf("migrate: goose up: %w", err)
 	}
-	fmt.Println("migrate up: app/sde schema current")
+
+	// PHASE 20.11. "schema current" used to be printed on the strength of
+	// goose's own bookkeeping, which records which FILES ran and knows
+	// nothing about whether their tables still exist. The two came apart on
+	// the development installation — one table dropped out of band, and
+	// every subsequent `migrate up` reported the schema current — so the
+	// claim is now verified before it is made.
+	//
+	// This FAILS rather than warns. Leaving the schema correct is precisely
+	// this command's contract; a `migrate up` that exits 0 over a missing
+	// table is the defect, not a nicety.
+	missing, err := hangardb.MissingTables(ctx, pool)
+	if err != nil {
+		return fmt.Errorf("migrate: verifying schema: %w", err)
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("migrate: schema is NOT current — %s", hangardb.FormatMissing(missing))
+	}
+	fmt.Println("migrate up: app/sde schema current (verified against the migrations, not just goose's log)")
 
 	// Phase 10 fix: db/seed/*.sql existed since Phase 1a with nothing
 	// applying it — harmless until app.role_grant's FK to app.permission

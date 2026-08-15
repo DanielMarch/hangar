@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	hangardb "github.com/hangar-project/hangar/db"
 	"github.com/hangar-project/hangar/internal/domain"
 	"github.com/hangar-project/hangar/internal/store"
 	"github.com/hangar-project/hangar/internal/store/gen"
@@ -117,6 +118,55 @@ func TestAllDomainTablesPresent(t *testing.T) {
 	require.Len(t, got, wantTotal,
 		"table count must match 52 platform (51 + Phase 8's sync_acting_character_history) + 79 domain "+
 			"(78 + Phase 20.9's character_skill_summary) + 5 default partitions = %d: %v", wantTotal, got)
+}
+
+// TestExpectedTablesMatchesTheHandMaintainedLists ties db.ExpectedTables —
+// which is DERIVED by parsing the migrations — to the three hand-maintained
+// lists in this package's tests, which are transcribed from
+// 02_DATABASE_SCHEMA.md.
+//
+// ── WHY BOTH EXIST, RATHER THAN ONE REPLACING THE OTHER ──────────────────
+// They answer different questions and are wrong in different directions. The
+// lists say what the SPECIFICATION calls for; the parse says what the
+// MIGRATIONS actually do. Keeping both and asserting they agree is what makes
+// either trustworthy: a migration that creates a table nobody specified, and
+// a specified table no migration creates, are both real defects and each is
+// invisible to one of the two sources.
+//
+// It also protects the runtime check. db.MissingTables is only as good as its
+// parse, and a regex that quietly stopped matching some CREATE spelling would
+// make the integrity check pass by expecting less — the same failure shape
+// this repository has hit repeatedly with counts that were stated rather than
+// re-derived. This test is what makes that loud.
+func TestExpectedTablesMatchesTheHandMaintainedLists(t *testing.T) {
+	derived, err := hangardb.ExpectedTables()
+	require.NoError(t, err)
+
+	derivedApp := map[string]bool{}
+	for _, ref := range derived {
+		if ref.Schema == "app" {
+			derivedApp[ref.Name] = true
+		}
+	}
+
+	listed := map[string]bool{}
+	for _, group := range [][]string{expectedPlatformTables, expectedDomainTables, defaultPartitionTables} {
+		for _, name := range group {
+			listed[name] = true
+		}
+	}
+
+	for name := range listed {
+		require.True(t, derivedApp[name],
+			"app.%s is in 02_DATABASE_SCHEMA.md's table map but NO migration creates it — "+
+				"either the migration is missing or the list is wrong", name)
+	}
+	for name := range derivedApp {
+		require.True(t, listed[name],
+			"a migration creates app.%s but it is in none of the documented table lists — "+
+				"add it to expectedPlatformTables or expectedDomainTables, or explain the omission", name)
+	}
+	require.Len(t, derivedApp, len(listed))
 }
 
 // TestAssetTreeRecursiveCTE — 5-level nesting resolves; an injected cycle

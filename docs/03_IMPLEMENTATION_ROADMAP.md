@@ -108,6 +108,17 @@ docs/BASELINE.md                      ← task 6 output
   rather than in Phase 4 because every process role must heartbeat from the first release, and
   retrofitting it into all three commands later is more disruptive than writing it now. It is
   inert until Phase 1a creates the table — guard on the table's existence.
+  * **[Superseded in Phase 20.11.]** The existence guard was correct for Phase 0 and expired the
+    moment migration `00006` landed; it was still there nineteen phases later, and by then it was
+    actively harmful. It made `replica.go` disagree with the two other readers of the same table —
+    `GatewayCollector` counts a missing `app.esi_replica` as a scrape failure, Governor 1 warns and
+    holds its mode — so one condition had three different meanings. Worse, with the table absent
+    Governor 1 never leaves the solo mode it starts in, so **every replica believes it alone holds
+    the full ESI error budget**, and the only trace was a `DEBUG` line. The guard is deleted; a
+    missing table is now an ordinary failed upsert, and `db.MissingTables` catches the real
+    condition at boot and in `hangar migrate up`. Do not reintroduce a per-write existence probe:
+    a writer that checks its own table exists cannot tell "not deployed yet" from "someone dropped
+    it", and that ambiguity is what hid this.
 * The `Dockerfile`, `Makefile`, `sqlc.yaml`, `docker-compose.yml`, `go.mod` and
   `web/package.json` in this repository are the target shapes. Run `go mod tidy` and
   `pnpm install` to resolve real versions, then commit `go.sum` and `pnpm-lock.yaml`. Only the

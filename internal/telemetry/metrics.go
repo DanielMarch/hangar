@@ -336,6 +336,14 @@ func (c *GatewayCollector) Collect(ch chan<- prometheus.Metric) {
 	if c.replicas != nil {
 		// The query takes a NEGATIVE interval added to now(), matching
 		// db/queries/esi_replica.sql's live_threshold argument.
+		//
+		// PHASE 20.11: this branch is the one that was RIGHT. Until now
+		// ReplicaHeartbeat treated a missing app.esi_replica as a supported,
+		// inert state at DEBUG while this counted the same condition as a
+		// scrape failure. The special case there has been deleted, so all
+		// three readers of the table now agree that its absence is a failure
+		// — and db.MissingTables catches it at boot, where it can be acted
+		// on, instead of only here once a minute.
 		n, err := c.replicas.CountLiveReplicas(ctx, -c.liveThreshold)
 		if err != nil {
 			c.scrapeErrors.WithLabelValues("replicas").Inc()

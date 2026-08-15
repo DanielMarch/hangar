@@ -2,7 +2,6 @@ package telemetry
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -35,10 +34,36 @@ const (
 // It lands in Phase 0 — rather than Phase 4, which first reads the table —
 // because every process role must heartbeat from the very first release;
 // retrofitting the loop into all three commands later is more disruptive
-// than writing it once now. It is INERT until Phase 1a creates the table:
-// every tick re-checks existence via to_regclass and simply skips when the
-// table is absent, so `hangar serve` on a Phase-0-only schema neither errors
-// nor blocks on a relation that doesn't exist yet.
+// than writing it once now.
+//
+// ── THE "INERT UNTIL PHASE 1a" PATH IS GONE (PHASE 20.11) ────────────────
+// This type used to probe `to_regclass('app.esi_replica')` on EVERY tick and
+// skip silently at DEBUG when the table was absent, because Phase 0 shipped
+// before Phase 1a created it. Migration 00006 has created it for nineteen
+// phases; there is no supported schema without it.
+//
+// Carrying the branch past its reason was not free. It made this file
+// disagree with the two OTHER readers of the same table about what a missing
+// table means — GatewayCollector.Collect counts it as a scrape failure, and
+// Governor 1 logs a warning and holds its current mode — so the same
+// condition was simultaneously "supported and inert", "an error", and
+// "a reason to keep guessing". Only one of those can be right, and the
+// evidence says it is not this one: with the table absent, Governor 1 never
+// leaves the solo mode it optimistically starts in, so EVERY replica
+// believes it alone holds the full ESI error budget. That is precisely the
+// hazard flushSoloToClustered exists to prevent, arrived at by a different
+// road and with nothing logged above DEBUG.
+//
+// So the special case is deleted rather than re-levelled. A missing table is
+// now an ordinary failed upsert, reported at WARN like any other, and the
+// condition is caught where it can actually be acted on: db.MissingTables,
+// run by `hangar migrate up` and at `serve` startup. Deleting the probe also
+// removes a to_regclass round-trip per process per ten seconds, forever.
+//
+// Note what is NOT claimed: the heartbeat does not verify the schema itself.
+// A writer that checks its own table exists before every write is a writer
+// that cannot distinguish "not deployed yet" from "someone dropped it", and
+// that ambiguity is what let this sit unnoticed.
 type ReplicaHeartbeat struct {
 	pool      *pgxpool.Pool
 	replicaID uuid.UUID
@@ -83,16 +108,6 @@ func (h *ReplicaHeartbeat) Run(ctx context.Context) {
 }
 
 func (h *ReplicaHeartbeat) beat(ctx context.Context) {
-	exists, err := h.tableExists(ctx)
-	if err != nil {
-		h.log.WarnContext(ctx, "replica heartbeat: checking app.esi_replica existence failed", "error", err)
-		return
-	}
-	if !exists {
-		h.log.DebugContext(ctx, "replica heartbeat: app.esi_replica does not exist yet (Phase 1a); inert")
-		return
-	}
-
 	const upsert = `
 		INSERT INTO app.esi_replica (replica_id, role, version, started_at, last_heartbeat)
 		VALUES ($1, $2, $3, now(), now())
@@ -103,25 +118,12 @@ func (h *ReplicaHeartbeat) beat(ctx context.Context) {
 	}
 }
 
+// deregister removes this process's row on clean shutdown. Its error is
+// deliberately discarded: the row ages out of the live window in
+// LiveThreshold anyway, so a failed delete costs at most one stale replica
+// for thirty seconds, and shutdown is the wrong moment to start logging.
 func (h *ReplicaHeartbeat) deregister(ctx context.Context) {
-	exists, err := h.tableExists(ctx)
-	if err != nil || !exists {
-		return
-	}
 	_, _ = h.pool.Exec(ctx, `DELETE FROM app.esi_replica WHERE replica_id = $1`, h.replicaID)
-}
-
-// tableExists guards every tick on the table's existence (Phase 0 design
-// note) rather than caching a one-time answer, so a heartbeat started before
-// `hangar migrate up` finishes self-heals the moment 1a lands, with no
-// process restart required.
-func (h *ReplicaHeartbeat) tableExists(ctx context.Context) (bool, error) {
-	var name *string
-	err := h.pool.QueryRow(ctx, `SELECT to_regclass('app.esi_replica')::text`).Scan(&name)
-	if err != nil {
-		return false, fmt.Errorf("checking app.esi_replica: %w", err)
-	}
-	return name != nil, nil
 }
 
 // Hostname is a small helper used when composing replica log context; not

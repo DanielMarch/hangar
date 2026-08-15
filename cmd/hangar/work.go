@@ -213,6 +213,8 @@ func runWork(ctx context.Context) error {
 	// them out. See cmd/hangar/webhooks.go.
 	webhooks := buildWebhookDispatcher(pool, keyring, logger)
 
+	reportSchemaIntegrity(ctx, pool, logger)
+
 	hb := telemetry.NewReplicaHeartbeat(pool, telemetry.RoleWork, version, logger)
 
 	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)

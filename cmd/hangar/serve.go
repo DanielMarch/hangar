@@ -58,6 +58,11 @@ func runServe(ctx context.Context) error {
 	}
 	defer pool.Close()
 
+	// PHASE 20.11. Verified before the heartbeat starts, because a missing
+	// app.esi_replica is exactly the drift this catches and the heartbeat is
+	// its first victim. See cmd/hangar/schema_status.go.
+	reportSchemaIntegrity(ctx, pool, logger)
+
 	hb := telemetry.NewReplicaHeartbeat(pool, telemetry.RoleServe, version, logger)
 	hbCtx, cancelHB := context.WithCancel(ctx)
 	defer cancelHB()

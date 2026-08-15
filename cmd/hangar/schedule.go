@@ -46,6 +46,8 @@ func runSchedule(ctx context.Context) error {
 	}
 	defer pool.Close()
 
+	reportSchemaIntegrity(ctx, pool, logger)
+
 	hb := telemetry.NewReplicaHeartbeat(pool, telemetry.RoleSchedule, version, logger)
 
 	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
