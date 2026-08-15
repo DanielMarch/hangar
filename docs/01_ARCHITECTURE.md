@@ -389,8 +389,9 @@ What differs is *when* a request's cost stops being charged:
   windows**. A 40-token burst returned *nothing at all* at t = 120 s, 300 s, 600 s or 780 s, and
   nothing resembling a step at t = 900 s either; recovery began at the next `:00/:15/:30/:45`
   boundary and then proceeded **linearly**, at 48 tokens per 900 s — the previous window's whole
-  count decaying away while the current one accumulates. Two independent bursts on two groups
-  both began recovering at a wall-clock boundary rather than at their own 900 s anniversary.
+  count decaying away while the current one accumulates. The fit held across a second roll, to
+  the token. Two independent bursts on two groups both began recovering at a wall-clock boundary
+  rather than at their own 900 s anniversary.
 
 So a request's cost is charged in full until the boundary (0–900 s), then decays over the
 following 900 s. Both windows retain roughly 900 s of consumption on average, but ESI's **tail is
