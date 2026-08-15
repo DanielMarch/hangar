@@ -368,10 +368,37 @@ const (
 	// and the note that "total_sp could be summed from app.character_skill"
 	// was itself wrong — ESI's total INCLUDES unallocated points, so the sum
 	// differs from the total by exactly the number that was missing.
+	// ── PHASE 20.11 AUDIT: THE REASON WAS RIGHT, ITS EVIDENCE WAS NOT ─────
+	// Re-derived against eveseat's source at the pinned commit. The blocker
+	// holds, but the sentence "the field has no honest value" implied the
+	// CORPUS demonstrates it, and the corpus demonstrates the opposite:
+	//
+	//	character.sheet.json records "user_id": null
+	//
+	// — not an integer. CharacterSheetResource emits `$this->user->id`, and
+	// CharacterInfo::user() is a hasOneThrough over `refresh_tokens`, which
+	// fixtures.php never seeds. So the recorded null is an artefact of the
+	// fixture having no linked user, and a shim emitting a constant null
+	// would be BYTE-IDENTICAL TO THE RECORDING while being wrong for every
+	// real installation, where a character with a token has a linked user and
+	// an integer id HANGAR cannot produce from a uuid.
+	//
+	// That is the corporation.structures/`services` trap exactly, and it is
+	// why this route is still not served: the honest bar is byte-identity
+	// with what legacy EMITS, not with what this particular fixture happened
+	// to leave null. Recorded here rather than quietly served.
+	//
+	// ACTIONABLE, and cheaper than it looks: seeding one refresh_tokens row
+	// in fixtures.php and re-recording would pin the populated case and
+	// settle this permanently — in whichever direction it falls.
 	reasonCharacterSheetFields = "NOT shimmable, blocked on `user_id`: legacy's is a MySQL " +
-		"auto-increment integer and HANGAR's app.character.user_id is a uuid, so the field has no " +
-		"honest value — the same identifier-space break that makes UserController unshimmable, " +
-		"appearing inside an otherwise reproducible route. This route's SECOND blocker is CLOSED as " +
+		"auto-increment integer and HANGAR's app.character.user_id is a uuid, so no translation " +
+		"produces the integer a legacy client stored — the same identifier-space break that makes " +
+		"UserController unshimmable, appearing inside an otherwise reproducible route. NOTE (20.11 " +
+		"audit): the RECORDING shows `\"user_id\": null`, because CharacterInfo::user() is a " +
+		"hasOneThrough over `refresh_tokens` and fixtures.php seeds none — so a constant null would " +
+		"match the corpus and be wrong on every populated installation. The corpus does not pin this " +
+		"field; re-recording with a refresh token would. This route's SECOND blocker is CLOSED as " +
 		"of Phase 20.9 (B56): `skillpoints.total_sp` and `skillpoints.unallocated_sp` were parsed " +
 		"from ESI and discarded on every sync, and app.character_skill_summary now holds both. " +
 		"Closing it removed one blocker of two and changed nothing about this route's status."
