@@ -57,6 +57,11 @@ func Validate(spec Spec, raw map[string]string) (map[string]Value, error) {
 
 func coerce(t FieldType, v string) (Value, error) {
 	switch t {
+	case FieldOpaque:
+		// Whitelisted by name only — see FieldOpaque's doc comment. The
+		// value's own parser (api.ParsePageRequest for a cursor) rejects a
+		// malformed one with a 400, and it is the only thing that can tell.
+		return v, nil
 	case FieldString:
 		if containsSQLMeta(v) {
 			return nil, fmt.Errorf("contains disallowed characters")

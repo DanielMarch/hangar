@@ -67,6 +67,42 @@ func (q *Queries) GetEsiRouteByID(ctx context.Context, routeID uuid.UUID) (AppEs
 	return i, err
 }
 
+const getEsiRouteByMethodAndPath = `-- name: GetEsiRouteByMethodAndPath :one
+SELECT route_id, operation_id, method, upstream_path, cache_age, cache_mode, rate_limit_group, rate_limit_max, rate_limit_window, pagination_style, compatibility_date, blocked_by_pin, spec_fragment, identifier_types, first_seen_at, retired_at, updated_at FROM app.esi_route WHERE method = $1 AND upstream_path = $2
+`
+
+// PHASE 20.5 (B30). The asset-names enrichment makes a SECOND upstream call
+// from inside the assets sync, and Principle 5 says the upstream path is
+// taken verbatim from the catalogue, never hand-built. The subscription only
+// carries the LIST route's route_id, so the POST route is looked up by the
+// pair that identifies it in the spec. Deliberately not by operation_id:
+// operation ids are CCP's own and have changed under HANGAR before, whereas
+// (method, path) is the identity app.esi_route is unique on.
+func (q *Queries) GetEsiRouteByMethodAndPath(ctx context.Context, method string, upstreamPath string) (AppEsiRoute, error) {
+	row := q.db.QueryRow(ctx, getEsiRouteByMethodAndPath, method, upstreamPath)
+	var i AppEsiRoute
+	err := row.Scan(
+		&i.RouteID,
+		&i.OperationID,
+		&i.Method,
+		&i.UpstreamPath,
+		&i.CacheAge,
+		&i.CacheMode,
+		&i.RateLimitGroup,
+		&i.RateLimitMax,
+		&i.RateLimitWindow,
+		&i.PaginationStyle,
+		&i.CompatibilityDate,
+		&i.BlockedByPin,
+		&i.SpecFragment,
+		&i.IdentifierTypes,
+		&i.FirstSeenAt,
+		&i.RetiredAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getEsiRouteByOperationID = `-- name: GetEsiRouteByOperationID :one
 SELECT route_id, operation_id, method, upstream_path, cache_age, cache_mode, rate_limit_group, rate_limit_max, rate_limit_window, pagination_style, compatibility_date, blocked_by_pin, spec_fragment, identifier_types, first_seen_at, retired_at, updated_at FROM app.esi_route WHERE operation_id = $1
 `

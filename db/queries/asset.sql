@@ -34,6 +34,25 @@ UPDATE app.asset SET deleted_at = now(), updated_at = now()
  WHERE owner_kind = $1 AND owner_id = $2 AND deleted_at IS NULL
    AND NOT (item_id = ANY(sqlc.arg(keep_item_ids)::bigint[]));
 
+-- name: SetAssetName :execrows
+-- PHASE 20.5 (B30). Asset names arrive in a SECOND upstream call —
+-- POST /{owner}/{id}/assets/names, whose request body is the item ids the
+-- assets LIST call just returned — so they are applied over rows the list
+-- sync has already committed rather than folded into UpsertAsset. That
+-- ordering is ESI's, not a choice: there is nothing to ask for names for
+-- until the list has been read.
+--
+-- Only nameable items ever appear here (ESI returns a name only for a
+-- singleton container or ship), and the IS DISTINCT FROM guard makes an
+-- unchanged name a zero-row write, so a steady-state pass over a hangar
+-- full of named cans writes nothing. A soft-deleted row is deliberately NOT
+-- excluded: naming an item that has since gone is harmless, and adding the
+-- predicate would make the update's row count depend on delete timing.
+UPDATE app.asset
+   SET name = sqlc.arg(name), updated_at = now()
+ WHERE owner_kind = $1 AND owner_id = $2 AND item_id = sqlc.arg(item_id)
+   AND name IS DISTINCT FROM sqlc.arg(name);
+
 -- name: GetAsset :one
 SELECT * FROM app.asset WHERE owner_kind = $1 AND owner_id = $2 AND item_id = $3;
 

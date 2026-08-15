@@ -23,6 +23,7 @@ import (
 
 	"github.com/hangar-project/hangar/internal/api"
 	"github.com/hangar-project/hangar/internal/api/dto"
+	"github.com/hangar-project/hangar/internal/api/filters"
 	apimw "github.com/hangar-project/hangar/internal/api/middleware"
 )
 
@@ -54,6 +55,7 @@ func RegisterAll(hapi huma.API, deps api.Deps) {
 	registerAdminRoles(hapi, deps)
 	registerAdminRules(hapi, deps)
 	registerTeamspeakLink(hapi, deps)
+	registerWebhooks(hapi, deps)
 }
 
 // ---- shared input/output shapes -------------------------------------------------
@@ -126,7 +128,20 @@ func get[I, O any](hapi huma.API, deps api.Deps, permission, path, opID, summary
 	} else {
 		op.Middlewares = huma.Middlewares{requireAuthenticated()}
 	}
+	// PHASE 20.5 (B33). The filter whitelist, derived from *I's own `query:`
+	// tags — the same tags huma builds the OpenAPI document's parameter list
+	// from, so the closed set and the documented set are one thing. Ordered
+	// AFTER the permission guard deliberately: an unauthorised caller must
+	// learn they are unauthorised, not which query parameters exist.
+	op.Middlewares = append(op.Middlewares, api.ValidateQueryFilters(hapi, queryFilterSpec[I](opID)))
 	huma.Register(hapi, op, handler)
+}
+
+// queryFilterSpec builds one operation's closed filter set from its input
+// type. Called once per operation at registration, never per request.
+func queryFilterSpec[I any](opID string) filters.Spec {
+	var zero I
+	return filters.SpecFromQueryTags(opID, zero)
 }
 
 func mutate[I, O any](hapi huma.API, deps api.Deps, method, permission, path, opID, summary, tag string, handler func(context.Context, *I) (*O, error)) {
@@ -142,6 +157,10 @@ func mutate[I, O any](hapi huma.API, deps api.Deps, method, permission, path, op
 	} else {
 		op.Middlewares = huma.Middlewares{requireAuthenticated()}
 	}
+	// A mutation's query string is whitelisted on the same terms as a
+	// collection's. A POST is the LAST place an ignored, narrowing parameter
+	// should pass silently.
+	op.Middlewares = append(op.Middlewares, api.ValidateQueryFilters(hapi, queryFilterSpec[I](opID)))
 	huma.Register(hapi, op, handler)
 }
 

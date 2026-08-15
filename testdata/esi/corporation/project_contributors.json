@@ -1,0 +1,7 @@
+{
+  "contributors": [
+    { "id": 90000001, "name": "Contributor Name", "contributed": 250 },
+    { "id": 90000002, "name": "Second Contributor", "contributed": 10 }
+  ],
+  "cursor": { "after": "eyJvIjoxfQ" }
+}

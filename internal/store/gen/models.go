@@ -1530,6 +1530,14 @@ type AppWebhookEndpoint struct {
 	DisabledReason *string
 	// Reset to 0 by any successful delivery. The endpoint-level circuit breaker: per-delivery attempt caps alone never disable a permanently-dead endpoint, they just dead-letter each job individually. Phase 19.
 	ConsecutiveFailures int32
+	PrevHmacKeyVersion  *int32
+	PrevHmacWrappedDek  []byte
+	PrevHmacNonce       []byte
+	PrevHmacCiphertext  []byte
+	// Phase 20.5 (B24): the instant the superseded secret stops being accepted. Until then every delivery carries two v1= signatures and a receiver may match either, so a rotation drops nothing that is already in the outbox. Cleared, along with the other prev_* columns, on the first dispatch after it passes.
+	PrevHmacExpiresAt *time.Time
+	// Phase 20.5 (B24): when the signing secret was last replaced. Returned by the read endpoint; the secret itself never is, and is shown exactly once, at the moment it is minted.
+	RotatedAt *time.Time
 }
 
 type SdeAncestry struct {

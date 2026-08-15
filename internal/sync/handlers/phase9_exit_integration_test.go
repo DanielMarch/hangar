@@ -237,9 +237,26 @@ func TestUUIDKeyedProjectInsertAndJoin(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, projectID, fetched.ProjectID, "project_id must round-trip as the same uuid.UUID, never coerced through text or bigint")
 
-	contributions, err := handlers.ParseCorporationProjectContributions(mustReadCorpFixture9(t, "project_contributions.json"))
+	// ── PHASE 20.5, B38's LEFTOVER ───────────────────────────────────────
+	// This read project_contributions.json — an INVENTED fixture, a bare
+	// array of {amount, character_id} for a route ESI does not have — through
+	// a parser that had never been handed a real body. Both are replaced by
+	// the live spec's shape: an OBJECT of {contributors, cursor} whose
+	// elements are {id, name, contributed}, where `id` is a CHARACTER id and
+	// `contributed` is int64 progress.
+	//
+	// The Gate 6 assertion below is UNCHANGED and is the point: one response
+	// now writes both the roster row and the amount row, so the uuid PK still
+	// joins directly against a bigint character_id in the same row, with no
+	// coercion through text — and for the first time it does so from data a
+	// real ESI response could produce.
+	contributors, err := handlers.ParseCorporationProjectContributors(mustReadCorpFixture9(t, "project_contributors.json"))
 	require.NoError(t, err)
-	_, err = handlers.SyncCorporationProjectContributions(ctx, s, projectID, contributions)
+	require.Len(t, contributors, 2)
+	// The fixture's ids are the spec's own example values; re-point the first
+	// at this test's seeded character so the join below has a real row.
+	contributors[0].ID = characterID
+	_, err = handlers.SyncCorporationProjectContributors(ctx, s, projectID, contributors)
 	require.NoError(t, err)
 
 	// The Gate 6 fixture row itself: a uuid PK joining directly against a
@@ -248,7 +265,15 @@ func TestUUIDKeyedProjectInsertAndJoin(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, projectID, contribution.ProjectID)
 	require.Equal(t, characterID, contribution.CharacterID)
-	require.True(t, decimal.NewFromFloat(250.00).Equal(contribution.Amount))
+	require.True(t, decimal.NewFromInt(250).Equal(contribution.Amount),
+		"`contributed` is int64 progress and lands in amount unchanged")
+
+	// And the roster row the same response feeds — 00011 created two tables
+	// for what turned out to be one route.
+	roster, err := s.ListCorporationProjectContributors(ctx, projectID)
+	require.NoError(t, err)
+	require.Len(t, roster, 2)
+	require.Nil(t, roster[0].JoinedAt, "ESI does not report when a contributor joined; now() would be a fabricated fact that then ages")
 }
 
 // TestMarketOrderIssuedByPersists (new, Phase 9's carry-over fix from

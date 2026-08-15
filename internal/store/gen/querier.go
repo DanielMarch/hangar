@@ -417,6 +417,11 @@ type Querier interface {
 	// proxy for "response time" of a request that never answered), and turned
 	// into a normal settled entry — never deleted for free.
 	ExpireLedgerReservations(ctx context.Context, rateLimitGroup string, userKey string) ([]AppEsiLedgerEntry, error)
+	// Clears a superseded secret once its grace window has passed. Called by the
+	// dispatcher at delivery time rather than by a sweeper: the dispatcher is
+	// already reading this exact row, and a second secret that outlives its
+	// window because a cron did not run is a second secret to steal.
+	ExpireWebhookPreviousSecret(ctx context.Context, endpointID uuid.UUID) error
 	// Dead-letters everything still owed to an endpoint that has just been
 	// auto-disabled.
 	//
@@ -489,6 +494,14 @@ type Querier interface {
 	// payload (internal/sync/planner.SyncJobArgs) both carry route_id, not
 	// operation_id — the worker (Phase 7+) re-reads the route by this key.
 	GetEsiRouteByID(ctx context.Context, routeID uuid.UUID) (AppEsiRoute, error)
+	// PHASE 20.5 (B30). The asset-names enrichment makes a SECOND upstream call
+	// from inside the assets sync, and Principle 5 says the upstream path is
+	// taken verbatim from the catalogue, never hand-built. The subscription only
+	// carries the LIST route's route_id, so the POST route is looked up by the
+	// pair that identifies it in the spec. Deliberately not by operation_id:
+	// operation ids are CCP's own and have changed under HANGAR before, whereas
+	// (method, path) is the identity app.esi_route is unique on.
+	GetEsiRouteByMethodAndPath(ctx context.Context, method string, upstreamPath string) (AppEsiRoute, error)
 	GetEsiRouteByOperationID(ctx context.Context, operationID string) (AppEsiRoute, error)
 	GetEsiScope(ctx context.Context, scope string) (AppEsiScope, error)
 	GetKillmail(ctx context.Context, ownerKind string, ownerID int64, killmailID int64) (AppKillmail, error)
@@ -559,6 +572,9 @@ type Querier interface {
 	GetUserByMainCharacterID(ctx context.Context, mainCharacterID *int64) (AppUser, error)
 	GetWalletBalance(ctx context.Context, ownerKind string, ownerID int64, division int16) (AppWalletBalance, error)
 	GetWebhookEndpoint(ctx context.Context, endpointID uuid.UUID) (AppWebhookEndpoint, error)
+	// The owner-scoped read. Same reasoning as RotateWebhookSecret: ownership is
+	// a predicate, not a Go-side comparison somebody can omit.
+	GetWebhookEndpointForOwner(ctx context.Context, endpointID uuid.UUID, ownerUserID uuid.UUID) (AppWebhookEndpoint, error)
 	// Strict Mode's per-user probe (02_DATABASE_SCHEMA.md §4.1): true if any of
 	// this user's characters holds an invalid token. The partial index on
 	// app.character_token(valid) WHERE NOT valid is what keeps this a
@@ -853,6 +869,24 @@ type Querier interface {
 	ListMailLists(ctx context.Context, characterID int64) ([]AppMailList, error)
 	ListMailRecipients(ctx context.Context, characterID int64, mailID int64) ([]AppMailRecipient, error)
 	ListMarketHistory(ctx context.Context, regionID int32, typeID int32, pageSize int32) ([]AppMarketHistory, error)
+	// PHASE 20.5 (B30). The (region_id, type_id) pairs the market-history
+	// fan-out walks.
+	//
+	// GET /markets/{region_id}/history needs BOTH a region in the path and a
+	// REQUIRED type_id in the query, and a subscription row carries one
+	// entity_id and no second identifier — so, exactly like every other detail
+	// route, the second identifier is enumerated here from rows an earlier sync
+	// already landed. The source is app.market_order: the types this
+	// installation's own tracked owners actually trade, not EVE's ~15,000
+	// published types. An installation with no orders enumerates nothing and
+	// makes no requests, which is the correct amount of work for a question
+	// nobody has asked.
+	//
+	// app.market_price is deliberately NOT the source even though the market
+	// prices sync fills it with every published type: that would be one request
+	// per (region, type) across every region, which is a rate-limit incident
+	// rather than a feature.
+	ListMarketHistoryPairs(ctx context.Context, maxPairs int32) ([]ListMarketHistoryPairsRow, error)
 	ListMarketOrderHistoryByOwner(ctx context.Context, ownerKind string, ownerID int64) ([]AppMarketOrderHistory, error)
 	ListMarketOrdersByOwner(ctx context.Context, ownerKind string, ownerID int64) ([]AppMarketOrder, error)
 	// PHASE 15.1 — SRS §6.5 `GET /api/v1/markets/{region_id}/orders`.
@@ -1076,6 +1110,12 @@ type Querier interface {
 	ListWalletBalances(ctx context.Context, ownerKind string, ownerID int64) ([]AppWalletBalance, error)
 	ListWalletJournalPage(ctx context.Context, arg ListWalletJournalPageParams) ([]AppWalletJournal, error)
 	ListWalletTransactionsPage(ctx context.Context, arg ListWalletTransactionsPageParams) ([]AppWalletTransaction, error)
+	// PHASE 20.5: `AND enabled` removed. An endpoint HANGAR auto-disabled after
+	// consecutive failures is the one its owner most needs to see — hiding it
+	// makes a working configuration and a broken one look identical, which is
+	// the same shape of defect as everything else this phase closed. The handler
+	// returns `enabled`, `disabled_at` and `disabled_reason` so the difference is
+	// visible rather than inferred.
 	ListWebhookEndpointsForUser(ctx context.Context, ownerUserID uuid.UUID) ([]AppWebhookEndpoint, error)
 	MarkAlertDeliveryFailed(ctx context.Context, arg MarkAlertDeliveryFailedParams) error
 	MarkAlertDeliverySent(ctx context.Context, deliveryID uuid.UUID) error
@@ -1171,6 +1211,14 @@ type Querier interface {
 	// beside a stale residual: if the correction that follows never lands
 	// (transaction rolled back), there is no reading rather than a wrong one.
 	RecordReconciledLedgerLocal(ctx context.Context, rateLimitGroup string, userKey string, localRemainingAfter *int32) error
+	// PHASE 20.5 (B22). Stamps CCP's own build number onto a completed import,
+	// under a reserved key inside the existing row_counts jsonb rather than in a
+	// column of its own: the only consumer is `hangar admin import-sde
+	// --if-changed`, which asks "is the live SDE already CCP's latest build",
+	// and a migration for one comparison the operator drives would be a column
+	// nothing else ever reads. The underscore prefix keeps it out of the table
+	// namespace row_counts otherwise holds.
+	RecordSdeImportBuild(ctx context.Context, build int64, importID uuid.UUID) error
 	// ---- security log (append-only) ----
 	RecordSecurityLogEntry(ctx context.Context, arg RecordSecurityLogEntryParams) error
 	// PHASE 20.4. Writes BOTH operands of esi_ledger_divergence in one
@@ -1278,7 +1326,17 @@ type Querier interface {
 	RevokeApiToken(ctx context.Context, tokenID uuid.UUID) error
 	RevokeShareLink(ctx context.Context, linkID uuid.UUID) error
 	RevokeUserRole(ctx context.Context, userID uuid.UUID, roleID uuid.UUID) error
-	RevokeWebhookEndpoint(ctx context.Context, endpointID uuid.UUID) error
+	RevokeWebhookEndpointForOwner(ctx context.Context, endpointID uuid.UUID, ownerUserID uuid.UUID) error
+	// PHASE 20.5 (B24). Installs a new signing secret and demotes the current one
+	// to `prev_*` for a bounded grace window, IN ONE STATEMENT — the demotion
+	// reads the columns it is overwriting, so doing it as two statements would
+	// leave a gap in which a delivery could be signed with a secret nobody would
+	// accept.
+	//
+	// The endpoint must belong to the caller: owner_user_id is in the predicate
+	// rather than checked in Go, so a handler that forgets the check returns no
+	// rows instead of rotating somebody else's endpoint.
+	RotateWebhookSecret(ctx context.Context, arg RotateWebhookSecretParams) (AppWebhookEndpoint, error)
 	SearchAlliancesByName(ctx context.Context, query string, pageSize int32) ([]AppAlliance, error)
 	// Phase 15 addition: POST /api/v1/support/search's backing query — SRS
 	// §6.7/§4.7: "CCP prohibits using ESI for entity discovery", so this
@@ -1289,6 +1347,20 @@ type Querier interface {
 	// binding is the second, independent layer of defense against injection.
 	SearchCharactersByName(ctx context.Context, query string, pageSize int32) ([]AppCharacter, error)
 	SearchCorporationsByName(ctx context.Context, query string, pageSize int32) ([]AppCorporation, error)
+	// PHASE 20.5 (B30). Asset names arrive in a SECOND upstream call —
+	// POST /{owner}/{id}/assets/names, whose request body is the item ids the
+	// assets LIST call just returned — so they are applied over rows the list
+	// sync has already committed rather than folded into UpsertAsset. That
+	// ordering is ESI's, not a choice: there is nothing to ask for names for
+	// until the list has been read.
+	//
+	// Only nameable items ever appear here (ESI returns a name only for a
+	// singleton container or ship), and the IS DISTINCT FROM guard makes an
+	// unchanged name a zero-row write, so a steady-state pass over a hangar
+	// full of named cans writes nothing. A soft-deleted row is deliberately NOT
+	// excluded: naming an item that has since gone is harmless, and adding the
+	// predicate would make the update's row count depend on delete timing.
+	SetAssetName(ctx context.Context, arg SetAssetNameParams) (int64, error)
 	// PHASE 15.1 — `/corporations/{corporation_id}/members/limit` is its own
 	// ESI route returning a bare integer, not a field of the corporation
 	// sheet, so it needs a targeted write: UpsertCorporation would require

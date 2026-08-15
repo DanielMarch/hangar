@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/riverqueue/river"
@@ -58,7 +59,46 @@ var globalDispatch = map[string]globalHandler{
 		}
 		return res.RowsAffected, nil
 	},
+	// PHASE 20.5 (B30). Global adjusted/average prices per type. The
+	// simplest of the thirteen to place and the one that had been
+	// unreachable the longest: the route takes no parameters, needs no
+	// scope, needs no token, and GET /api/v1/markets/prices has been
+	// serving an empty collection from app.market_price since Phase 15
+	// because nothing ever wrote to it.
+	marketPricesPath: func(ctx context.Context, s *store.Store, body []byte) (int32, error) {
+		dto, err := handlers.ParseMarketPrices(body)
+		if err != nil {
+			return 0, err
+		}
+		res, err := handlers.SyncMarketPrices(ctx, s, dto)
+		if err != nil {
+			return 0, err
+		}
+		return res.RowsAffected, nil
+	},
 }
+
+const (
+	marketPricesPath  = "/markets/prices"
+	marketHistoryPath = "/markets/{region_id}/history"
+
+	// maxMarketHistoryPairs bounds one pass of the market-history fan-out.
+	//
+	// The pair set comes from app.market_order (ListMarketHistoryPairs), so
+	// it is bounded by what this installation actually trades rather than by
+	// EVE — but "actually trades" for a large trading corporation is still
+	// thousands of (region, type) pairs, and this route carries NO
+	// x-rate-limit group in the catalogue, so Governor 1 does not throttle
+	// it and Governor 2's installation-wide error budget is the only thing
+	// standing behind it. A cap is therefore load-bearing, not defensive.
+	//
+	// 500 at the route's own cadence is the largest number that cannot,
+	// by itself, out-pace the error budget's 100/minute ceiling on a bad
+	// day. A pass that hits the cap syncs the first 500 pairs in
+	// (region_id, type_id) order and says so in its sync_run row; it does
+	// not silently truncate.
+	maxMarketHistoryPairs = 500
+)
 
 // GlobalWorker executes "sync_route" jobs for entity_kind = "global"
 // subscriptions — Phase 8's only global-scoped domain is sovereignty
@@ -94,9 +134,13 @@ func (w *GlobalWorker) Work(ctx context.Context, job *river.Job[planner.SyncJobA
 		return nil
 	}
 
-	handler, ok := globalDispatch[route.UpstreamPath]
-	if !ok {
-		return fmt.Errorf("worker: no global handler registered for route %s (%s)", route.UpstreamPath, route.OperationID)
+	var handler globalHandler
+	if route.UpstreamPath != marketHistoryPath {
+		h, ok := globalDispatch[route.UpstreamPath]
+		if !ok {
+			return fmt.Errorf("worker: no global handler registered for route %s (%s)", route.UpstreamPath, route.OperationID)
+		}
+		handler = h
 	}
 
 	run, err := s.StartSyncRun(ctx, args.SubscriptionID)
@@ -104,7 +148,14 @@ func (w *GlobalWorker) Work(ctx context.Context, job *river.Job[planner.SyncJobA
 		return fmt.Errorf("worker: starting sync run for %s: %w", args.SubscriptionID, err)
 	}
 
-	rowsAffected, outcome, syncErr := w.doSync(ctx, s, sub, route, handler)
+	var rowsAffected int32
+	var outcome string
+	var syncErr error
+	if route.UpstreamPath == marketHistoryPath {
+		rowsAffected, outcome, syncErr = w.doMarketHistoryFanout(ctx, s, sub, route)
+	} else {
+		rowsAffected, outcome, syncErr = w.doSync(ctx, s, sub, route, handler)
+	}
 
 	finishErr := s.FinishSyncRun(ctx, gen.FinishSyncRunParams{
 		RunID: run.RunID, Status: statusOf(outcome), Outcome: &outcome,
@@ -197,4 +248,99 @@ func (w *GlobalWorker) doSync(ctx context.Context, s *store.Store, sub gen.AppSy
 	default:
 		return 0, outcome, fmt.Errorf("worker: unexpected status %d from %s", resp.StatusCode, route.UpstreamPath)
 	}
+}
+
+// doMarketHistoryFanout walks every (region_id, type_id) pair this
+// installation's own market-order sync has landed, fetching each pair's
+// daily price history.
+//
+// ── WHY THIS IS A FAN-OUT AND NOT A DISPATCH ENTRY (PHASE 20.5, B30) ─────
+// GET /markets/{region_id}/history needs a region in the PATH and a REQUIRED
+// type_id in the QUERY. A subscription row has one entity_id and no second
+// identifier column, so — exactly like a starbase's detail route or a mail
+// body — the parameters are enumerated at work time from rows an earlier
+// sync already committed. What is unusual here is that BOTH parameters are
+// enumerated, which is why it does not use runDetailFanout's single-id item
+// shape.
+//
+// It is a GLOBAL subscription rather than a per-region one because the
+// route is unauthenticated reference data with no owner at all: there is no
+// entity whose token or roles govern it, and inventing a region-as-entity
+// would put region ids in a column every other row uses for a character or
+// corporation id.
+//
+// ── ONE PAIR'S FAILURE IS NOT THE PASS'S FAILURE ─────────────────────────
+// A 404 on a pair (the type has never traded in that region) is data, and
+// skips. A refusal from either governor snoozes the whole subscription, as
+// everywhere else. Anything else stops the pass with an error and whatever
+// pairs already committed stay committed — each pair is its own upsert set,
+// not a slice of one dataset, so there is no torn-set hazard the way there
+// is for a paged collection.
+func (w *GlobalWorker) doMarketHistoryFanout(ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute) (rowsAffected int32, outcome string, err error) {
+	pairs, err := s.ListMarketHistoryPairs(ctx, maxMarketHistoryPairs)
+	if err != nil {
+		return 0, "", fmt.Errorf("worker: listing market-history (region, type) pairs: %w", err)
+	}
+
+	outcome = "200"
+	for _, p := range pairs {
+		resp, doErr := w.Gateway.Do(ctx, esi.Request{
+			Method: route.Method, UpstreamPath: route.UpstreamPath,
+			PathParams: map[string]string{"region_id": strconv.FormatInt(int64(p.RegionID), 10)},
+			Query:      map[string][]string{"type_id": {strconv.FormatInt(int64(p.TypeID), 10)}},
+			CacheMode:  derefStr(route.CacheMode),
+			// This route carries no x-rate-limit group in the live spec, so
+			// RateLimitGroup is empty and Governor 1 is bypassed for it —
+			// stated rather than left to be noticed, because it is the
+			// reason maxMarketHistoryPairs exists.
+			RateLimitGroup:        derefStr(route.RateLimitGroup),
+			RateLimitMax:          RouteRateLimitMax(derefInt32(route.RateLimitMax)),
+			RateLimitAdmissionMax: BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
+			RateLimitWindow:       sync.IntervalToDuration(route.RateLimitWindow),
+			UserKey:               "hangar:global",
+		})
+		if doErr != nil {
+			if r, ok := classifyRefusal(doErr, w.Policy.TTLFloor, time.Now()); ok {
+				return rowsAffected, r.reason, snoozeRefusal(ctx, s, sub.SubscriptionID, r)
+			}
+			return rowsAffected, normalize.Outcome(0, true), fmt.Errorf("worker: fetching market history for region %d type %d: %w", p.RegionID, p.TypeID, doErr)
+		}
+
+		switch resp.StatusCode {
+		case http.StatusOK:
+			dto, perr := handlers.ParseMarketHistory(resp.Body)
+			if perr != nil {
+				return rowsAffected, normalize.Outcome(resp.StatusCode, false), perr
+			}
+			res, serr := handlers.SyncMarketHistory(ctx, s, p.RegionID, p.TypeID, dto)
+			if serr != nil {
+				return rowsAffected, normalize.Outcome(resp.StatusCode, false), serr
+			}
+			rowsAffected += res.RowsAffected
+			outcome = normalize.Outcome(resp.StatusCode, false)
+		case http.StatusNotFound:
+			continue
+		case http.StatusTooManyRequests:
+			return rowsAffected, normalize.Outcome(resp.StatusCode, false),
+				snoozeAfter429(ctx, s, sub.SubscriptionID, resp, w.Policy.TTLFloor)
+		default:
+			return rowsAffected, normalize.Outcome(resp.StatusCode, false),
+				fmt.Errorf("worker: market history for region %d type %d returned status %d", p.RegionID, p.TypeID, resp.StatusCode)
+		}
+	}
+
+	next, err := sync.PlanNextDueAt(sync.DueTimeInput{
+		Route:  sync.RouteCacheConfig{CacheMode: derefStr(route.CacheMode), CacheAge: sync.IntervalToDuration(route.CacheAge), BlockedByPin: route.BlockedByPin},
+		Policy: w.Policy, LastSuccess: time.Now(), Consecutive304: 0, OptInNoCache: sub.OptInNoCache, Now: time.Now(),
+	})
+	if err != nil {
+		return rowsAffected, outcome, err
+	}
+	if err := s.RecordSyncSuccess(ctx, gen.RecordSyncSuccessParams{
+		SubscriptionID: sub.SubscriptionID, LastStatus: statusOf(outcome), CursorAfter: sub.CursorAfter,
+		NextDueAt: next, Consecutive304: 0,
+	}); err != nil {
+		return rowsAffected, outcome, err
+	}
+	return rowsAffected, outcome, nil
 }

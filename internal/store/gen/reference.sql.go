@@ -209,6 +209,24 @@ func (q *Queries) ListCorporationsByAlliance(ctx context.Context, allianceID *in
 	return items, nil
 }
 
+const recordSdeImportBuild = `-- name: RecordSdeImportBuild :exec
+UPDATE app.sde_import
+   SET row_counts = row_counts || jsonb_build_object('_ccp_build', $1::bigint)
+ WHERE import_id = $2
+`
+
+// PHASE 20.5 (B22). Stamps CCP's own build number onto a completed import,
+// under a reserved key inside the existing row_counts jsonb rather than in a
+// column of its own: the only consumer is `hangar admin import-sde
+// --if-changed`, which asks "is the live SDE already CCP's latest build",
+// and a migration for one comparison the operator drives would be a column
+// nothing else ever reads. The underscore prefix keeps it out of the table
+// namespace row_counts otherwise holds.
+func (q *Queries) RecordSdeImportBuild(ctx context.Context, build int64, importID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, recordSdeImportBuild, build, importID)
+	return err
+}
+
 const searchAlliancesByName = `-- name: SearchAlliancesByName :many
 SELECT alliance_id, name, ticker, creator_id, creator_corporation_id, executor_corporation_id, date_founded, faction_id, updated_at FROM app.alliance WHERE name ILIKE '%' || $1::text || '%' ORDER BY name LIMIT $2
 `

@@ -48,7 +48,25 @@ func TestEffectivePollInterval(t *testing.T) {
 
 func TestPlanNextDueAtAnchorsOnLastSuccess(t *testing.T) {
 	last := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
-	now := last.Add(time.Hour) // several failed attempts happened since
+	// Now is INSIDE the window last+interval, so the anchor still means
+	// something and the result is anchored on it.
+	//
+	// ── AMENDED IN PHASE 20.5 ────────────────────────────────────────────
+	// This case previously used now = last + 1h against a 10-minute
+	// interval, and asserted a due time of last + [10,20) minutes — i.e.
+	// FORTY MINUTES IN THE PAST. The stated reasoning was that "a currently-
+	// failing subscription doesn't drift later just because attempts keep
+	// failing", which is right for a failing subscription and wrong for the
+	// case that actually dominates: a route answering 304, whose
+	// last_success_at is frozen by design (§6.2 resets bookkeeping only on
+	// 200) and therefore recomputes the same past instant forever. Measured
+	// live at commit 5ebbc56: 62 of 85 enabled subscriptions more than an
+	// hour in the past, one at consecutive_304 = 2785.
+	//
+	// The anchor behaviour is unchanged where it means something — that is
+	// this test — and clamped where it does not, which is
+	// TestALongRunning304StreamNeverSchedulesInThePast in duetime_spin_test.go.
+	now := last.Add(3 * time.Minute)
 	rnd := rand.New(rand.NewSource(1))
 
 	due, err := sync.PlanNextDueAt(sync.DueTimeInput{
@@ -62,11 +80,14 @@ func TestPlanNextDueAtAnchorsOnLastSuccess(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// due must be in [last+interval, last+2*interval) — anchored on
-	// last_success, never on "now", so a currently-failing subscription
-	// doesn't drift later just because attempts keep failing.
+	// last_success, never on "now", so an early poll does not walk the
+	// schedule forward by one round-trip on every cycle.
 	interval := 10 * time.Minute
 	if due.Before(last.Add(interval)) || !due.Before(last.Add(2*interval)) {
 		t.Errorf("PlanNextDueAt = %s, want in [%s, %s)", due, last.Add(interval), last.Add(2*interval))
+	}
+	if !due.After(now) {
+		t.Errorf("PlanNextDueAt = %s, which is not after now (%s) — that is the 304 spin", due, now)
 	}
 }
 

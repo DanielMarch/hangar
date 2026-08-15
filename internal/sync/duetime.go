@@ -65,5 +65,54 @@ func PlanNextDueAt(in DueTimeInput) (time.Time, error) {
 	if anchor.IsZero() {
 		anchor = in.Now
 	}
-	return anchor.Add(interval).Add(FullJitter(interval, in.Rand)), nil
+	next := anchor.Add(interval).Add(FullJitter(interval, in.Rand))
+
+	// ── A DUE TIME IN THE PAST IS A SPIN, NOT A SCHEDULE (PHASE 20.5) ────
+	//
+	// Found by watching the live installation, not by reading. Measured at
+	// commit 5ebbc56: 62 of 85 enabled subscriptions had next_due_at MORE
+	// THAN AN HOUR IN THE PAST, one with consecutive_304 = 2785, and
+	// app.sync_run held 106,818 rows for an installation that has existed
+	// for two days.
+	//
+	// The mechanism is this line's anchor. On a 304, the worker passes
+	// `LastSuccess: sub.LastSuccessAt` — and a 304 never updates
+	// last_success_at, because §6.2 is explicit that a 304 "resets adaptive
+	// backoff bookkeeping only on 200". So once a route has been answering
+	// 304 for longer than its own interval, every subsequent 304 recomputes
+	// THE SAME instant in the past, the planner's claim query (which orders
+	// by next_due_at) finds it due on every 5-second tick forever, and the
+	// subscription polls ESI continuously for data that has not changed.
+	//
+	// Two consequences, and the second is what surfaced it:
+	//
+	//   1. Governor 2's error budget is spent on requests nobody asked for
+	//      (esi_error_limit_remaining sat at 97, not 100, on an idle
+	//      installation), and Gate 1's whole premise is that HANGAR's
+	//      request rate is what it intends.
+	//
+	//   2. A subscription stuck an hour in the past ALWAYS sorts ahead of
+	//      one scheduled for the future, and the claim is LIMITed. So a
+	//      NEWLY CREATED subscription can never be claimed at all while any
+	//      stuck one exists — which is how this was found: Phase 20.5's
+	//      fifteen new fan-out subscriptions were created, were due, and
+	//      were never once polled.
+	//
+	// THE FIX IS HERE AND NOT AT THE CALL SITES, deliberately. Anchoring on
+	// last_success is CORRECT for the case it was written for: a route whose
+	// upstream cache expires an hour after the data was generated should be
+	// re-polled an hour after that data, not an hour after we happened to
+	// ask. That intent is preserved — the anchor only moves when it would
+	// otherwise produce a time already past, which is exactly the case where
+	// it has stopped meaning anything. Fixing the three 304 call sites
+	// instead would have left the invariant unstated and reintroducible by
+	// the fourth.
+	//
+	// last_success_at is deliberately NOT touched: it means "when did the
+	// data last change", it is what the admin board shows, and §6.2's
+	// reset-only-on-200 rule is about that column, not about this one.
+	if !next.After(in.Now) {
+		next = in.Now.Add(interval).Add(FullJitter(interval, in.Rand))
+	}
+	return next, nil
 }

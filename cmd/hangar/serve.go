@@ -164,6 +164,13 @@ func runServe(ctx context.Context) error {
 	// SPA login screen cannot build against.
 	s := store.New(pool)
 
+	// PHASE 20.5 (B22). Whether reference data exists is stated once, at
+	// boot, rather than left to be inferred from a fitting export full of
+	// numeric ids. Deliberately not blocking and not fatal: an installation
+	// with no SDE is a supported state, it is just one nobody should have to
+	// discover.
+	reportSDEState(ctx, pool, s, logger)
+
 	// PHASE 20.3. §9.2's revocation triggers, in the process that performs
 	// most of the mutations that fire them. Before this, `serve` mounted
 	// the entire RBAC mutation surface with rbac.PermissionsChangedHook
@@ -197,7 +204,7 @@ func runServe(ctx context.Context) error {
 	// for — advancing the ESI compatibility pin. It produces alert events
 	// into the shared outbox; `work` still owns the pump that delivers
 	// them, and therefore owns Gate 3's delivery metrics.
-	deps := api.Deps{Store: s, Pool: pool, SSO: flow, Urgent: urgent, Alerts: buildAlertEmitter(cfg, pool)}
+	deps := api.Deps{Store: s, Pool: pool, SSO: flow, Urgent: urgent, Alerts: buildAlertEmitter(cfg, pool), Keyring: keyring}
 	api.Version = version
 	hapi := api.NewAPI(mux, deps)
 	v1.RegisterAll(hapi, deps)

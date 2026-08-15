@@ -44,6 +44,16 @@ SELECT * FROM app.esi_route WHERE operation_id = $1;
 -- operation_id — the worker (Phase 7+) re-reads the route by this key.
 SELECT * FROM app.esi_route WHERE route_id = $1;
 
+-- name: GetEsiRouteByMethodAndPath :one
+-- PHASE 20.5 (B30). The asset-names enrichment makes a SECOND upstream call
+-- from inside the assets sync, and Principle 5 says the upstream path is
+-- taken verbatim from the catalogue, never hand-built. The subscription only
+-- carries the LIST route's route_id, so the POST route is looked up by the
+-- pair that identifies it in the spec. Deliberately not by operation_id:
+-- operation ids are CCP's own and have changed under HANGAR before, whereas
+-- (method, path) is the identity app.esi_route is unique on.
+SELECT * FROM app.esi_route WHERE method = $1 AND upstream_path = $2;
+
 -- name: ListEsiRoutes :many
 SELECT * FROM app.esi_route WHERE retired_at IS NULL ORDER BY upstream_path;
 

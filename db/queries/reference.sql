@@ -122,6 +122,18 @@ UPDATE app.sde_import
 -- name: GetLatestSdeImport :one
 SELECT * FROM app.sde_import ORDER BY started_at DESC LIMIT 1;
 
+-- name: RecordSdeImportBuild :exec
+-- PHASE 20.5 (B22). Stamps CCP's own build number onto a completed import,
+-- under a reserved key inside the existing row_counts jsonb rather than in a
+-- column of its own: the only consumer is `hangar admin import-sde
+-- --if-changed`, which asks "is the live SDE already CCP's latest build",
+-- and a migration for one comparison the operator drives would be a column
+-- nothing else ever reads. The underscore prefix keeps it out of the table
+-- namespace row_counts otherwise holds.
+UPDATE app.sde_import
+   SET row_counts = row_counts || jsonb_build_object('_ccp_build', sqlc.arg(build)::bigint)
+ WHERE import_id = sqlc.arg(import_id);
+
 -- name: SetCorporationMemberLimit :exec
 -- PHASE 15.1 — `/corporations/{corporation_id}/members/limit` is its own
 -- ESI route returning a bare integer, not a field of the corporation

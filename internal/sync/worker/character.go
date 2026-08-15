@@ -40,6 +40,28 @@ import (
 // catalogue like every other call" — TestMailBodyRoutedThroughCatalogue).
 const mailBodyPath = "/characters/{character_id}/mail/{mail_id}"
 
+// PHASE 20.5 (B30): the three character-owned DETAIL routes whose handlers
+// were written, tested and never dispatched. Each is the same shape as
+// mailBodyPath — a second dynamic path parameter enumerated from the parent
+// list this character has already synced — and each is now subscribable
+// (worker/syncset.go's fanoutRoutes).
+//
+// The calendar pair is deliberately TWO subscriptions over the same event
+// list rather than one that fetches both. They are two routes with two
+// operation ids, two cache states and two etags; folding them together would
+// make one 304 hide the other's 200, and would report one outcome for two
+// upstream calls.
+const (
+	calendarEventDetailPath = "/characters/{character_id}/calendar/{event_id}"
+	calendarAttendeesPath   = "/characters/{character_id}/calendar/{event_id}/attendees"
+	planetColonyDetailPath  = "/characters/{character_id}/planets/{planet_id}"
+
+	// characterAssetsPath is NOT a fan-out. It is here because its
+	// after-sync enrichment (assets/names, see characterAfterOK) is keyed
+	// on it.
+	characterAssetsPath = "/characters/{character_id}/assets"
+)
+
 // characterHandler is the shape every character-domain sync function in
 // internal/sync/handlers reduces to once its Parse+Sync pair is combined:
 // raw response body in, rows-affected count out.
@@ -277,10 +299,17 @@ func (w *CharacterWorker) Work(ctx context.Context, job *river.Job[planner.SyncJ
 	var rowsAffected int32
 	var outcome string
 	var syncErr error
-	if route.UpstreamPath == mailBodyPath {
+	switch route.UpstreamPath {
+	case mailBodyPath:
 		// Fanout, not a simple body-in/rows-out handler — see doMailBodyFanout.
 		rowsAffected, outcome, syncErr = w.doMailBodyFanout(ctx, s, sub, route, args.EntityID, tok.Value)
-	} else {
+	case calendarEventDetailPath:
+		rowsAffected, outcome, syncErr = w.doCalendarEventDetailFanout(ctx, s, sub, route, args.EntityID, tok.Value)
+	case calendarAttendeesPath:
+		rowsAffected, outcome, syncErr = w.doCalendarAttendeesFanout(ctx, s, sub, route, args.EntityID, tok.Value)
+	case planetColonyDetailPath:
+		rowsAffected, outcome, syncErr = w.doPlanetColonyDetailFanout(ctx, s, sub, route, args.EntityID, tok.Value)
+	default:
 		handler, ok := characterDispatch[route.UpstreamPath]
 		if !ok {
 			finishErr := s.FinishSyncRun(ctx, gen.FinishSyncRunParams{RunID: run.RunID, Status: nil, Outcome: nil, Error: strPtr("no handler registered"), RowsAffected: nil})
@@ -380,6 +409,18 @@ func (w *CharacterWorker) doSync(ctx context.Context, s *store.Store, sub gen.Ap
 			n, syncErr = handler(ctx, s, characterID, resp.Body)
 			if syncErr != nil {
 				return 0, outcome, syncErr
+			}
+			// PHASE 20.5 (B30): the assets/names enrichment. A second
+			// upstream call whose input is the body just synced — see
+			// worker/assetnames.go for why it belongs to this subscription
+			// rather than one of its own.
+			if route.UpstreamPath == characterAssetsPath {
+				named, nerr := syncAssetNames(ctx, w.Gateway, s, characterAssetNamesPath,
+					"character_id", "character", characterID, characterID, accessToken, resp.Body)
+				if nerr != nil {
+					return n, outcome, nerr
+				}
+				n += named
 			}
 		}
 		next, err := sync.PlanNextDueAt(sync.DueTimeInput{
@@ -529,6 +570,109 @@ func (w *CharacterWorker) doMailBodyFanout(ctx context.Context, s *store.Store, 
 		return rowsAffected, outcome, err
 	}
 	return rowsAffected, outcome, nil
+}
+
+// fanoutDetail is the character-side binding of worker/fanout.go's shared
+// engine. Unlike the corporation form it records no acting-character 403
+// history: a character acts for itself, there is no election to inform, and
+// writing a candidate row for a character that is not a candidate for
+// anything would put rows in app.sync_acting_character_history that §6.3's
+// elector would then have to learn to ignore.
+func (w *CharacterWorker) fanoutDetail(
+	ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute,
+	characterID int64, accessToken, idPathParamName string,
+	items []fanoutDetailItem,
+	syncOne func(ctx context.Context, s *store.Store, id int64, body []byte) (int32, error),
+) (int32, string, error) {
+	return runDetailFanout(ctx, w.Gateway, w.Policy, s, detailFanout{
+		sub: sub, route: route,
+		ownerParam: "character_id", ownerID: characterID, idParam: idPathParamName,
+		actingCharacterID: characterID, entityID: characterID, accessToken: accessToken,
+		items: items, syncOne: syncOne,
+	})
+}
+
+// doCalendarEventDetailFanout fetches the body text, owner and duration of
+// every calendar event this character's list sync already knows about.
+//
+// Every event is re-fetched every pass rather than only the ones with no
+// detail row: an event's text and duration are mutable — a fleet op moves,
+// an alliance edits the briefing — and UpsertCalendarEventDetail's own
+// IS DISTINCT FROM guard already makes an unchanged detail a zero-row write.
+// That is the opposite of the mail-body fan-out next door, which fetches
+// only headers WITHOUT a body, because a sent mail's body never changes.
+func (w *CharacterWorker) doCalendarEventDetailFanout(ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute, characterID int64, accessToken string) (int32, string, error) {
+	events, err := s.ListCalendarEvents(ctx, characterID)
+	if err != nil {
+		return 0, "", fmt.Errorf("worker: listing known calendar events for character %d: %w", characterID, err)
+	}
+	items := make([]fanoutDetailItem, len(events))
+	for i, e := range events {
+		items[i] = fanoutDetailItem{id: e.EventID}
+	}
+	return w.fanoutDetail(ctx, s, sub, route, characterID, accessToken, "event_id", items,
+		func(ctx context.Context, s *store.Store, eventID int64, body []byte) (int32, error) {
+			dto, err := handlers.ParseCalendarEventDetail(body)
+			if err != nil {
+				return 0, err
+			}
+			res, err := handlers.SyncCalendarEventDetail(ctx, s, characterID, eventID, dto)
+			if err != nil {
+				return 0, err
+			}
+			return res.RowsAffected, nil
+		})
+}
+
+// doCalendarAttendeesFanout mirrors the detail fan-out for the attendee
+// roster of each known event.
+func (w *CharacterWorker) doCalendarAttendeesFanout(ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute, characterID int64, accessToken string) (int32, string, error) {
+	events, err := s.ListCalendarEvents(ctx, characterID)
+	if err != nil {
+		return 0, "", fmt.Errorf("worker: listing known calendar events for character %d: %w", characterID, err)
+	}
+	items := make([]fanoutDetailItem, len(events))
+	for i, e := range events {
+		items[i] = fanoutDetailItem{id: e.EventID}
+	}
+	return w.fanoutDetail(ctx, s, sub, route, characterID, accessToken, "event_id", items,
+		func(ctx context.Context, s *store.Store, eventID int64, body []byte) (int32, error) {
+			dto, err := handlers.ParseCalendarAttendees(body)
+			if err != nil {
+				return 0, err
+			}
+			res, err := handlers.SyncCalendarAttendees(ctx, s, characterID, eventID, dto)
+			if err != nil {
+				return 0, err
+			}
+			return res.RowsAffected, nil
+		})
+}
+
+// doPlanetColonyDetailFanout fetches the pins/links/routes of every planetary
+// colony this character's list sync already knows about — the whole PI
+// layout, which the colony LIST route reports only as a `num_pins` count.
+func (w *CharacterWorker) doPlanetColonyDetailFanout(ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute, characterID int64, accessToken string) (int32, string, error) {
+	colonies, err := s.ListPlanetColonies(ctx, characterID)
+	if err != nil {
+		return 0, "", fmt.Errorf("worker: listing known planet colonies for character %d: %w", characterID, err)
+	}
+	items := make([]fanoutDetailItem, len(colonies))
+	for i, c := range colonies {
+		items[i] = fanoutDetailItem{id: int64(c.PlanetID)}
+	}
+	return w.fanoutDetail(ctx, s, sub, route, characterID, accessToken, "planet_id", items,
+		func(ctx context.Context, s *store.Store, planetID int64, body []byte) (int32, error) {
+			dto, err := handlers.ParsePlanetColonyDetail(body)
+			if err != nil {
+				return 0, err
+			}
+			res, err := handlers.SyncPlanetColonyDetail(ctx, s, characterID, planetID, dto)
+			if err != nil {
+				return 0, err
+			}
+			return res.RowsAffected, nil
+		})
 }
 
 func statusOf(outcome string) *int16 {

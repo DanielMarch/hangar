@@ -32,7 +32,7 @@ require (
 	// ---- Job queue (SRS §3.1, §4.2) ----
 	github.com/riverqueue/river v0.43.0 // CONTRACTUAL PIN
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.43.0
-	github.com/riverqueue/river/rivertype v0.43.0 // indirect
+	github.com/riverqueue/river/rivertype v0.43.0
 	github.com/shopspring/decimal v1.4.0 // NUMERIC(30,2) arithmetic — Principle 9
 
 	// ---- CLI + configuration (SRS §3.2 cmd/hangar, internal/config) ----
@@ -51,7 +51,7 @@ require (
 require (
 	// ---- Test-only ----
 	github.com/stretchr/testify v1.11.1
-	github.com/testcontainers/testcontainers-go v0.40.0 // indirect
+	github.com/testcontainers/testcontainers-go v0.40.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.40.0
 )
 

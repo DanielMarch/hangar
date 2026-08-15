@@ -232,7 +232,17 @@ func (d *Dispatcher) deliverOne(ctx context.Context, s *store.Store, delivery ge
 		return d.settle(ctx, s, delivery, nil, &PermanentError{Reason: "encoding delivery body", Err: err}, now, &endpoint)
 	}
 
-	status, err := d.post(ctx, endpoint.Url, body, secret, now, delivery)
+	// ── PHASE 20.5 (B24): THE ROTATION OVERLAP ───────────────────────────
+	// A superseded secret inside its grace window is signed with as well, so
+	// an event that was already in the outbox when the owner rotated goes
+	// out verifiable by BOTH secrets. Read here, at send time, because that
+	// is where the signature is made: an event enqueued before a rotation
+	// and one enqueued after are indistinguishable by the time they reach
+	// this line, and both are handled correctly by signing with what the
+	// endpoint currently offers.
+	previous := d.previousSecret(ctx, s, endpoint, now)
+
+	status, err := d.post(ctx, endpoint.Url, body, secret, previous, now, delivery)
 	if err != nil {
 		if d.Log != nil {
 			d.Log.WarnContext(ctx, "events: webhook delivery failed",
@@ -291,14 +301,51 @@ func (d *Dispatcher) settle(ctx context.Context, s *store.Store, delivery gen.Ap
 
 // post makes the signed HTTP call. It returns the response status (nil if
 // there was no response at all) and an error describing any non-2xx.
-func (d *Dispatcher) post(ctx context.Context, url string, body, secret []byte, now time.Time, delivery gen.AppWebhookDelivery) (*int16, error) {
+// previousSecret returns the superseded HMAC secret when a rotation grace
+// window is still open, and nil otherwise — clearing the expired columns on
+// the way past, so the overlap is bounded by the dispatcher that is already
+// reading this row rather than by a sweeper that may not run.
+//
+// EVERY failure returns nil rather than an error. A previous secret that
+// cannot be opened (the master key rotated out from under it) must not stop
+// a delivery the CURRENT secret can sign perfectly well; the consequence is
+// a subscriber that has not yet updated seeing failures for the rest of the
+// window, which is strictly better than every subscriber seeing none.
+func (d *Dispatcher) previousSecret(ctx context.Context, s *store.Store, endpoint gen.AppWebhookEndpoint, now time.Time) []byte {
+	if endpoint.PrevHmacExpiresAt == nil || endpoint.PrevHmacKeyVersion == nil {
+		return nil
+	}
+	if !now.Before(*endpoint.PrevHmacExpiresAt) {
+		if err := s.ExpireWebhookPreviousSecret(ctx, endpoint.EndpointID); err != nil && d.Log != nil {
+			d.Log.WarnContext(ctx, "events: clearing an expired previous webhook secret failed",
+				"endpoint_id", endpoint.EndpointID, "error", err)
+		}
+		return nil
+	}
+	previous, err := crypto.OpenWebhookSecret(d.Keyring, endpoint.EndpointID, crypto.Sealed{
+		KeyVersion: int(*endpoint.PrevHmacKeyVersion),
+		WrappedDEK: endpoint.PrevHmacWrappedDek,
+		Nonce:      endpoint.PrevHmacNonce,
+		Ciphertext: endpoint.PrevHmacCiphertext,
+	})
+	if err != nil {
+		if d.Log != nil {
+			d.Log.WarnContext(ctx, "events: superseded webhook secret could not be opened; signing with the current secret only",
+				"endpoint_id", endpoint.EndpointID, "error", err)
+		}
+		return nil
+	}
+	return previous
+}
+
+func (d *Dispatcher) post(ctx context.Context, url string, body, secret, previousSecret []byte, now time.Time, delivery gen.AppWebhookDelivery) (*int16, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, &PermanentError{Reason: "endpoint URL is not usable", Err: err}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "hangar-webhooks/1")
-	req.Header.Set(SignatureHeader, Sign(secret, body, now))
+	req.Header.Set(SignatureHeader, Sign(secret, body, now, previousSecret))
 	// The delivery id is stable across retries, so a receiver can
 	// de-duplicate at-least-once delivery without parsing the body.
 	req.Header.Set("X-Hangar-Delivery", delivery.DeliveryID.String())

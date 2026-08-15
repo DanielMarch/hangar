@@ -97,3 +97,26 @@ SELECT * FROM app.market_order
 SELECT DISTINCT type_id FROM app.market_order
  WHERE region_id = $1
  ORDER BY type_id;
+
+-- name: ListMarketHistoryPairs :many
+-- PHASE 20.5 (B30). The (region_id, type_id) pairs the market-history
+-- fan-out walks.
+--
+-- GET /markets/{region_id}/history needs BOTH a region in the path and a
+-- REQUIRED type_id in the query, and a subscription row carries one
+-- entity_id and no second identifier — so, exactly like every other detail
+-- route, the second identifier is enumerated here from rows an earlier sync
+-- already landed. The source is app.market_order: the types this
+-- installation's own tracked owners actually trade, not EVE's ~15,000
+-- published types. An installation with no orders enumerates nothing and
+-- makes no requests, which is the correct amount of work for a question
+-- nobody has asked.
+--
+-- app.market_price is deliberately NOT the source even though the market
+-- prices sync fills it with every published type: that would be one request
+-- per (region, type) across every region, which is a rate-limit incident
+-- rather than a feature.
+SELECT DISTINCT region_id, type_id
+  FROM app.market_order
+ ORDER BY region_id, type_id
+ LIMIT sqlc.arg(max_pairs);

@@ -305,6 +305,31 @@ sent**. The Phase 3 test asserts all three, not just the first.
 table. It never becomes authoritative: a Redis error is logged and treated as a miss.
 Principle 7 means every test suite runs with Redis absent by default.
 
+**[Phase 20.5 — the decision is now implemented, and what it costs is measured.]** Nothing
+constructed the Redis tier until 20.5, so the `cache` compose profile had been inert since
+Phase 5. Wiring it settled two questions:
+
+* **A Redis outage mid-request is a MISS.** Not a failure — that would make an optional
+  dependency load-bearing, which is Principle 7 inverted — and **not a fall-through to
+  Postgres**, which sounds generous and is wrong: when Redis is the L2, nothing has been
+  *written* to `app.esi_cache_entry`, so the fall-through finds either nothing or rows left
+  over from before the tier was switched, and serving those means serving a body the
+  configured cache tier does not contain.
+
+* **The tier does not save requests, only bytes.** `Client.Do` always makes the conditional
+  call, because the validators come from `app.sync_subscription` and not from the cache; the
+  cache is consulted in exactly one place, to replay a stored body when the server answers
+  304. So the upstream call count is identical with the tier absent, cold, warm, and dead,
+  and the only tier-visible difference is whether a 304 carries a replayed body — which no
+  caller reads, since the worker's 304 branch never invokes a handler. That is why
+  correctness never depended on this tier, and why "degrade to a miss" costs nothing.
+
+**A request carrying a body is never cached.** §5.3's key formula has no request-body term, so
+two POSTs to the same path would collide on one key and the second would be served the first's
+answer. Extending the formula was rejected as a specification change made in passing; the
+conservative rule costs nothing, because the one route HANGAR POSTs to
+(`/{owner}/{id}/assets/names`) carries no cache mode, no ETag and no `Cache-Control`.
+
 ### 5.5 Rate limiting — the floating-window consumption ledger
 
 This is the design that Gate 1 and the Phase 4 fidelity test exist to police. Read this
@@ -570,6 +595,62 @@ declares no TTL contract; HANGAR applies `ttl_floor` (default 300 s). The config
 
 Full jitter on every computed `next_due_at`. Adaptive backoff resets on any 200 — **not**
 on a 304, which is the whole point of the backoff.
+
+**[AMENDED — Phase 20.5] `next_due_at` is never in the past.** The formulae above anchor on
+`last_success`, and a 304 does not update `last_success` (that is the sentence immediately
+above, and it is right). The two together produce a spin: once a route has been answering
+304 for longer than its own interval, every subsequent 304 recomputes *the same* instant in
+the past, the planner's claim query — which orders by `next_due_at` — finds it due on every
+5-second tick, and HANGAR polls ESI continuously for data that has not changed.
+
+Measured on a live installation at commit `5ebbc56`, before the amendment: **62 of 85 enabled
+subscriptions had `next_due_at` more than an hour in the past**, one at
+`consecutive_304 = 2785`, `app.sync_run` at **106,818 rows** after two days, and
+`esi_error_limit_remaining` resting at 97 rather than 100 while nothing was being asked of the
+installation.
+
+So `PlanNextDueAt` clamps: when `last_success + interval + jitter` is not after *now*, the
+anchor becomes *now*. The original intent is preserved wherever it still means something — a
+route polled **before** its upstream cache expired is still re-anchored on when the data was
+generated, so HANGAR does not walk its poll times forward by one round-trip per cycle — and
+`last_success_at` is still untouched by a 304, because that column means "when did the data
+last change".
+
+There is a second consequence worth stating, because it is how this was found rather than
+what it costs: a subscription stuck in the past always sorts ahead of one scheduled for the
+future, and the claim is `LIMIT`ed. A **newly created** subscription therefore could not be
+claimed at all while any stuck one existed.
+
+### 6.2.1 Fan-out routes are subscribable
+
+**[Phase 20.5, defect B30]** A detail route carries a second dynamic path parameter beyond
+its owner — `{mail_id}`, `{event_id}`, `{planet_id}`, `{starbase_id}`, `{division}`,
+`{contract_id}`, `{project_id}`, `{observer_id}`. A subscription row has one `entity_id` and
+no second identifier column, and the conclusion previously drawn from that was that those
+routes cannot be subscribed to at all.
+
+The premise is true and the conclusion was wrong. **The subscription names the OWNER and the
+templated path; the second identifier is enumerated at work time** from rows the parent list
+sync already landed — which is exactly what every `do*Fanout` function in
+`internal/sync/worker` has done since Phase 8.1. Excluding them from `SubscribableRoutes`
+meant `internal/sync/subscribe` could never create a row naming one, so those functions were
+unreachable on every installation ever deployed, including the starbase detail route §4.4
+names as the source for `corporation.starbase.fuel_low`.
+
+A fan-out gets its own subscription rather than being folded into its parent's handler
+because that is what gives it its own cadence, its own ETag and snooze bookkeeping, its own
+`app.sync_run` history and its own line on the admin board. Folding it in would report one
+outcome for two different upstream calls.
+
+`GET /markets/{region_id}/history` is the one fan-out that enumerates **both** parameters, from
+the `(region_id, type_id)` pairs in `app.market_order` — the types this installation's own
+tracked owners actually trade, not EVE's ~15,000 published types — bounded by a hard cap,
+because that route carries no `x-rate-limit` group and Governor 1 therefore does not throttle
+it.
+
+`POST /{owner}/{id}/assets/names` is deliberately **not** subscribable: it takes a request
+body, and a subscription is a polling schedule. It runs as an enrichment of the assets sync,
+whose output is its input.
 
 ### 6.3 Acting-character election
 

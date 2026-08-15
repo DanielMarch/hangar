@@ -593,7 +593,10 @@ func TestClientErrorDeadLettersImmediately(t *testing.T) {
 			// error lands in the shared Tick counters. Asserting on
 			// per-endpoint rows below makes the assertions robust to that;
 			// this keeps the fan-out itself honest as well.
-			t.Cleanup(func() { require.NoError(t, s.RevokeWebhookEndpoint(ctx, endpoint.EndpointID)) })
+			// PHASE 20.5: RevokeWebhookEndpoint was DELETED in favour of the
+			// owner-scoped form, which puts ownership in the predicate rather
+			// than in a Go-side check somebody can omit.
+			t.Cleanup(func() { require.NoError(t, s.RevokeWebhookEndpointForOwner(ctx, endpoint.EndpointID, owner)) })
 
 			role, err := s.CreateRole(ctx, fmt.Sprintf("status-%d-%s", tc.status, uuid.NewString()), nil, false)
 			require.NoError(t, err)

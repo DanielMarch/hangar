@@ -14,38 +14,10 @@
 
 # == OPEN DEFECTS =========================================================
 
-# B24 (closed by Phase 20.5) — webhook HMAC sealing — the missing §4.9 configuration surface
-internal/crypto.SealWebhookSecret
-
-# B24 (closed by Phase 20.5) — webhook HMAC secret generation — the missing §4.9 configuration surface
-internal/crypto.NewWebhookSecret
-
-# B30 (closed by Phase 20.5) — ESI route handler implemented but never dispatched by any worker
-internal/sync/handlers.ParseAssetNames
-internal/sync/handlers.ParseCalendarAttendees
-internal/sync/handlers.ParseCalendarEventDetail
-internal/sync/handlers.ParseCorporationProjectContributors
-internal/sync/handlers.ParseMarketHistory
-internal/sync/handlers.ParseMarketPrices
-internal/sync/handlers.ParsePlanetColonyDetail
-internal/sync/handlers.SyncCalendarAttendees
-internal/sync/handlers.SyncCalendarEventDetail
-internal/sync/handlers.SyncCorporationProjectContributors
-internal/sync/handlers.SyncMarketHistory
-internal/sync/handlers.SyncMarketPrices
-internal/sync/handlers.SyncPlanetColonyDetail
-
-# B33 (closed by Phase 20.5) — $filter grammar validation
-internal/api/filters.New
-internal/api/filters.Validate
-internal/api/filters.coerce
-internal/api/filters.containsSQLMeta
-
-# B34 (closed by Phase 20.5) — optional Redis L2 tier — compose ships a `cache` profile nothing uses
-internal/esi/cache.NewRedisL2
-internal/esi/cache.redisL2.Get
-internal/esi/cache.redisL2.Set
-
+# B22, B24, B30, B33 and B34 were ALL CLOSED IN PHASE 20.5 and their entries
+# are gone rather than annotated — 26 symbols across five defects, plus the
+# whole of internal/sde. This section is now down to one open group.
+#
 # GATE7 (closed by Phase 20.6) — shim helper awaiting the routes that use it (only 4 of 33 read routes are served)
 internal/api/v2shim.BreakingControllers
 internal/api/v2shim.Float
@@ -120,7 +92,6 @@ internal/esi/catalogue.SchedulingMode  # open-vocabulary accessor; the schedulin
 internal/esi/ratelimit.Governor1.forceModeCheck  # test hook for deterministic mode transitions
 internal/events.DeadLetterBoard  # dead-letter query awaiting its admin endpoint
 internal/events.EventID  # helper of the Recorder double
-internal/events.KnownTypes  # closed event-type vocabulary, asserted by tests
 internal/events.ParseSignatureHeader  # as Verify — consumer-side, not called by the sender
 internal/events.PendingCount  # CORRECTED IN 20.4. It was listed as "awaiting the alert_dead_letter_depth metric (20.4)"; that attribution was wrong. This counts UNDISPATCHED §4.9 WEBHOOK OUTBOX events (app.outbox_event), not alert deliveries. alert_dead_letter_depth is a gauge over app.alert_delivery and 20.4 wired it to alerting.DeadLetterCount, which is the only source that could have been right. This remains a genuine unwired admin-surface query — a webhook-outbox backlog gauge would be a real and useful metric, but it is named by no gate, and 04_RELEASE_GATES.md rule 7 is about not declaring metrics ahead of their wiring, not about inventing ones nobody asked for.
 internal/events.Recorder.Len  # test-facing accessor on the in-memory Recorder double

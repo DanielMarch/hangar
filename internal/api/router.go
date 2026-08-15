@@ -5,14 +5,18 @@
 package api
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
 	"github.com/hangar-project/hangar/internal/alerting"
+	"github.com/hangar-project/hangar/internal/api/filters"
 	"github.com/hangar-project/hangar/internal/api/middleware"
 	"github.com/hangar-project/hangar/internal/api/v2shim"
+	"github.com/hangar-project/hangar/internal/crypto"
 	"github.com/hangar-project/hangar/internal/provisioning"
 	"github.com/hangar-project/hangar/internal/sso"
 	"github.com/hangar-project/hangar/internal/store"
@@ -58,6 +62,21 @@ type Deps struct {
 	// an installation whose administrator advanced the ESI pin must still
 	// have advanced it even if nothing was listening.
 	Alerts *alerting.Emitter
+
+	// Keyring is the envelope-encryption key material §4.9's webhook
+	// configuration surface needs (Phase 20.5, defect B24): an endpoint's
+	// HMAC secret is sealed with AAD bound to the endpoint's own uuid, so it
+	// cannot be written — or rotated — without one.
+	//
+	// It is the SAME keyring cmd/hangar builds once per process for the SSO
+	// refresh tokens and hands to the webhook dispatcher. Constructing a
+	// second one here would report a bad HANGAR_MASTER_KEY twice with two
+	// different messages, which is the reason buildWebhookDispatcher takes
+	// it as a parameter too.
+	//
+	// Nil in the spec-only build path; the handlers that need it answer 500
+	// rather than panicking.
+	Keyring *crypto.Keyring
 }
 
 // NewAPI builds the Huma API bound to mux, with SRS §6's session-resolving
@@ -193,3 +212,73 @@ func RequirePermission(s *store.Store, permission string) func(huma.Context, fun
 		_ = called // guard decides; nothing further to do either branch
 	}
 }
+
+// ── PHASE 20.5, DEFECT B33: THE FILTER WHITELIST IS ENFORCED ─────────────
+//
+// ValidateQueryFilters refuses any query parameter the operation does not
+// declare, before the handler runs.
+//
+// WHAT IT REPLACES. Nothing. There was no check at all: huma binds the
+// parameters an input struct declares and ignores everything else, so an
+// undeclared parameter — a filter a client believed was narrowing the
+// result — produced a 200 and the whole collection. That is the third and
+// worst of the three possible answers to a hostile filter, because the
+// caller cannot tell it happened.
+//
+// WHY 422 AND NOT 400. 00_SRS_v3.1.md's Phase 15 exit criterion states the
+// status outright: "adversarial query tests reject non-whitelisted filters
+// with 422". APPENDIX_C_MIGRATION.md §6.6's 400 is a statement about the
+// /api/v2 SHIM's `$filter`, which internal/api/v2shim already answers with
+// exactly that (errFilterUnsupported), and the two surfaces are allowed to
+// differ because they are two contracts. On /api/v1 a `$filter` is simply an
+// undeclared field like any other; it gets 422 with a message that names it,
+// because a legacy client sending it deserves to be told where the
+// replacement is rather than merely that something was wrong.
+//
+// REPEATED KEYS take the LAST value, matching internal/api/filters.Validate's
+// own documented rule and huma's binder.
+func ValidateQueryFilters(hapi huma.API, spec filters.Spec) func(huma.Context, func(huma.Context)) {
+	return func(ctx huma.Context, next func(huma.Context)) {
+		req, _ := humago.Unwrap(ctx)
+		query := req.URL.Query()
+		if len(query) == 0 {
+			next(ctx)
+			return
+		}
+		raw := make(map[string]string, len(query))
+		for k, values := range query {
+			if len(values) == 0 {
+				raw[k] = ""
+				continue
+			}
+			raw[k] = values[len(values)-1]
+		}
+		if err := filterQuery(spec, raw); err != nil {
+			_ = huma.WriteErr(hapi, ctx, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		next(ctx)
+	}
+}
+
+// filterQuery is ValidateQueryFilters' decision, split out so it can be
+// tested without a huma.Context.
+func filterQuery(spec filters.Spec, raw map[string]string) error {
+	if _, ok := raw[legacyODataFilterParam]; ok {
+		return fmt.Errorf("filter rejected: %s: the OData $filter parameter is not supported by /api/v1. "+
+			"It is refused rather than ignored, because a filter that narrows a result set and is then dropped "+
+			"returns MORE data than was asked for. Use this resource's own declared filter parameters",
+			legacyODataFilterParam)
+	}
+	if _, err := filters.Validate(spec, raw); err != nil {
+		var invalid *filters.ErrInvalidFilter
+		if errors.As(err, &invalid) {
+			return fmt.Errorf("filter rejected: %s", invalid.Error())
+		}
+		return fmt.Errorf("filter rejected")
+	}
+	return nil
+}
+
+// legacyODataFilterParam is the parameter Laravel-era clients send.
+const legacyODataFilterParam = "$filter"

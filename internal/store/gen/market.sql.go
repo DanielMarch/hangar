@@ -59,6 +59,55 @@ func (q *Queries) ListMarketHistory(ctx context.Context, regionID int32, typeID 
 	return items, nil
 }
 
+const listMarketHistoryPairs = `-- name: ListMarketHistoryPairs :many
+SELECT DISTINCT region_id, type_id
+  FROM app.market_order
+ ORDER BY region_id, type_id
+ LIMIT $1
+`
+
+type ListMarketHistoryPairsRow struct {
+	RegionID int32
+	TypeID   int32
+}
+
+// PHASE 20.5 (B30). The (region_id, type_id) pairs the market-history
+// fan-out walks.
+//
+// GET /markets/{region_id}/history needs BOTH a region in the path and a
+// REQUIRED type_id in the query, and a subscription row carries one
+// entity_id and no second identifier — so, exactly like every other detail
+// route, the second identifier is enumerated here from rows an earlier sync
+// already landed. The source is app.market_order: the types this
+// installation's own tracked owners actually trade, not EVE's ~15,000
+// published types. An installation with no orders enumerates nothing and
+// makes no requests, which is the correct amount of work for a question
+// nobody has asked.
+//
+// app.market_price is deliberately NOT the source even though the market
+// prices sync fills it with every published type: that would be one request
+// per (region, type) across every region, which is a rate-limit incident
+// rather than a feature.
+func (q *Queries) ListMarketHistoryPairs(ctx context.Context, maxPairs int32) ([]ListMarketHistoryPairsRow, error) {
+	rows, err := q.db.Query(ctx, listMarketHistoryPairs, maxPairs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMarketHistoryPairsRow
+	for rows.Next() {
+		var i ListMarketHistoryPairsRow
+		if err := rows.Scan(&i.RegionID, &i.TypeID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMarketOrderHistoryByOwner = `-- name: ListMarketOrderHistoryByOwner :many
 SELECT owner_kind, owner_id, order_id, type_id, region_id, location_id, range, is_buy_order, is_corporation, escrow, price, volume_total, volume_remain, min_volume, duration, issued, state, wallet_division, updated_at, issued_by FROM app.market_order_history WHERE owner_kind = $1 AND owner_id = $2 ORDER BY issued DESC
 `

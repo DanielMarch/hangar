@@ -7,10 +7,56 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: ListWebhookEndpointsForUser :many
-SELECT * FROM app.webhook_endpoint WHERE owner_user_id = $1 AND enabled ORDER BY created_at;
+-- PHASE 20.5: `AND enabled` removed. An endpoint HANGAR auto-disabled after
+-- consecutive failures is the one its owner most needs to see — hiding it
+-- makes a working configuration and a broken one look identical, which is
+-- the same shape of defect as everything else this phase closed. The handler
+-- returns `enabled`, `disabled_at` and `disabled_reason` so the difference is
+-- visible rather than inferred.
+SELECT * FROM app.webhook_endpoint WHERE owner_user_id = $1 ORDER BY created_at;
 
--- name: RevokeWebhookEndpoint :exec
-UPDATE app.webhook_endpoint SET enabled = false WHERE endpoint_id = $1;
+-- name: RotateWebhookSecret :one
+-- PHASE 20.5 (B24). Installs a new signing secret and demotes the current one
+-- to `prev_*` for a bounded grace window, IN ONE STATEMENT — the demotion
+-- reads the columns it is overwriting, so doing it as two statements would
+-- leave a gap in which a delivery could be signed with a secret nobody would
+-- accept.
+--
+-- The endpoint must belong to the caller: owner_user_id is in the predicate
+-- rather than checked in Go, so a handler that forgets the check returns no
+-- rows instead of rotating somebody else's endpoint.
+UPDATE app.webhook_endpoint
+   SET prev_hmac_key_version = hmac_key_version,
+       prev_hmac_wrapped_dek = hmac_wrapped_dek,
+       prev_hmac_nonce       = hmac_nonce,
+       prev_hmac_ciphertext  = hmac_ciphertext,
+       prev_hmac_expires_at  = now() + sqlc.arg(grace)::interval,
+       hmac_key_version      = sqlc.arg(hmac_key_version),
+       hmac_wrapped_dek      = sqlc.arg(hmac_wrapped_dek),
+       hmac_nonce            = sqlc.arg(hmac_nonce),
+       hmac_ciphertext       = sqlc.arg(hmac_ciphertext),
+       rotated_at            = now()
+ WHERE endpoint_id = sqlc.arg(endpoint_id) AND owner_user_id = sqlc.arg(owner_user_id)
+RETURNING *;
+
+-- name: ExpireWebhookPreviousSecret :exec
+-- Clears a superseded secret once its grace window has passed. Called by the
+-- dispatcher at delivery time rather than by a sweeper: the dispatcher is
+-- already reading this exact row, and a second secret that outlives its
+-- window because a cron did not run is a second secret to steal.
+UPDATE app.webhook_endpoint
+   SET prev_hmac_key_version = NULL, prev_hmac_wrapped_dek = NULL,
+       prev_hmac_nonce = NULL, prev_hmac_ciphertext = NULL, prev_hmac_expires_at = NULL
+ WHERE endpoint_id = $1 AND prev_hmac_expires_at IS NOT NULL AND prev_hmac_expires_at <= now();
+
+-- name: GetWebhookEndpointForOwner :one
+-- The owner-scoped read. Same reasoning as RotateWebhookSecret: ownership is
+-- a predicate, not a Go-side comparison somebody can omit.
+SELECT * FROM app.webhook_endpoint WHERE endpoint_id = $1 AND owner_user_id = $2;
+
+-- name: RevokeWebhookEndpointForOwner :exec
+UPDATE app.webhook_endpoint SET enabled = false, disabled_at = now(), disabled_reason = 'revoked by owner'
+ WHERE endpoint_id = $1 AND owner_user_id = $2 AND enabled;
 
 -- name: InsertOutboxEvent :one
 -- Written in the same transaction as the mutation it announces (Phase 19

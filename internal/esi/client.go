@@ -9,6 +9,7 @@
 package esi
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -198,6 +199,29 @@ type Request struct {
 	// conditional headers. nil means "no prior state" — always a full
 	// fetch, never conditional.
 	Validators *cache.Validators
+
+	// Body is the request entity for the handful of ESI routes that take
+	// one — POST /{owner}/{id}/assets/names is the first HANGAR calls.
+	// Sent as application/json.
+	//
+	// ── A REQUEST WITH A BODY IS NEVER CACHED (PHASE 20.5) ───────────────
+	// 01_ARCHITECTURE.md §5.3's cache-key formula is
+	// (method, path, query, compatibility_date, tenant, resolved_language,
+	// token_subject). It has no request-body term, so two POSTs to the same
+	// path with different bodies would collide on one key and the second
+	// would be served the first one's answer — silently, and with the wrong
+	// asset names in it.
+	//
+	// Adding a body hash to the key was considered and REJECTED: §5.3's
+	// formula is a specification, and quietly extending it in the phase
+	// that happened to need the first POST is the class of change that
+	// makes a document stop describing the system. The rule taken instead
+	// is the conservative one — a body means no L1/L2 read, no L1/L2
+	// write, and no conditional headers, exactly the shape of the existing
+	// no-store contract — and it costs nothing here, because the one route
+	// that uses it carries no cache_mode, no ETag and no Cache-Control from
+	// ESI anyway.
+	Body []byte
 }
 
 // Response is what Do returns. NotModified distinguishes a 304 (Body is
@@ -316,9 +340,16 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, req.Method, rawURL, nil)
+	var reqBody io.Reader
+	if req.Body != nil {
+		reqBody = bytes.NewReader(req.Body)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, req.Method, rawURL, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("esi: building http request: %w", err)
+	}
+	if req.Body != nil {
+		httpReq.Header.Set("Content-Type", "application/json")
 	}
 	if req.AccessToken != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+req.AccessToken)
@@ -331,7 +362,14 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 	if c.Language != "" {
 		httpReq.Header.Set("Accept-Language", c.Language)
 	}
-	condSent := cache.ApplyConditionalHeaders(httpReq, req.Validators, req.CacheMode)
+	// A request carrying a body sends no conditional headers — see
+	// Request.Body. Passing nil validators rather than special-casing
+	// ApplyConditionalHeaders keeps the no-store rule in one place.
+	validators := req.Validators
+	if req.Body != nil {
+		validators = nil
+	}
+	condSent := cache.ApplyConditionalHeaders(httpReq, validators, req.CacheMode)
 
 	resp, sendErr := c.HTTPClient.Do(httpReq)
 
@@ -431,7 +469,7 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 	etag := header.Get("ETag")
 	lastMod, hasLastMod := parseLastModified(header.Get("Last-Modified"))
 
-	if status == http.StatusOK && c.Cache != nil {
+	if status == http.StatusOK && c.Cache != nil && req.Body == nil {
 		key := c.cacheKey(req)
 		c.Cache.Set(ctx, key, cache.Entry{
 			ETag: etag, LastModified: lastMod, HasLastModified: hasLastMod,
@@ -532,7 +570,7 @@ func (c *Client) compatibilityDate() string {
 }
 
 func (c *Client) cachedBody(ctx context.Context, req Request) (body []byte, etag string, lastMod time.Time, hasLastMod bool, ok bool) {
-	if c.Cache == nil {
+	if c.Cache == nil || req.Body != nil {
 		return nil, "", time.Time{}, false, false
 	}
 	e, found := c.Cache.Get(ctx, c.cacheKey(req), req.CacheMode)

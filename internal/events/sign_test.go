@@ -46,10 +46,11 @@ func TestSignProducesParsableHeader(t *testing.T) {
 	header := events.Sign(fixedSecret, fixedBody, fixedTime)
 	require.Equal(t, "t=1770000000,v1=", header[:len("t=1770000000,v1=")])
 
-	ts, sig, err := events.ParseSignatureHeader(header)
+	ts, sigs, err := events.ParseSignatureHeader(header)
 	require.NoError(t, err)
 	require.Equal(t, fixedTime, ts)
-	require.Len(t, sig, 32)
+	require.Len(t, sigs, 1)
+	require.Len(t, sigs[0], 32)
 }
 
 func TestVerifyAcceptsItsOwnSignature(t *testing.T) {
@@ -104,9 +105,10 @@ func TestVerifyAcceptsUpperCaseHexAndUnknownElements(t *testing.T) {
 	// Only the hex VALUE is case-insensitive. The element keys (`t`, `v1`)
 	// are part of the wire format and stay lower-case — upper-casing those
 	// is a different header, not a differently-spelled one.
-	ts, sig, err := events.ParseSignatureHeader(header)
+	ts, sigs, err := events.ParseSignatureHeader(header)
 	require.NoError(t, err)
-	upperHex := fmt.Sprintf("t=%d,v1=%s", ts.Unix(), strings.ToUpper(hex.EncodeToString(sig)))
+	require.Len(t, sigs, 1, "a single-secret Sign must still emit exactly one v1 element")
+	upperHex := fmt.Sprintf("t=%d,v1=%s", ts.Unix(), strings.ToUpper(hex.EncodeToString(sigs[0])))
 	require.NoError(t, events.Verify(fixedSecret, fixedBody, upperHex, fixedTime, events.DefaultReplayWindow),
 		"hex case must not matter — a receiver library that upper-cases is not wrong")
 
@@ -176,9 +178,10 @@ func TestWebhookSignatureVerifiesWithReferenceScript(t *testing.T) {
 		require.NoError(t, err, "the reference script rejected a signature this package produced:\n%s", out)
 		require.Contains(t, out, "SIGNATURE VALID")
 		// The script must agree on the digest itself, not merely on the verdict.
-		_, sig, parseErr := events.ParseSignatureHeader(header)
+		_, sigs, parseErr := events.ParseSignatureHeader(header)
 		require.NoError(t, parseErr)
-		require.Contains(t, out, hex.EncodeToString(sig))
+		require.Len(t, sigs, 1)
+		require.Contains(t, out, hex.EncodeToString(sigs[0]))
 	})
 
 	t.Run("tampered body is rejected", func(t *testing.T) {
@@ -245,4 +248,50 @@ func repoPath(t *testing.T, parts ...string) string {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	require.NoError(t, err)
 	return filepath.Join(append([]string{root}, parts...)...)
+}
+
+// ── PHASE 20.5 (B24): THE ROTATION OVERLAP ───────────────────────────────
+
+// TestADualSignedDeliveryVerifiesAgainstEitherSecret is the property the
+// whole rotation design rests on: an event already in the outbox when its
+// endpoint's secret is rotated goes out signed with BOTH, so a subscriber
+// that has updated and one that has not are both correct.
+func TestADualSignedDeliveryVerifiesAgainstEitherSecret(t *testing.T) {
+	newSecret := []byte("the-new-secret-32-bytes-long--ok")
+	oldSecret := []byte("the-old-secret-32-bytes-long--ok")
+
+	header := events.Sign(newSecret, fixedBody, fixedTime, oldSecret)
+
+	_, sigs, err := events.ParseSignatureHeader(header)
+	require.NoError(t, err)
+	require.Len(t, sigs, 2, "a rotation overlap must emit two v1 elements, not overwrite one")
+
+	require.NoError(t, events.Verify(newSecret, fixedBody, header, fixedTime, events.DefaultReplayWindow),
+		"a subscriber holding the NEW secret must accept a dual-signed delivery")
+	require.NoError(t, events.Verify(oldSecret, fixedBody, header, fixedTime, events.DefaultReplayWindow),
+		"a subscriber that has not yet updated must accept it too — this is what 'without dropping in-flight deliveries' means")
+	require.ErrorIs(t, events.Verify([]byte("a-third-secret-nobody-issued-ok!"), fixedBody, header, fixedTime, events.DefaultReplayWindow),
+		events.ErrBadSignature, "two valid signatures must not make a third secret valid")
+}
+
+// TestANilOrEmptyExtraSecretIsOmitted — the steady state (no rotation in
+// progress) must produce byte-identical output to what Phase 19 produced,
+// or every existing receiver sees a changed header for no reason.
+func TestANilOrEmptyExtraSecretIsOmitted(t *testing.T) {
+	single := events.Sign(fixedSecret, fixedBody, fixedTime)
+	require.Equal(t, single, events.Sign(fixedSecret, fixedBody, fixedTime, nil))
+	require.Equal(t, single, events.Sign(fixedSecret, fixedBody, fixedTime, []byte{}))
+}
+
+// TestTheOldSecretStopsWorkingOnceItIsNoLongerSignedWith — the overlap is
+// bounded. Once the dispatcher stops including the previous secret (its
+// grace window having passed and prev_* having been cleared), a subscriber
+// still holding it is rejected, which is the point of a rotation.
+func TestTheOldSecretStopsWorkingOnceItIsNoLongerSignedWith(t *testing.T) {
+	newSecret := []byte("the-new-secret-32-bytes-long--ok")
+	oldSecret := []byte("the-old-secret-32-bytes-long--ok")
+
+	afterWindow := events.Sign(newSecret, fixedBody, fixedTime)
+	require.NoError(t, events.Verify(newSecret, fixedBody, afterWindow, fixedTime, events.DefaultReplayWindow))
+	require.ErrorIs(t, events.Verify(oldSecret, fixedBody, afterWindow, fixedTime, events.DefaultReplayWindow), events.ErrBadSignature)
 }

@@ -277,13 +277,20 @@ func TestNoPackageIsAbsentFromTheBinary(t *testing.T) {
 	// The packages currently known to be absent, each with its defect.
 	// Same contract as the allowlist: this shrinks, and an entry that has
 	// become reachable is a failure.
+	//
 	// PHASE 20.2 closed two of the three. internal/i18n is reached through
 	// internal/config's HANGAR_LOCALE validation and cmd/hangar's gateway
 	// assembly (B23); internal/esi/pagination is now the single page-walk
 	// implementation, called by internal/sync/worker (B31).
-	known := map[string]string{
-		"internal/sde": "B22 — the whole SDE import pipeline; closed by Phase 20.5",
-	}
+	//
+	// PHASE 20.5 CLOSED THE LAST ONE. internal/sde is reached through
+	// cmd/hangar's `admin import-sde` and `admin sde-status` commands and
+	// through serve's boot-time SDE report (B22). The map is now EMPTY, and
+	// that is the state it should stay in: every package in this module is
+	// imported by the binary. An entry appearing here again means a whole
+	// subsystem has been built and not wired, which is defect class B20 in
+	// its most severe form.
+	known := map[string]string{}
 
 	for _, pkg := range absent {
 		if _, ok := known[pkg]; !ok {

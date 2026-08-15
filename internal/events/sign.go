@@ -65,11 +65,37 @@ func SigningPayload(ts time.Time, body []byte) []byte {
 	return out
 }
 
-// Sign returns the full header value for body at time ts.
-func Sign(secret, body []byte, ts time.Time) string {
-	mac := hmac.New(sha256.New, secret)
-	mac.Write(SigningPayload(ts, body))
-	return fmt.Sprintf("%s=%d,%s=%s", timestampKey, ts.Unix(), signatureVersion, hex.EncodeToString(mac.Sum(nil)))
+// Sign returns the full header value for body at time ts, signed with every
+// secret given, in order.
+//
+// ── WHY THIS IS VARIADIC (PHASE 20.5, B24) ───────────────────────────────
+// A secret ROTATION is an overlap, not a swap: for a bounded grace window
+// after a rotation, a delivery is signed with BOTH the new secret and the
+// superseded one, and a receiver may match either. That is what lets an
+// event already sitting in the outbox go out without being dropped,
+// delayed, or re-signed — see migration 00044's header for the full
+// argument, and Verify below for the matching side.
+//
+// The header format already permitted this. signatureVersion's own note
+// explains that `v1=` is labelled precisely so additional elements can
+// appear without breaking a receiver written against one of them; repeated
+// elements are the same mechanism, and are what Stripe's scheme does for
+// exactly this reason.
+//
+// Called with one secret — the steady state — the output is byte-identical
+// to what Phase 19 produced.
+func Sign(secret []byte, body []byte, ts time.Time, alsoWith ...[]byte) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s=%d", timestampKey, ts.Unix())
+	for _, s := range append([][]byte{secret}, alsoWith...) {
+		if len(s) == 0 {
+			continue
+		}
+		mac := hmac.New(sha256.New, s)
+		mac.Write(SigningPayload(ts, body))
+		fmt.Fprintf(&b, ",%s=%s", signatureVersion, hex.EncodeToString(mac.Sum(nil)))
+	}
+	return b.String()
 }
 
 // Signature verification failures. Distinguished from each other for the
@@ -113,27 +139,42 @@ func Verify(secret, body []byte, header string, now time.Time, window time.Durat
 		return fmt.Errorf("%w: %s off (window %s)", ErrStaleSignature, drift.Truncate(time.Second), window)
 	}
 
+	// EVERY candidate is compared, and the loop deliberately does not break
+	// early on a match: during a rotation overlap the header carries two
+	// signatures, and returning as soon as one matches would make the
+	// verification time depend on WHICH secret was used — leaking, to a
+	// timing observer, whether the sender had rotated yet.
 	mac := hmac.New(sha256.New, secret)
 	mac.Write(SigningPayload(ts, body))
-	if subtle.ConstantTimeCompare(mac.Sum(nil), provided) != 1 {
+	want := mac.Sum(nil)
+	matched := 0
+	for _, sig := range provided {
+		matched |= subtle.ConstantTimeCompare(want, sig)
+	}
+	if matched != 1 {
 		return ErrBadSignature
 	}
 	return nil
 }
 
-// ParseSignatureHeader splits `t=<unix>,v1=<hex>` into its parts.
+// ParseSignatureHeader splits `t=<unix>,v1=<hex>[,v1=<hex>...]` into its
+// parts, returning EVERY v1 element.
 //
 // Unknown elements are IGNORED rather than rejected, so adding a future
 // `v2=` alongside `v1=` does not break receivers written against v1 — see
 // the note on signatureVersion. A header with no v1 element at all is
 // malformed, because then there is nothing this version can check.
-func ParseSignatureHeader(header string) (time.Time, []byte, error) {
+//
+// PHASE 20.5 (B24): this returned ONE signature and each `v1=` overwrote the
+// last, so a dual-signed rotation header would have been verified against
+// whichever signature happened to be written second. Returning the set is
+// what makes the rotation overlap real rather than accidental.
+func ParseSignatureHeader(header string) (time.Time, [][]byte, error) {
 	var (
 		ts      time.Time
 		sawTS   bool
-		sig     []byte
-		sawSig  bool
-		invalid = func(reason string) (time.Time, []byte, error) {
+		sigs    [][]byte
+		invalid = func(reason string) (time.Time, [][]byte, error) {
 			return time.Time{}, nil, fmt.Errorf("%w: %s", ErrMalformedSignature, reason)
 		}
 	)
@@ -158,17 +199,17 @@ func ParseSignatureHeader(header string) (time.Time, []byte, error) {
 			if len(decoded) != sha256.Size {
 				return invalid(fmt.Sprintf("v1 is %d bytes, want %d", len(decoded), sha256.Size))
 			}
-			sig, sawSig = decoded, true
+			sigs = append(sigs, decoded)
 		}
 	}
 
 	switch {
-	case !sawTS && !sawSig:
+	case !sawTS && len(sigs) == 0:
 		return invalid("no t= or v1= element")
 	case !sawTS:
 		return invalid("no t= element")
-	case !sawSig:
+	case len(sigs) == 0:
 		return invalid("no v1= element")
 	}
-	return ts, sig, nil
+	return ts, sigs, nil
 }

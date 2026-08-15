@@ -54,8 +54,8 @@ var corporationGoldenParsers = map[string]func([]byte) (any, error){
 	"sovereignty_systems":      func(b []byte) (any, error) { return handlers.ParseSovereigntySystems(b) },
 
 	// Phase 9 additions.
-	"projects":              func(b []byte) (any, error) { return handlers.ParseCorporationProjects(b) },
-	"project_contributions": func(b []byte) (any, error) { return handlers.ParseCorporationProjectContributions(b) },
+	"projects":             func(b []byte) (any, error) { return handlers.ParseCorporationProjects(b) },
+	"project_contributors": func(b []byte) (any, error) { return handlers.ParseCorporationProjectContributors(b) },
 }
 
 const corporationTestdataDir = "../../../testdata/esi/corporation"
@@ -66,7 +66,16 @@ const corporationTestdataDir = "../../../testdata/esi/corporation"
 // with no field loss, and every registered parser has a fixture.
 // corporationEnvelopeField names, per fixture, the property a parser
 // unwraps. Absent means "the parser returns the whole document".
-var corporationEnvelopeField = map[string]string{"projects": "projects"}
+// PHASE 20.5: `project_contributors` joins `projects` as an envelope
+// route. The fixture it replaces, project_contributions.json, was an
+// INVENTED shape — a bare array of {amount, character_id} for a route ESI
+// does not have — recorded against a parser that had never been handed a
+// real body (defect B38's leftover). A golden fixture nobody measured is
+// how a wrong DTO passes its own test for three phases.
+var corporationEnvelopeField = map[string]string{
+	"projects":             "projects",
+	"project_contributors": handlers.ProjectContributorsItemsField,
+}
 
 func TestGoldenFileParsesAllCorporationDomains(t *testing.T) {
 	entries, err := os.ReadDir(corporationTestdataDir)

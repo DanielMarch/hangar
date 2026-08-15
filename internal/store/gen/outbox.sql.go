@@ -88,7 +88,7 @@ const createWebhookEndpoint = `-- name: CreateWebhookEndpoint :one
 
 INSERT INTO app.webhook_endpoint (owner_user_id, url, hmac_key_version, hmac_wrapped_dek, hmac_nonce, hmac_ciphertext, event_filter)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING endpoint_id, owner_user_id, url, hmac_key_version, hmac_wrapped_dek, hmac_nonce, hmac_ciphertext, event_filter, enabled, created_at, disabled_at, disabled_reason, consecutive_failures
+RETURNING endpoint_id, owner_user_id, url, hmac_key_version, hmac_wrapped_dek, hmac_nonce, hmac_ciphertext, event_filter, enabled, created_at, disabled_at, disabled_reason, consecutive_failures, prev_hmac_key_version, prev_hmac_wrapped_dek, prev_hmac_nonce, prev_hmac_ciphertext, prev_hmac_expires_at, rotated_at
 `
 
 type CreateWebhookEndpointParams struct {
@@ -128,6 +128,12 @@ func (q *Queries) CreateWebhookEndpoint(ctx context.Context, arg CreateWebhookEn
 		&i.DisabledAt,
 		&i.DisabledReason,
 		&i.ConsecutiveFailures,
+		&i.PrevHmacKeyVersion,
+		&i.PrevHmacWrappedDek,
+		&i.PrevHmacNonce,
+		&i.PrevHmacCiphertext,
+		&i.PrevHmacExpiresAt,
+		&i.RotatedAt,
 	)
 	return i, err
 }
@@ -168,6 +174,22 @@ func (q *Queries) EnqueueWebhookDelivery(ctx context.Context, endpointID uuid.UU
 		&i.FailedAt,
 	)
 	return i, err
+}
+
+const expireWebhookPreviousSecret = `-- name: ExpireWebhookPreviousSecret :exec
+UPDATE app.webhook_endpoint
+   SET prev_hmac_key_version = NULL, prev_hmac_wrapped_dek = NULL,
+       prev_hmac_nonce = NULL, prev_hmac_ciphertext = NULL, prev_hmac_expires_at = NULL
+ WHERE endpoint_id = $1 AND prev_hmac_expires_at IS NOT NULL AND prev_hmac_expires_at <= now()
+`
+
+// Clears a superseded secret once its grace window has passed. Called by the
+// dispatcher at delivery time rather than by a sweeper: the dispatcher is
+// already reading this exact row, and a second secret that outlives its
+// window because a cron did not run is a second secret to steal.
+func (q *Queries) ExpireWebhookPreviousSecret(ctx context.Context, endpointID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, expireWebhookPreviousSecret, endpointID)
+	return err
 }
 
 const failOutstandingDeliveriesForEndpoint = `-- name: FailOutstandingDeliveriesForEndpoint :exec
@@ -213,7 +235,7 @@ func (q *Queries) GetOutboxEvent(ctx context.Context, eventID uuid.UUID) (AppOut
 }
 
 const getWebhookEndpoint = `-- name: GetWebhookEndpoint :one
-SELECT endpoint_id, owner_user_id, url, hmac_key_version, hmac_wrapped_dek, hmac_nonce, hmac_ciphertext, event_filter, enabled, created_at, disabled_at, disabled_reason, consecutive_failures FROM app.webhook_endpoint WHERE endpoint_id = $1
+SELECT endpoint_id, owner_user_id, url, hmac_key_version, hmac_wrapped_dek, hmac_nonce, hmac_ciphertext, event_filter, enabled, created_at, disabled_at, disabled_reason, consecutive_failures, prev_hmac_key_version, prev_hmac_wrapped_dek, prev_hmac_nonce, prev_hmac_ciphertext, prev_hmac_expires_at, rotated_at FROM app.webhook_endpoint WHERE endpoint_id = $1
 `
 
 func (q *Queries) GetWebhookEndpoint(ctx context.Context, endpointID uuid.UUID) (AppWebhookEndpoint, error) {
@@ -233,6 +255,45 @@ func (q *Queries) GetWebhookEndpoint(ctx context.Context, endpointID uuid.UUID) 
 		&i.DisabledAt,
 		&i.DisabledReason,
 		&i.ConsecutiveFailures,
+		&i.PrevHmacKeyVersion,
+		&i.PrevHmacWrappedDek,
+		&i.PrevHmacNonce,
+		&i.PrevHmacCiphertext,
+		&i.PrevHmacExpiresAt,
+		&i.RotatedAt,
+	)
+	return i, err
+}
+
+const getWebhookEndpointForOwner = `-- name: GetWebhookEndpointForOwner :one
+SELECT endpoint_id, owner_user_id, url, hmac_key_version, hmac_wrapped_dek, hmac_nonce, hmac_ciphertext, event_filter, enabled, created_at, disabled_at, disabled_reason, consecutive_failures, prev_hmac_key_version, prev_hmac_wrapped_dek, prev_hmac_nonce, prev_hmac_ciphertext, prev_hmac_expires_at, rotated_at FROM app.webhook_endpoint WHERE endpoint_id = $1 AND owner_user_id = $2
+`
+
+// The owner-scoped read. Same reasoning as RotateWebhookSecret: ownership is
+// a predicate, not a Go-side comparison somebody can omit.
+func (q *Queries) GetWebhookEndpointForOwner(ctx context.Context, endpointID uuid.UUID, ownerUserID uuid.UUID) (AppWebhookEndpoint, error) {
+	row := q.db.QueryRow(ctx, getWebhookEndpointForOwner, endpointID, ownerUserID)
+	var i AppWebhookEndpoint
+	err := row.Scan(
+		&i.EndpointID,
+		&i.OwnerUserID,
+		&i.Url,
+		&i.HmacKeyVersion,
+		&i.HmacWrappedDek,
+		&i.HmacNonce,
+		&i.HmacCiphertext,
+		&i.EventFilter,
+		&i.Enabled,
+		&i.CreatedAt,
+		&i.DisabledAt,
+		&i.DisabledReason,
+		&i.ConsecutiveFailures,
+		&i.PrevHmacKeyVersion,
+		&i.PrevHmacWrappedDek,
+		&i.PrevHmacNonce,
+		&i.PrevHmacCiphertext,
+		&i.PrevHmacExpiresAt,
+		&i.RotatedAt,
 	)
 	return i, err
 }
@@ -396,7 +457,7 @@ func (q *Queries) ListDeadLetterWebhookDeliveries(ctx context.Context, pageSize 
 }
 
 const listEndpointsForEvent = `-- name: ListEndpointsForEvent :many
-SELECT endpoint_id, owner_user_id, url, hmac_key_version, hmac_wrapped_dek, hmac_nonce, hmac_ciphertext, event_filter, enabled, created_at, disabled_at, disabled_reason, consecutive_failures FROM app.webhook_endpoint
+SELECT endpoint_id, owner_user_id, url, hmac_key_version, hmac_wrapped_dek, hmac_nonce, hmac_ciphertext, event_filter, enabled, created_at, disabled_at, disabled_reason, consecutive_failures, prev_hmac_key_version, prev_hmac_wrapped_dek, prev_hmac_nonce, prev_hmac_ciphertext, prev_hmac_expires_at, rotated_at FROM app.webhook_endpoint
  WHERE enabled
    AND (cardinality(event_filter) = 0 OR $1::text = ANY (event_filter))
  ORDER BY endpoint_id
@@ -429,6 +490,12 @@ func (q *Queries) ListEndpointsForEvent(ctx context.Context, eventType string) (
 			&i.DisabledAt,
 			&i.DisabledReason,
 			&i.ConsecutiveFailures,
+			&i.PrevHmacKeyVersion,
+			&i.PrevHmacWrappedDek,
+			&i.PrevHmacNonce,
+			&i.PrevHmacCiphertext,
+			&i.PrevHmacExpiresAt,
+			&i.RotatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -441,9 +508,15 @@ func (q *Queries) ListEndpointsForEvent(ctx context.Context, eventType string) (
 }
 
 const listWebhookEndpointsForUser = `-- name: ListWebhookEndpointsForUser :many
-SELECT endpoint_id, owner_user_id, url, hmac_key_version, hmac_wrapped_dek, hmac_nonce, hmac_ciphertext, event_filter, enabled, created_at, disabled_at, disabled_reason, consecutive_failures FROM app.webhook_endpoint WHERE owner_user_id = $1 AND enabled ORDER BY created_at
+SELECT endpoint_id, owner_user_id, url, hmac_key_version, hmac_wrapped_dek, hmac_nonce, hmac_ciphertext, event_filter, enabled, created_at, disabled_at, disabled_reason, consecutive_failures, prev_hmac_key_version, prev_hmac_wrapped_dek, prev_hmac_nonce, prev_hmac_ciphertext, prev_hmac_expires_at, rotated_at FROM app.webhook_endpoint WHERE owner_user_id = $1 ORDER BY created_at
 `
 
+// PHASE 20.5: `AND enabled` removed. An endpoint HANGAR auto-disabled after
+// consecutive failures is the one its owner most needs to see — hiding it
+// makes a working configuration and a broken one look identical, which is
+// the same shape of defect as everything else this phase closed. The handler
+// returns `enabled`, `disabled_at` and `disabled_reason` so the difference is
+// visible rather than inferred.
 func (q *Queries) ListWebhookEndpointsForUser(ctx context.Context, ownerUserID uuid.UUID) ([]AppWebhookEndpoint, error) {
 	rows, err := q.db.Query(ctx, listWebhookEndpointsForUser, ownerUserID)
 	if err != nil {
@@ -467,6 +540,12 @@ func (q *Queries) ListWebhookEndpointsForUser(ctx context.Context, ownerUserID u
 			&i.DisabledAt,
 			&i.DisabledReason,
 			&i.ConsecutiveFailures,
+			&i.PrevHmacKeyVersion,
+			&i.PrevHmacWrappedDek,
+			&i.PrevHmacNonce,
+			&i.PrevHmacCiphertext,
+			&i.PrevHmacExpiresAt,
+			&i.RotatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -554,11 +633,82 @@ func (q *Queries) RecordWebhookEndpointFailure(ctx context.Context, endpointID u
 	return consecutive_failures, err
 }
 
-const revokeWebhookEndpoint = `-- name: RevokeWebhookEndpoint :exec
-UPDATE app.webhook_endpoint SET enabled = false WHERE endpoint_id = $1
+const revokeWebhookEndpointForOwner = `-- name: RevokeWebhookEndpointForOwner :exec
+UPDATE app.webhook_endpoint SET enabled = false, disabled_at = now(), disabled_reason = 'revoked by owner'
+ WHERE endpoint_id = $1 AND owner_user_id = $2 AND enabled
 `
 
-func (q *Queries) RevokeWebhookEndpoint(ctx context.Context, endpointID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, revokeWebhookEndpoint, endpointID)
+func (q *Queries) RevokeWebhookEndpointForOwner(ctx context.Context, endpointID uuid.UUID, ownerUserID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, revokeWebhookEndpointForOwner, endpointID, ownerUserID)
 	return err
+}
+
+const rotateWebhookSecret = `-- name: RotateWebhookSecret :one
+UPDATE app.webhook_endpoint
+   SET prev_hmac_key_version = hmac_key_version,
+       prev_hmac_wrapped_dek = hmac_wrapped_dek,
+       prev_hmac_nonce       = hmac_nonce,
+       prev_hmac_ciphertext  = hmac_ciphertext,
+       prev_hmac_expires_at  = now() + $1::interval,
+       hmac_key_version      = $2,
+       hmac_wrapped_dek      = $3,
+       hmac_nonce            = $4,
+       hmac_ciphertext       = $5,
+       rotated_at            = now()
+ WHERE endpoint_id = $6 AND owner_user_id = $7
+RETURNING endpoint_id, owner_user_id, url, hmac_key_version, hmac_wrapped_dek, hmac_nonce, hmac_ciphertext, event_filter, enabled, created_at, disabled_at, disabled_reason, consecutive_failures, prev_hmac_key_version, prev_hmac_wrapped_dek, prev_hmac_nonce, prev_hmac_ciphertext, prev_hmac_expires_at, rotated_at
+`
+
+type RotateWebhookSecretParams struct {
+	Grace          time.Duration
+	HmacKeyVersion int32
+	HmacWrappedDek []byte
+	HmacNonce      []byte
+	HmacCiphertext []byte
+	EndpointID     uuid.UUID
+	OwnerUserID    uuid.UUID
+}
+
+// PHASE 20.5 (B24). Installs a new signing secret and demotes the current one
+// to `prev_*` for a bounded grace window, IN ONE STATEMENT — the demotion
+// reads the columns it is overwriting, so doing it as two statements would
+// leave a gap in which a delivery could be signed with a secret nobody would
+// accept.
+//
+// The endpoint must belong to the caller: owner_user_id is in the predicate
+// rather than checked in Go, so a handler that forgets the check returns no
+// rows instead of rotating somebody else's endpoint.
+func (q *Queries) RotateWebhookSecret(ctx context.Context, arg RotateWebhookSecretParams) (AppWebhookEndpoint, error) {
+	row := q.db.QueryRow(ctx, rotateWebhookSecret,
+		arg.Grace,
+		arg.HmacKeyVersion,
+		arg.HmacWrappedDek,
+		arg.HmacNonce,
+		arg.HmacCiphertext,
+		arg.EndpointID,
+		arg.OwnerUserID,
+	)
+	var i AppWebhookEndpoint
+	err := row.Scan(
+		&i.EndpointID,
+		&i.OwnerUserID,
+		&i.Url,
+		&i.HmacKeyVersion,
+		&i.HmacWrappedDek,
+		&i.HmacNonce,
+		&i.HmacCiphertext,
+		&i.EventFilter,
+		&i.Enabled,
+		&i.CreatedAt,
+		&i.DisabledAt,
+		&i.DisabledReason,
+		&i.ConsecutiveFailures,
+		&i.PrevHmacKeyVersion,
+		&i.PrevHmacWrappedDek,
+		&i.PrevHmacNonce,
+		&i.PrevHmacCiphertext,
+		&i.PrevHmacExpiresAt,
+		&i.RotatedAt,
+	)
+	return i, err
 }

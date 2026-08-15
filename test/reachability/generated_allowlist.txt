@@ -27,10 +27,13 @@ ListRecentSyncRuns
 SetSyncNoCacheOptIn
 SetSyncSubscriptionEnabled
 
-# B24 — §4.9 webhook endpoint configuration surface
-CreateWebhookEndpoint
-ListWebhookEndpointsForUser
-RevokeWebhookEndpoint
+# B24 — CLOSED in Phase 20.5. CreateWebhookEndpoint and
+# ListWebhookEndpointsForUser have production callers (internal/api/v1/
+# webhooks.go), and RevokeWebhookEndpoint was DELETED rather than kept:
+# RevokeWebhookEndpointForOwner supersedes it by putting ownership in the
+# predicate instead of in a Go-side check somebody can omit. Closing a defect
+# by adding a caller for the weaker of two queries would have been the
+# allowlist wagging the codebase.
 
 # B26 — CLOSED in Phase 20.2 apart from one reader. GetRole, ListPermissions,
 # ListEffectivePermissions and SetUserActive all gained production callers
@@ -51,7 +54,15 @@ ListAlertTypes
 ListRecentAlertEvents
 ListUnparseableCharacterNotifications
 
-# B30 — route handlers that are never dispatched, and their readers
+# B30 — CLOSED in Phase 20.5 for the WRITERS; these five are READERS, and
+# each is waiting for an endpoint rather than for a dispatch entry. The
+# distinction is the whole point of the defect: the writers now run (every
+# fan-out route is subscribable, worker/syncset.go), so these tables are
+# populated for the first time — and nothing serves them yet.
+#
+# ListCorporationProjectContributions in particular now has data to return:
+# the contributors sync writes app.corporation_project_contribution with
+# `contributed` as the amount (B38's leftover, closed in the same phase).
 DeleteCharacterFittingsNotIn
 GetCalendarEventDetail
 GetPlanetColonyDetail
@@ -80,13 +91,15 @@ DeleteExpiredSessions
 DeleteStaleReplicas
 DeregisterReplica
 
-# Domain readers awaiting the endpoint or screen that uses them
+# Domain readers awaiting the endpoint or screen that uses them.
+# GetLatestSdeImport LEFT this group in Phase 20.5: `hangar admin sde-status`,
+# `hangar admin import-sde --if-changed` and the boot-time SDE report all read
+# it (B22).
 CreateCharacterNote
 CreateSquadApplication
 GetAsset
 GetContract
 GetKillmail
-GetLatestSdeImport
 GetMoonReport
 GetShareLink
 GetSquad

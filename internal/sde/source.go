@@ -50,6 +50,21 @@ func (z ZipSource) Open(_ context.Context, table string) (io.ReadCloser, error) 
 	return nil, NotFound(fmt.Errorf("sde: %s not present in zip", name))
 }
 
+// OpenZip opens an already-downloaded SDE zip from disk.
+//
+// PHASE 20.5 (B22): the operator path for an air-gapped or
+// bandwidth-constrained installation, where somebody fetches the export once
+// and imports it on every host from a share. The zip reader is left open for
+// the life of the process, which is the whole of one `hangar admin
+// import-sde` run.
+func OpenZip(path string) (ZipSource, error) {
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		return ZipSource{}, fmt.Errorf("sde: opening %s: %w", path, err)
+	}
+	return ZipSource{Reader: &zr.Reader}, nil
+}
+
 // DownloadZip streams an SDE zip from url to a temp file (bounded memory:
 // io.Copy moves the body straight to disk in fixed-size chunks, never
 // holding the response in a buffer) and opens it as a ZipSource. The

@@ -37,6 +37,26 @@
 # replaying a captured delivery simply rewrites `t`.
 #
 # ─────────────────────────────────────────────────────────────────────────
+# MORE THAN ONE v1= DURING A SECRET ROTATION
+#
+# When the endpoint's owner rotates the signing secret, HANGAR signs every
+# delivery with BOTH the new secret and the superseded one for a grace
+# window, and the header then carries two elements:
+#
+#     X-Hangar-Signature: t=1770000000,v1=<new>,v1=<previous>
+#
+# ACCEPT IF ANY ELEMENT MATCHES. That overlap is what lets you update your
+# stored secret at your leisure instead of during a coordinated cutover, and
+# it is why deliveries queued before the rotation are not lost. A verifier
+# that reads only the first v1= will reject perfectly valid deliveries for
+# the whole window if it happens to hold the other secret — this script used
+# to do exactly that, and it is fixed here.
+#
+# The window is bounded: once it passes, only the current secret is signed
+# with, and a receiver still holding the old one starts failing. That is the
+# point of a rotation.
+#
+# ─────────────────────────────────────────────────────────────────────────
 # THE FOUR WAYS RECEIVERS GET THIS WRONG
 #
 # 1. Signing a RE-SERIALISED body. The signature covers the exact bytes on
@@ -114,7 +134,7 @@ while [ $# -gt 0 ]; do
         --secret-file) [ $# -ge 2 ] || die_usage "--secret-file needs a value"; SECRET_FILE=$2; shift 2 ;;
         --window)      [ $# -ge 2 ] || die_usage "--window needs a value";      WINDOW=$2;      shift 2 ;;
         --now)         [ $# -ge 2 ] || die_usage "--now needs a value";         NOW=$2;         shift 2 ;;
-        -h|--help)     sed -n '2,90p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help)     sed -n '2,110p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *)             die_usage "unknown argument '$1'" ;;
     esac
 done
@@ -147,18 +167,28 @@ fi
 # ── parse t= and v1= out of the header ───────────────────────────────────
 # Unknown elements are ignored on purpose: a future v2= must be able to
 # appear alongside v1= without breaking receivers written against v1.
-extract() {
-    printf '%s' "$SIGNATURE" | tr ',' '\n' | sed -n "s/^[[:space:]]*$1=//p" | head -n 1
+extract_first() {
+    printf '%s' "$SIGNATURE" | tr ',' '
+' | sed -n "s/^[[:space:]]*$1=//p" | head -n 1
 }
 
-TS=$(extract 't')
-PROVIDED=$(extract 'v1')
+# EVERY matching element, one per line — see the rotation note at the top of
+# this file for why there can be more than one v1=.
+extract_all() {
+    printf '%s' "$SIGNATURE" | tr ',' '
+' | sed -n "s/^[[:space:]]*$1=//p"
+}
 
-[ -n "$TS" ]       || fail "header has no t= element (got: $SIGNATURE)"
-[ -n "$PROVIDED" ] || fail "header has no v1= element (got: $SIGNATURE)"
+TS=$(extract_first 't')
+PROVIDED_ALL=$(extract_all 'v1')
+
+[ -n "$TS" ]           || fail "header has no t= element (got: $SIGNATURE)"
+[ -n "$PROVIDED_ALL" ] || fail "header has no v1= element (got: $SIGNATURE)"
 
 printf '%s' "$TS" | grep -Eq '^-?[0-9]+$' || fail "t= is not an integer: $TS"
-printf '%s' "$PROVIDED" | grep -Eq '^[0-9a-fA-F]{64}$' || fail "v1= is not 64 hex characters: $PROVIDED"
+for one in $PROVIDED_ALL; do
+    printf '%s' "$one" | grep -Eq '^[0-9a-fA-F]{64}$' || fail "v1= is not 64 hex characters: $one"
+done
 
 # ── replay window ────────────────────────────────────────────────────────
 [ -n "$NOW" ] || NOW=$(date -u +%s)
@@ -210,20 +240,34 @@ EXPECTED=$( { printf '%s.' "$TS"; cat "$BODY_SOURCE"; } | hmac_hex "$SECRET" )
 # script that demonstrated the insecure comparison would be teaching the
 # wrong thing to the exact audience least able to spot it.
 BLIND=$(openssl rand -hex 32)
-if [ "$(printf '%s' "$EXPECTED" | hmac_hex "$BLIND")" \
-   = "$(printf '%s' "$(printf '%s' "$PROVIDED" | tr 'A-Z' 'a-z')" | hmac_hex "$BLIND")" ]; then
+EXPECTED_BLINDED=$(printf '%s' "$EXPECTED" | hmac_hex "$BLIND")
+
+# Every element is compared and the loop deliberately does not stop at the
+# first match, so the work done does not depend on WHICH secret signed the
+# delivery — during a rotation overlap that would otherwise leak, through
+# timing, whether the sender had rotated yet.
+MATCHED=0
+for one in $PROVIDED_ALL; do
+    if [ "$EXPECTED_BLINDED" = "$(printf '%s' "$(printf '%s' "$one" | tr 'A-Z' 'a-z')" | hmac_hex "$BLIND")" ]; then
+        MATCHED=1
+    fi
+done
+
+if [ "$MATCHED" -eq 1 ]; then
     echo "SIGNATURE VALID"
     echo "  timestamp : $TS ($(( DRIFT ))s from now, window ${WINDOW}s)"
     echo "  digest    : $EXPECTED"
     exit 0
 fi
 
-echo "SIGNATURE INVALID: computed digest does not match the v1= element" >&2
+echo "SIGNATURE INVALID: computed digest does not match any v1= element" >&2
 echo "  expected (computed here) : $EXPECTED" >&2
-echo "  provided (in the header) : $PROVIDED" >&2
+echo "  provided (in the header) : $(echo "$PROVIDED_ALL" | tr '
+' ' ')" >&2
 echo >&2
 echo "Most likely causes, in order:" >&2
 echo "  1. the body file is not the RAW bytes received (re-serialised JSON?)" >&2
 echo "  2. the secret does not belong to this endpoint" >&2
-echo "  3. the body was altered in transit by a proxy that rewrites JSON" >&2
+echo "  3. the secret was rotated and its grace window has since passed" >&2
+echo "  4. the body was altered in transit by a proxy that rewrites JSON" >&2
 exit 1

@@ -2629,6 +2629,75 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/me/webhooks": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The caller's outbound webhook endpoints (never their signing secrets) */
+    get: operations["list-webhook-endpoints"];
+    put?: never;
+    /** Register an endpoint. The signing secret is returned ONCE, here, and never again */
+    post: operations["create-webhook-endpoint"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/me/webhooks/event-types": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The closed vocabulary an endpoint's event_filter may draw from */
+    get: operations["list-webhook-event-types"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/me/webhooks/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Disable an endpoint and dead-letter everything still owed to it */
+    delete: operations["revoke-webhook-endpoint"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/me/webhooks/{id}/rotate": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Replace the signing secret. The previous one keeps verifying for 24h, so nothing already queued is dropped */
+    post: operations["rotate-webhook-secret"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/meta/esi-status": {
     parameters: {
       query?: never;
@@ -3108,6 +3177,18 @@ export interface components {
       name: string;
       type: string;
     };
+    CreateWebhookInBody: {
+      /**
+       * Format: uri
+       * @description A URL to the JSON Schema for this object.
+       * @example https://example.com/schemas/CreateWebhookInBody.json
+       */
+      readonly $schema?: string;
+      /** @description Event types to receive. EMPTY MEANS EVERYTHING — an omitted filter is not a filter that matches nothing. */
+      event_filter?: string[] | null;
+      /** @description Absolute https:// URL deliveries are POSTed to. */
+      url: string;
+    };
     ErrorDetail: {
       /** @description Where the error occurred, e.g. 'body.items[3].tags' or 'path.thing-id' */
       location?: string;
@@ -3448,6 +3529,21 @@ export interface components {
       is_admin?: boolean;
       /** Format: int64 */
       main_character_id?: number;
+    };
+    WebhookSecretOutBody: {
+      /**
+       * Format: uri
+       * @description A URL to the JSON Schema for this object.
+       * @example https://example.com/schemas/WebhookSecretOutBody.json
+       */
+      readonly $schema?: string;
+      endpoint_id: string;
+      event_filter: string[] | null;
+      notice: string;
+      /** Format: int64 */
+      rotation_grace_seconds?: number;
+      secret: string;
+      url: string;
     };
   };
   responses: never;
@@ -8583,6 +8679,159 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ItemMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "list-webhook-endpoints": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "create-webhook-endpoint": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateWebhookInBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WebhookSecretOutBody"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "list-webhook-event-types": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "revoke-webhook-endpoint": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description HANGAR-assigned UUID. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "rotate-webhook-secret": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description HANGAR-assigned UUID. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WebhookSecretOutBody"];
         };
       };
       /** @description Error */

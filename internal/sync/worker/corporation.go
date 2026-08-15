@@ -326,8 +326,8 @@ func (w *CorporationWorker) Work(ctx context.Context, job *river.Job[planner.Syn
 		rowsAffected, outcome, syncErr = w.doContractItemsFanout(ctx, s, sub, route, args.EntityID, characterID, tok.Value)
 	case contractBidsPath:
 		rowsAffected, outcome, syncErr = w.doContractBidsFanout(ctx, s, sub, route, args.EntityID, characterID, tok.Value)
-	case projectContributionsPath:
-		rowsAffected, outcome, syncErr = w.doProjectContributionsFanout(ctx, s, sub, route, args.EntityID, characterID, tok.Value)
+	case projectContributorsPath:
+		rowsAffected, outcome, syncErr = w.doProjectContributorsFanout(ctx, s, sub, route, args.EntityID, characterID, tok.Value)
 	default:
 		handler, isSimple := corporationDispatch[route.UpstreamPath]
 		if !isSimple {
@@ -410,8 +410,11 @@ const (
 	contractItemsPath = "/corporations/{corporation_id}/contracts/{contract_id}/items"
 	contractBidsPath  = "/corporations/{corporation_id}/contracts/{contract_id}/bids"
 	// DEFECT B38 (Phase 20.2): was ".../contributions". ESI's path is
-	// ".../contributors" — see character.go's note on the same defect.
-	projectContributionsPath = "/corporations/{corporation_id}/projects/{project_id}/contributors"
+	// ".../contributors" — see character.go's note on the same defect. The
+	// CONSTANT was renamed in 20.5 too: it had kept the `Contributions`
+	// spelling for three phases while naming the contributors path, which is
+	// exactly how the wrong DTO stayed attached to it.
+	projectContributorsPath = "/corporations/{corporation_id}/projects/{project_id}/contributors"
 )
 
 func strPtr(s string) *string { return &s }
@@ -650,115 +653,34 @@ func (w *CorporationWorker) doSync(ctx context.Context, s *store.Store, sub gen.
 	}
 }
 
-// fanoutDetailItem is one candidate detail call fanoutDetail should make:
-// the id substituted into the route's own {id-param} placeholder, plus any
-// extra path/query values that specific detail route needs beyond
-// {corporation_id} and the id itself (e.g. starbase detail's system_id
-// query parameter).
-type fanoutDetailItem struct {
-	id              int64
-	extraPathParams map[string]string
-	extraQuery      map[string]string
-}
-
-// fanoutDetail is the shared engine behind
-// doStarbaseDetailFanout/doSkyhookDetailFanout/doSovereigntyHubDetailFanout/
-// doMiningObserverRecordsFanout: for each already-known parent-list id,
-// make one detail call and sync it. A 403 on the FIRST item aborts the
-// remaining calls immediately (per-role 403s are almost always
-// homogeneous across every item of the same corporation/route -- see
-// doSync's 403 case comment) rather than burning the whole item set before
-// discovering the token can't do this at all; a 404 on any one item is
-// data (the structure/observer vanished between the list and detail
-// calls), not a failure, and simply skips that item.
+// fanoutDetail is the corporation-side binding of worker/fanout.go's shared
+// engine: for each already-known parent-list id, make one detail call and
+// sync it. What it adds over the engine is §6.3's per-candidate 403 history
+// — the corporation elector reads it, and the character worker has no
+// elector at all, which is why that bookkeeping lives here as a callback
+// rather than inside runDetailFanout.
 func (w *CorporationWorker) fanoutDetail(
 	ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute,
 	corporationID, characterID int64, accessToken, idPathParamName string,
 	items []fanoutDetailItem,
 	syncOne func(ctx context.Context, s *store.Store, id int64, body []byte) (int32, error),
 ) (rowsAffected int32, outcome string, err error) {
-	outcome = "200"
-	for _, item := range items {
-		pathParams := map[string]string{
-			"corporation_id": strconv.FormatInt(corporationID, 10),
-			idPathParamName:  strconv.FormatInt(item.id, 10),
-		}
-		for k, v := range item.extraPathParams {
-			pathParams[k] = v
-		}
-		var query map[string][]string
-		if len(item.extraQuery) > 0 {
-			query = make(map[string][]string, len(item.extraQuery))
-			for k, v := range item.extraQuery {
-				query[k] = []string{v}
-			}
-		}
-
-		resp, doErr := w.Gateway.Do(ctx, esi.Request{
-			Method: route.Method, UpstreamPath: route.UpstreamPath,
-			PathParams: pathParams, Query: query, AccessToken: accessToken,
-			CacheMode:             derefStr(route.CacheMode),
-			RateLimitGroup:        derefStr(route.RateLimitGroup),
-			RateLimitMax:          RouteRateLimitMax(derefInt32(route.RateLimitMax)),
-			RateLimitAdmissionMax: BackgroundRateLimitMax(derefStr(route.RateLimitGroup), derefInt32(route.RateLimitMax)),
-			RateLimitWindow:       sync.IntervalToDuration(route.RateLimitWindow),
-			UserKey:               fmt.Sprintf("hangar:%d", characterID),
-			EntityID:              corporationID,
-		})
-		if doErr != nil {
-			if r, ok := classifyRefusal(doErr, w.Policy.TTLFloor, time.Now()); ok {
-				return rowsAffected, r.reason, snoozeRefusal(ctx, s, sub.SubscriptionID, r)
-			}
-			return rowsAffected, normalize.Outcome(0, true), fmt.Errorf("worker: fetching detail for id %d of %s: %w", item.id, route.UpstreamPath, doErr)
-		}
-
-		switch resp.StatusCode {
-		case http.StatusOK:
-			n, syncErr := syncOne(ctx, s, item.id, resp.Body)
-			if syncErr != nil {
-				return rowsAffected, normalize.Outcome(resp.StatusCode, false), syncErr
-			}
-			rowsAffected += n
-			outcome = normalize.Outcome(resp.StatusCode, false)
-		case http.StatusNotFound:
-			continue
-		case http.StatusForbidden:
-			if err := s.RecordSync403(ctx, sub.SubscriptionID); err != nil {
-				return rowsAffected, normalize.Outcome(resp.StatusCode, false), err
-			}
-			if err := s.RecordActingCharacter403(ctx, gen.RecordActingCharacter403Params{
+	return runDetailFanout(ctx, w.Gateway, w.Policy, s, detailFanout{
+		sub: sub, route: route,
+		ownerParam: "corporation_id", ownerID: corporationID, idParam: idPathParamName,
+		actingCharacterID: characterID, entityID: corporationID, accessToken: accessToken,
+		items: items, syncOne: syncOne,
+		on403: func(ctx context.Context, s *store.Store) error {
+			return s.RecordActingCharacter403(ctx, gen.RecordActingCharacter403Params{
 				EntityKind: string(sync.EntityCorporation), EntityID: corporationID, RouteID: route.RouteID, CharacterID: characterID,
-			}); err != nil {
-				return rowsAffected, normalize.Outcome(resp.StatusCode, false), err
-			}
-			return rowsAffected, normalize.Outcome(resp.StatusCode, false), nil
-		case http.StatusTooManyRequests:
-			return rowsAffected, normalize.Outcome(resp.StatusCode, false),
-				snoozeAfter429(ctx, s, sub.SubscriptionID, resp, w.Policy.TTLFloor)
-		default:
-			return rowsAffected, normalize.Outcome(resp.StatusCode, false), fmt.Errorf("worker: detail id %d of %s returned status %d", item.id, route.UpstreamPath, resp.StatusCode)
-		}
-	}
-
-	next, err := sync.PlanNextDueAt(sync.DueTimeInput{
-		Route:  sync.RouteCacheConfig{CacheMode: derefStr(route.CacheMode), CacheAge: sync.IntervalToDuration(route.CacheAge), BlockedByPin: route.BlockedByPin},
-		Policy: w.Policy, LastSuccess: time.Now(), Consecutive304: 0, OptInNoCache: sub.OptInNoCache, Now: time.Now(),
+			})
+		},
+		onSuccess: func(ctx context.Context, s *store.Store) error {
+			return s.ResetActingCharacter403(ctx, gen.ResetActingCharacter403Params{
+				EntityKind: string(sync.EntityCorporation), EntityID: corporationID, RouteID: route.RouteID, CharacterID: characterID,
+			})
+		},
 	})
-	if err != nil {
-		return rowsAffected, outcome, err
-	}
-	if err := s.RecordSyncSuccess(ctx, gen.RecordSyncSuccessParams{
-		SubscriptionID: sub.SubscriptionID, LastStatus: statusOf(outcome), CursorAfter: sub.CursorAfter,
-		NextDueAt: next, Consecutive304: 0,
-	}); err != nil {
-		return rowsAffected, outcome, err
-	}
-	if err := s.ResetActingCharacter403(ctx, gen.ResetActingCharacter403Params{
-		EntityKind: string(sync.EntityCorporation), EntityID: corporationID, RouteID: route.RouteID, CharacterID: characterID,
-	}); err != nil {
-		return rowsAffected, outcome, err
-	}
-	return rowsAffected, outcome, nil
 }
 
 // doStarbaseDetailFanout fans out over every starbase
@@ -931,15 +853,30 @@ func (w *CorporationWorker) doContractBidsFanout(ctx context.Context, s *store.S
 		})
 }
 
-// doProjectContributionsFanout fans out over every project this
-// corporation's list sync already knows about. project_id is uuid FROM
-// CCP (Principle 13's proof case) — fanoutDetail's item shape is int64-only
-// (every other fanout in this file substitutes a bigint id), so this is a
-// small dedicated loop rather than forcing a uuid through that helper's
-// int64 field; the uuid is formatted to its canonical string form for the
-// path substitution and never touches a bigint or text column along the
-// way (internal/store's uuid.UUID round trip is the only place it's typed).
-func (w *CorporationWorker) doProjectContributionsFanout(ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute, corporationID, characterID int64, accessToken string) (rowsAffected int32, outcome string, err error) {
+// doProjectContributorsFanout fans out over every project this corporation's
+// list sync already knows about. project_id is uuid FROM CCP (Principle 13's
+// proof case) — runDetailFanout's item shape is int64-only (every other
+// fanout substitutes a bigint id), so this is a small dedicated loop rather
+// than forcing a uuid through that helper's int64 field; the uuid is
+// formatted to its canonical string form for the path substitution and never
+// touches a bigint or text column along the way (internal/store's uuid.UUID
+// round trip is the only place it's typed).
+//
+// ── DEFECT B38's LEFTOVER, CLOSED IN PHASE 20.5 ──────────────────────────
+// This route was parsed with the WRONG DTO. B38 renamed the path from
+// `.../contributions` to `.../contributors` (ESI has no `contributions`
+// collection route at all) and kept the `contributions` parser, which
+// expects a bare array of {amount, character_id}. The live spec's
+// CorporationsProjectsContributors is an OBJECT of {contributors, cursor}
+// whose elements are {id, name, contributed}. It never failed because the
+// route was not subscribable, so the parser had never been handed a body —
+// the same shape of hiding as B49 one route over.
+//
+// It is also `x-pagination: cursor`, so it goes through fetchAllCursorPages
+// (§5.9's cursor mechanism, implemented for /projects in 20.2) rather than a
+// single request. A project with more than the default page of contributors
+// would otherwise have synced only the first ten.
+func (w *CorporationWorker) doProjectContributorsFanout(ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute, corporationID, characterID int64, accessToken string) (rowsAffected int32, outcome string, err error) {
 	projects, err := s.ListCorporationProjects(ctx, corporationID)
 	if err != nil {
 		return 0, "", fmt.Errorf("worker: listing known projects for corp %d: %w", corporationID, err)
@@ -947,7 +884,7 @@ func (w *CorporationWorker) doProjectContributionsFanout(ctx context.Context, s 
 
 	outcome = "200"
 	for _, p := range projects {
-		resp, doErr := w.Gateway.Do(ctx, esi.Request{
+		resp, doErr := fetchAllCursorPages(ctx, w.Gateway, esi.Request{
 			Method: route.Method, UpstreamPath: route.UpstreamPath,
 			PathParams: map[string]string{
 				"corporation_id": strconv.FormatInt(corporationID, 10),
@@ -961,21 +898,21 @@ func (w *CorporationWorker) doProjectContributionsFanout(ctx context.Context, s 
 			RateLimitWindow:       sync.IntervalToDuration(route.RateLimitWindow),
 			UserKey:               fmt.Sprintf("hangar:%d", characterID),
 			EntityID:              corporationID,
-		})
+		}, handlers.ProjectContributorsItemsField)
 		if doErr != nil {
 			if r, ok := classifyRefusal(doErr, w.Policy.TTLFloor, time.Now()); ok {
 				return rowsAffected, r.reason, snoozeRefusal(ctx, s, sub.SubscriptionID, r)
 			}
-			return rowsAffected, normalize.Outcome(0, true), fmt.Errorf("worker: fetching contributions for project %s of corp %d: %w", p.ProjectID, corporationID, doErr)
+			return rowsAffected, normalize.Outcome(0, true), fmt.Errorf("worker: fetching contributors for project %s of corp %d: %w", p.ProjectID, corporationID, doErr)
 		}
 
 		switch resp.StatusCode {
 		case http.StatusOK:
-			dto, perr := handlers.ParseCorporationProjectContributions(resp.Body)
+			dto, perr := handlers.ParseCorporationProjectContributors(resp.Body)
 			if perr != nil {
 				return rowsAffected, normalize.Outcome(resp.StatusCode, false), perr
 			}
-			res, serr := handlers.SyncCorporationProjectContributions(ctx, s, p.ProjectID, dto)
+			res, serr := handlers.SyncCorporationProjectContributors(ctx, s, p.ProjectID, dto)
 			if serr != nil {
 				return rowsAffected, normalize.Outcome(resp.StatusCode, false), serr
 			}
@@ -992,7 +929,7 @@ func (w *CorporationWorker) doProjectContributionsFanout(ctx context.Context, s 
 			return rowsAffected, normalize.Outcome(resp.StatusCode, false),
 				snoozeAfter429(ctx, s, sub.SubscriptionID, resp, w.Policy.TTLFloor)
 		default:
-			return rowsAffected, normalize.Outcome(resp.StatusCode, false), fmt.Errorf("worker: contributions fetch for project %s of corp %d returned status %d", p.ProjectID, corporationID, resp.StatusCode)
+			return rowsAffected, normalize.Outcome(resp.StatusCode, false), fmt.Errorf("worker: contributors fetch for project %s of corp %d returned status %d", p.ProjectID, corporationID, resp.StatusCode)
 		}
 	}
 

@@ -78,54 +78,104 @@ func SyncCorporationProjects(ctx context.Context, s *store.Store, corporationID 
 	return SyncResult{RowsAffected: int32(len(projects))}, nil
 }
 
-// CorporationProjectContributorDTO mirrors one element of
-// GET /corporations/{id}/projects/{project_id}/contributors.
+// ── DEFECT B38's LEFTOVER, CLOSED IN PHASE 20.5 ──────────────────────────
+//
+// GET /corporations/{id}/projects/{project_id}/contributors was parsed with
+// the DTO of a route that does not exist. B38 (Phase 20.2) renamed the path
+// from `.../contributions` — a spelling ESI has never had — and left
+// ParseCorporationProjectContributions, which expects a bare array of
+// {amount, character_id}, attached to it. The parser had never once run: the
+// route was not subscribable (B30), so no body ever reached it.
+//
+// READ FROM THE LIVE SPEC, not from the field names. `#/components/schemas/
+// CorporationsProjectsContributors` is an OBJECT:
+//
+//	{ "contributors": [ {id, name, contributed} ], "cursor": {after, before} }
+//
+// with `contributors` required, and each element's three fields all
+// required. The two answers this phase had to record:
+//
+//   - `id` is `$ref: "#/components/schemas/CharacterID"`, described by CCP
+//     as "Contributor's character ID". It is a CHARACTER, not a project
+//     member row, not an opaque contributor handle. It maps to the bigint
+//     `character_id` of BOTH app.corporation_project_contributor and
+//     app.corporation_project_contribution — which is what makes this route
+//     the Principle 13 / Gate 6 fixture it was always meant to be: a
+//     CCP-issued uuid project_id joined against a bigint character_id in one
+//     upsert, with no coercion through text at any point.
+//
+//   - `contributed` is `type: integer, format: int64`, described as
+//     "Contributor's contributed PROGRESS". It is NOT isk. The project's own
+//     isk field is `reward_isk` (what the corporation pays out), and its
+//     progress fields are `current_progress`/`target_progress`, which is the
+//     scale `contributed` is denominated in — the sibling route
+//     `.../contribution/{character_id}` returns the same field, "Your
+//     contribution", for one character. So `contributed` maps to
+//     app.corporation_project_contribution.amount, and `amount` is a
+//     PROGRESS COUNT in that table, not money. numeric(30,2) holds an int64
+//     exactly, so nothing is lost; the column is deliberately NOT renamed,
+//     because renaming a shipped column to improve a comment is a migration
+//     nobody's data benefits from. Recorded here instead, which is where
+//     somebody reading the sync would look.
+//
+// ONE RESPONSE, TWO TABLES. 00011 created `contributor` ("the roster of
+// characters participating, distinct from the amounts in #3") and
+// `contribution` (the amounts) as if two routes fed them. There is one
+// route, and it carries both facts, so it writes both rows in one pass.
+// joined_at stays NULL: ESI does not report when a contributor joined, and
+// stamping now() would date every membership to the moment HANGAR first
+// looked at it — a fabricated fact that would then age and look real.
+// `name` is deliberately not persisted anywhere: app.character is written by
+// the character-sheet sync for characters HANGAR holds a token for, and
+// inventing rows there from a projects response would manufacture characters
+// out of a display string.
 type CorporationProjectContributorDTO struct {
-	CharacterID int64     `json:"character_id"`
-	JoinedAt    time.Time `json:"joined_at,omitempty"`
+	// Contributed is the contributor's contributed PROGRESS, int64 in the
+	// spec — see this block's header for why it is not money.
+	Contributed int64 `json:"contributed"`
+	// ID is the contributor's CHARACTER id (spec: $ref CharacterID).
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
+
+// corporationProjectContributors is the ENVELOPE the route actually returns.
+// The cursor is captured by the worker's cursor walker (§5.9), which merges
+// every page into one envelope of this same shape before this parser sees
+// it — so the field is present, always empty by then, and read by nobody
+// here.
+type corporationProjectContributors struct {
+	Contributors []CorporationProjectContributorDTO `json:"contributors"`
+	Cursor       *struct{ After *string }           `json:"cursor,omitempty"`
+}
+
+// ProjectContributorsItemsField is the array key inside that envelope,
+// verbatim from the spec. Exported so worker/pagination.go's cursor merge
+// and this parser cannot disagree about it — the last time a path and its
+// parser were kept in two places, they drifted for three phases.
+const ProjectContributorsItemsField = "contributors"
 
 func ParseCorporationProjectContributors(body []byte) ([]CorporationProjectContributorDTO, error) {
-	var dto []CorporationProjectContributorDTO
-	if err := json.Unmarshal(body, &dto); err != nil {
+	var env corporationProjectContributors
+	if err := json.Unmarshal(body, &env); err != nil {
 		return nil, fmt.Errorf("handlers: parsing corporation project contributors: %w", err)
 	}
-	return dto, nil
+	return env.Contributors, nil
 }
 
+// SyncCorporationProjectContributors writes the roster row and the progress
+// row for each contributor. Both are upserts keyed on (project_id,
+// character_id), so a contributor whose progress has not moved since the
+// last poll writes nothing (each query's own IS DISTINCT FROM guard).
 func SyncCorporationProjectContributors(ctx context.Context, s *store.Store, projectID uuid.UUID, contributors []CorporationProjectContributorDTO) (SyncResult, error) {
+	var rows int32
 	for _, c := range contributors {
-		joined := nilIfZero(c.JoinedAt)
-		if _, err := s.UpsertCorporationProjectContributor(ctx, projectID, c.CharacterID, joined); ignoreUnchanged(err) != nil {
-			return SyncResult{}, fmt.Errorf("handlers: upserting corporation project contributor %d of project %s: %w", c.CharacterID, projectID, err)
+		if _, err := s.UpsertCorporationProjectContributor(ctx, projectID, c.ID, nil); ignoreUnchanged(err) != nil {
+			return SyncResult{}, fmt.Errorf("handlers: upserting corporation project contributor %d of project %s: %w", c.ID, projectID, err)
 		}
-	}
-	return SyncResult{RowsAffected: int32(len(contributors))}, nil
-}
-
-// CorporationProjectContributionDTO mirrors one element of
-// GET /corporations/{id}/projects/{project_id}/contributions — the
-// Principle 13 / Gate 6 fixture row: a uuid project_id (path parameter,
-// carried down from the caller, not part of this DTO's own JSON) paired
-// with a bigint character_id in the same upsert, never coerced through text.
-type CorporationProjectContributionDTO struct {
-	Amount      decimal.Decimal `json:"amount"`
-	CharacterID int64           `json:"character_id"`
-}
-
-func ParseCorporationProjectContributions(body []byte) ([]CorporationProjectContributionDTO, error) {
-	var dto []CorporationProjectContributionDTO
-	if err := json.Unmarshal(body, &dto); err != nil {
-		return nil, fmt.Errorf("handlers: parsing corporation project contributions: %w", err)
-	}
-	return dto, nil
-}
-
-func SyncCorporationProjectContributions(ctx context.Context, s *store.Store, projectID uuid.UUID, contributions []CorporationProjectContributionDTO) (SyncResult, error) {
-	for _, c := range contributions {
-		if _, err := s.UpsertCorporationProjectContribution(ctx, projectID, c.CharacterID, c.Amount); ignoreUnchanged(err) != nil {
-			return SyncResult{}, fmt.Errorf("handlers: upserting corporation project contribution for character %d of project %s: %w", c.CharacterID, projectID, err)
+		if _, err := s.UpsertCorporationProjectContribution(ctx, projectID, c.ID, decimal.NewFromInt(c.Contributed)); ignoreUnchanged(err) != nil {
+			return SyncResult{}, fmt.Errorf("handlers: upserting corporation project contribution for character %d of project %s: %w", c.ID, projectID, err)
 		}
+		rows++
 	}
-	return SyncResult{RowsAffected: int32(len(contributions))}, nil
+	return SyncResult{RowsAffected: rows}, nil
 }
