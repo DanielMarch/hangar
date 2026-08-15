@@ -69,6 +69,16 @@ operations. That is the complete set, and it is a **read-only** set.
 > re-authorizes, corporation assets stays correctly unsubscribed rather than failing at fetch
 > time with a 403.
 >
+> **Done on the development installation, and it behaved exactly as described.** CEODude
+> re-authorized through `/auth/login` on 2026-08-15; the stored grant went 46 -> 47, the
+> already-running `serve` reconciled on its own periodic pass (no operator step), and the
+> corporation-assets subscription appeared as the 88th — acting character 2124613505, enabled,
+> then polled `200` with an ETag stored and the next poll scheduled on the route's own TTL.
+> It landed **zero rows, correctly**: the cached response body for that exact second is `[]`,
+> two bytes, because HANGAR Corp was founded nine days earlier and owns no assets. A route that
+> returns nothing because there is nothing is not the same as a route that cannot run, and
+> distinguishing them took reading the response body rather than the row count.
+>
 > Verify the two sets agree at any time with:
 > ```bash
 > go run ./tools/scopedump
