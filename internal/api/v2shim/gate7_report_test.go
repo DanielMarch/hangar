@@ -26,11 +26,13 @@ package v2shim_test
 
 import (
 	"crypto/sha256"
+	"encoding/csv"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -114,9 +116,19 @@ func (r *gate7Report) write(t testing.TB) {
 		return r.rows[i].Pattern < r.rows[j].Pattern
 	})
 
+	// encoding/csv rather than Fprintf with %q. A reason is prose written by
+	// a human and several of them contain quotation marks; Go's %q escapes
+	// those as \" , which is Go syntax and NOT CSV — CSV doubles them. The
+	// first version of this writer produced a file its own reader could not
+	// parse, which is a good argument for never hand-rolling the format.
 	var b strings.Builder
-	b.WriteString("controller,pattern,status,corpus,http_status,expected_bytes,actual_bytes," +
-		"expected_sha256,actual_sha256,byte_identical,first_difference_at,reason\n")
+	w := csv.NewWriter(&b)
+	require.NoError(t, w.Write([]string{
+		"controller", "pattern", "status", "corpus", "http_status",
+		"expected_bytes", "actual_bytes", "expected_sha256", "actual_sha256",
+		"byte_identical", "first_difference_at", "reason",
+	}))
+
 	var served, identical int
 	byStatus := map[string]int{}
 	for _, row := range r.rows {
@@ -127,11 +139,15 @@ func (r *gate7Report) write(t testing.TB) {
 				identical++
 			}
 		}
-		fmt.Fprintf(&b, "%s,%s,%s,%s,%d,%d,%d,%s,%s,%t,%d,%q\n",
-			row.Controller, row.Pattern, row.Status, row.Corpus, row.HTTPStatus,
-			row.ExpectedLen, row.ActualLen, row.ExpectedSHA, row.ActualSHA,
-			row.Identical, row.FirstDiffAt, row.Reason)
+		require.NoError(t, w.Write([]string{
+			row.Controller, row.Pattern, row.Status, row.Corpus, strconv.Itoa(row.HTTPStatus),
+			strconv.Itoa(row.ExpectedLen), strconv.Itoa(row.ActualLen),
+			row.ExpectedSHA, row.ActualSHA,
+			strconv.FormatBool(row.Identical), strconv.Itoa(row.FirstDiffAt), row.Reason,
+		}))
 	}
+	w.Flush()
+	require.NoError(t, w.Error())
 	require.NoError(t, os.WriteFile(filepath.Join(r.dir, "byte-diff.csv"), []byte(b.String()), 0o600))
 
 	summary := fmt.Sprintf(`{
