@@ -103,6 +103,7 @@
       "calendar": "カレンダー",
       "industry": "産業",
       "killmails": "キルメール",
+      "fittings": "フィッティング",
       "intel": "インテル"
     },
     "sheet": {
@@ -154,6 +155,9 @@
     },
     "killmails": {
       "heading": "キルメール"
+    },
+    "fittings": {
+      "heading": "フィッティング"
     },
     "intel": {
       "heading": "インテル"

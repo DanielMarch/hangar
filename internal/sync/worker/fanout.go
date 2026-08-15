@@ -55,10 +55,34 @@ import (
 // route's own {id-param} placeholder, plus any extra path/query values that
 // specific detail route needs beyond the owner and the id itself (e.g.
 // starbase detail's system_id query parameter).
+//
+// ── PHASE 20.7 (B48): NOT EVERY SECOND PARAMETER IS AN INTEGER ───────────
+// Until this phase the engine substituted idParam with
+// strconv.FormatInt(item.id, 10), which silently assumed every detail route
+// keys on a bigint. Two of B48's routes do not:
+//
+//	/corporations/{corporation_id}/projects/{project_id}   project_id is a UUID
+//	/killmails/{killmail_id}/{killmail_hash}               the hash is a string
+//
+// The killmail case fits the integer shape anyway — killmail_id IS the id
+// and the hash rides in extraPathParams — but a project's uuid has no
+// integer form at all, and Principle 13 forbids coercing it to one. idText
+// therefore overrides the substitution when the second dynamic parameter is
+// not an integer; id stays authoritative for everything else (logging, the
+// syncOne callback's own bookkeeping).
 type fanoutDetailItem struct {
 	id              int64
+	idText          string
 	extraPathParams map[string]string
 	extraQuery      map[string]string
+}
+
+// pathValue renders this item's {idParam} substitution.
+func (it fanoutDetailItem) pathValue() string {
+	if it.idText != "" {
+		return it.idText
+	}
+	return strconv.FormatInt(it.id, 10)
 }
 
 // detailFanout is one fan-out's whole configuration. Everything the engine
@@ -85,8 +109,24 @@ type detailFanout struct {
 	entityID    int64
 	accessToken string
 
-	items   []fanoutDetailItem
-	syncOne func(ctx context.Context, s *store.Store, id int64, body []byte) (int32, error)
+	items []fanoutDetailItem
+	// syncOne receives the whole item rather than a bare id: since B48 the
+	// identifying value may be a uuid or a hash carried on idText, and a
+	// callback handed only the int64 could not tell which project it had
+	// just fetched.
+	syncOne func(ctx context.Context, s *store.Store, item fanoutDetailItem, body []byte) (int32, error)
+
+	// etag carries a PARENT-list validator through to the subscription row
+	// on success.
+	//
+	// Ordinary fan-outs leave it nil, and must: their parent list lives in a
+	// table, the subscription's own etag would describe nothing, and
+	// RecordSyncSuccess writes the column unconditionally. The killmail
+	// fan-out is the exception — it fetches its own parent list inside the
+	// pass (killmail_fanout.go), so that list's etag IS this subscription's
+	// etag, and storing it is what lets the next pass short-circuit on a 304
+	// instead of re-walking every page.
+	etag *string
 
 	// on403 runs extra bookkeeping beyond RecordSync403 (the corporation
 	// elector's per-candidate history). nil is valid and means "nothing
@@ -116,7 +156,7 @@ func runDetailFanout(ctx context.Context, gw *esi.Client, policy sync.PolicyConf
 	for _, item := range f.items {
 		pathParams := map[string]string{
 			f.ownerParam: strconv.FormatInt(f.ownerID, 10),
-			f.idParam:    strconv.FormatInt(item.id, 10),
+			f.idParam:    item.pathValue(),
 		}
 		for k, v := range item.extraPathParams {
 			pathParams[k] = v
@@ -144,12 +184,12 @@ func runDetailFanout(ctx context.Context, gw *esi.Client, policy sync.PolicyConf
 			if r, ok := classifyRefusal(doErr, policy.TTLFloor, time.Now()); ok {
 				return rowsAffected, r.reason, snoozeRefusal(ctx, s, f.sub.SubscriptionID, r)
 			}
-			return rowsAffected, normalize.Outcome(0, true), fmt.Errorf("worker: fetching detail for id %d of %s: %w", item.id, f.route.UpstreamPath, doErr)
+			return rowsAffected, normalize.Outcome(0, true), fmt.Errorf("worker: fetching detail for id %s of %s: %w", item.pathValue(), f.route.UpstreamPath, doErr)
 		}
 
 		switch resp.StatusCode {
 		case http.StatusOK:
-			n, syncErr := f.syncOne(ctx, s, item.id, resp.Body)
+			n, syncErr := f.syncOne(ctx, s, item, resp.Body)
 			if syncErr != nil {
 				return rowsAffected, normalize.Outcome(resp.StatusCode, false), syncErr
 			}
@@ -171,7 +211,7 @@ func runDetailFanout(ctx context.Context, gw *esi.Client, policy sync.PolicyConf
 			return rowsAffected, normalize.Outcome(resp.StatusCode, false),
 				snoozeAfter429(ctx, s, f.sub.SubscriptionID, resp, policy.TTLFloor)
 		default:
-			return rowsAffected, normalize.Outcome(resp.StatusCode, false), fmt.Errorf("worker: detail id %d of %s returned status %d", item.id, f.route.UpstreamPath, resp.StatusCode)
+			return rowsAffected, normalize.Outcome(resp.StatusCode, false), fmt.Errorf("worker: detail id %s of %s returned status %d", item.pathValue(), f.route.UpstreamPath, resp.StatusCode)
 		}
 	}
 
@@ -184,7 +224,7 @@ func runDetailFanout(ctx context.Context, gw *esi.Client, policy sync.PolicyConf
 	}
 	if err := s.RecordSyncSuccess(ctx, gen.RecordSyncSuccessParams{
 		SubscriptionID: f.sub.SubscriptionID, LastStatus: statusOf(outcome), CursorAfter: f.sub.CursorAfter,
-		NextDueAt: next, Consecutive304: 0,
+		Etag: f.etag, NextDueAt: next, Consecutive304: 0,
 	}); err != nil {
 		return rowsAffected, outcome, err
 	}

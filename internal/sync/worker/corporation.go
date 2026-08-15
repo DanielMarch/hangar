@@ -350,6 +350,12 @@ func (w *CorporationWorker) Work(ctx context.Context, job *river.Job[planner.Syn
 		rowsAffected, outcome, syncErr = w.doContractBidsFanout(ctx, s, sub, route, args.EntityID, characterID, tok.Value)
 	case projectContributorsPath:
 		rowsAffected, outcome, syncErr = w.doProjectContributorsFanout(ctx, s, sub, route, args.EntityID, characterID, tok.Value)
+	case projectDetailPath:
+		rowsAffected, outcome, syncErr = w.doProjectDetailFanout(ctx, s, sub, route, args.EntityID, characterID, tok.Value)
+	case projectContributionPath:
+		rowsAffected, outcome, syncErr = w.doProjectContributionFanout(ctx, s, sub, route, args.EntityID, characterID, tok.Value)
+	case corporationKillmailsPath:
+		rowsAffected, outcome, syncErr = w.doKillmailFanout(ctx, s, sub, route, args.EntityID, characterID, tok.Value)
 	default:
 		handler, isSimple := corporationDispatch[route.UpstreamPath]
 		if !isSimple {
@@ -437,6 +443,21 @@ const (
 	// spelling for three phases while naming the contributors path, which is
 	// exactly how the wrong DTO stayed attached to it.
 	projectContributorsPath = "/corporations/{corporation_id}/projects/{project_id}/contributors"
+
+	// ── PHASE 20.7 (B48) ─────────────────────────────────────────────────
+	// Capability #25's two remaining routes. The DETAIL route is the only
+	// source of app.corporation_project.contribution_type and .expires_at;
+	// the CONTRIBUTION route answers for one character at a time, which is
+	// what a member without the roles to read the whole contributors list is
+	// still entitled to.
+	projectDetailPath       = "/corporations/{corporation_id}/projects/{project_id}"
+	projectContributionPath = "/corporations/{corporation_id}/projects/{project_id}/contribution/{character_id}"
+
+	// corporationKillmailsPath is stage 1 of the killmail two-stage sync.
+	// The DETAIL route is fetched inside this route's own pass — see
+	// doKillmailFanout for why a killmail cannot be persisted before its
+	// detail has been fetched.
+	corporationKillmailsPath = "/corporations/{corporation_id}/killmails/recent"
 
 	// ── DEFECT B47 (PHASE 20.6) ──────────────────────────────────────────
 	// The corporation half of the assets sync. handlers.SyncAssets has been
@@ -717,7 +738,7 @@ func (w *CorporationWorker) fanoutDetail(
 	ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute,
 	corporationID, characterID int64, accessToken, idPathParamName string,
 	items []fanoutDetailItem,
-	syncOne func(ctx context.Context, s *store.Store, id int64, body []byte) (int32, error),
+	syncOne func(ctx context.Context, s *store.Store, item fanoutDetailItem, body []byte) (int32, error),
 ) (rowsAffected int32, outcome string, err error) {
 	return runDetailFanout(ctx, w.Gateway, w.Policy, s, detailFanout{
 		sub: sub, route: route,
@@ -755,7 +776,8 @@ func (w *CorporationWorker) doStarbaseDetailFanout(ctx context.Context, s *store
 		systemByID[sb.StarbaseID] = sb.SystemID
 	}
 	return w.fanoutDetail(ctx, s, sub, route, corporationID, characterID, accessToken, "starbase_id", items,
-		func(ctx context.Context, s *store.Store, starbaseID int64, body []byte) (int32, error) {
+		func(ctx context.Context, s *store.Store, item fanoutDetailItem, body []byte) (int32, error) {
+			starbaseID := item.id
 			dto, err := handlers.ParseCorporationStarbaseDetail(body)
 			if err != nil {
 				return 0, err
@@ -782,7 +804,8 @@ func (w *CorporationWorker) doSkyhookDetailFanout(ctx context.Context, s *store.
 		items[i] = fanoutDetailItem{id: sh.SkyhookID}
 	}
 	return w.fanoutDetail(ctx, s, sub, route, corporationID, characterID, accessToken, "skyhook_id", items,
-		func(ctx context.Context, s *store.Store, skyhookID int64, body []byte) (int32, error) {
+		func(ctx context.Context, s *store.Store, item fanoutDetailItem, body []byte) (int32, error) {
+			skyhookID := item.id
 			dto, err := handlers.ParseCorporationSkyhookDetail(body)
 			if err != nil {
 				return 0, err
@@ -807,7 +830,10 @@ func (w *CorporationWorker) doSovereigntyHubDetailFanout(ctx context.Context, s 
 		items[i] = fanoutDetailItem{id: h.HubID}
 	}
 	return w.fanoutDetail(ctx, s, sub, route, corporationID, characterID, accessToken, "sovereignty_hub_id", items,
-		func(ctx context.Context, s *store.Store, hubID int64, body []byte) (int32, error) {
+		func(ctx context.Context, s *store.Store, _ fanoutDetailItem, body []byte) (int32, error) {
+			// The hub id is not read back from the item: this route's own
+			// response carries it, and SyncCorporationSovereigntyHubDetail
+			// keys on the DTO rather than on what we asked for.
 			dto, err := handlers.ParseCorporationSovereigntyHubDetail(body)
 			if err != nil {
 				return 0, err
@@ -834,7 +860,8 @@ func (w *CorporationWorker) doMiningObserverRecordsFanout(ctx context.Context, s
 		items[i] = fanoutDetailItem{id: o.ObserverID}
 	}
 	return w.fanoutDetail(ctx, s, sub, route, corporationID, characterID, accessToken, "observer_id", items,
-		func(ctx context.Context, s *store.Store, observerID int64, body []byte) (int32, error) {
+		func(ctx context.Context, s *store.Store, item fanoutDetailItem, body []byte) (int32, error) {
+			observerID := item.id
 			dto, err := handlers.ParseCorporationMiningObserverRecords(body)
 			if err != nil {
 				return 0, err
@@ -864,7 +891,8 @@ func (w *CorporationWorker) doContractItemsFanout(ctx context.Context, s *store.
 		items[i] = fanoutDetailItem{id: c.ContractID}
 	}
 	return w.fanoutDetail(ctx, s, sub, route, corporationID, characterID, accessToken, "contract_id", items,
-		func(ctx context.Context, s *store.Store, contractID int64, body []byte) (int32, error) {
+		func(ctx context.Context, s *store.Store, item fanoutDetailItem, body []byte) (int32, error) {
+			contractID := item.id
 			dto, err := handlers.ParseContractItems(body)
 			if err != nil {
 				return 0, err
@@ -894,7 +922,8 @@ func (w *CorporationWorker) doContractBidsFanout(ctx context.Context, s *store.S
 		items[i] = fanoutDetailItem{id: c.ContractID}
 	}
 	return w.fanoutDetail(ctx, s, sub, route, corporationID, characterID, accessToken, "contract_id", items,
-		func(ctx context.Context, s *store.Store, contractID int64, body []byte) (int32, error) {
+		func(ctx context.Context, s *store.Store, item fanoutDetailItem, body []byte) (int32, error) {
+			contractID := item.id
 			dto, err := handlers.ParseContractBids(body)
 			if err != nil {
 				return 0, err
@@ -1001,4 +1030,99 @@ func (w *CorporationWorker) doProjectContributorsFanout(ctx context.Context, s *
 		return rowsAffected, outcome, err
 	}
 	return rowsAffected, outcome, nil
+}
+
+// doProjectDetailFanout fetches the DETAIL of every project this
+// corporation's list sync already landed — Appendix A capability #25's
+// missing half.
+//
+// ── WHAT THE DETAIL ROUTE IS FOR ─────────────────────────────────────────
+// It is not a richer copy of the list. app.corporation_project has two
+// columns the list route does not carry AT ALL — contribution_type and
+// expires_at (defect B50, handlers/project_sync.go) — and this is their only
+// source. UpsertCorporationProject's ON CONFLICT clause updates only state
+// and current_progress, so the list sync cannot blank what this writes and
+// this cannot blank what the list writes; the two own disjoint columns.
+//
+// project_id is a UUID, which is why fanoutDetailItem carries idText: the
+// engine's default int64 substitution has no honest rendering of one, and
+// Principle 13 forbids coercing it through a bigint.
+func (w *CorporationWorker) doProjectDetailFanout(ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute, corporationID, characterID int64, accessToken string) (int32, string, error) {
+	projects, err := s.ListCorporationProjects(ctx, corporationID)
+	if err != nil {
+		return 0, "", fmt.Errorf("worker: listing known projects for corp %d: %w", corporationID, err)
+	}
+	items := make([]fanoutDetailItem, len(projects))
+	for i, p := range projects {
+		items[i] = fanoutDetailItem{idText: p.ProjectID.String()}
+	}
+	return w.fanoutDetail(ctx, s, sub, route, corporationID, characterID, accessToken, "project_id", items,
+		func(ctx context.Context, s *store.Store, item fanoutDetailItem, body []byte) (int32, error) {
+			projectID, perr := uuid.Parse(item.idText)
+			if perr != nil {
+				return 0, fmt.Errorf("worker: project detail fan-out produced an unparseable project id %q: %w", item.idText, perr)
+			}
+			dto, derr := handlers.ParseCorporationProjectDetail(body)
+			if derr != nil {
+				return 0, derr
+			}
+			res, serr := handlers.SyncCorporationProjectDetail(ctx, s, projectID, dto)
+			if serr != nil {
+				return 0, serr
+			}
+			return res.RowsAffected, nil
+		})
+}
+
+// doProjectContributionFanout fetches ONE character's contribution to ONE
+// project, for every (project, contributor) pair already stored.
+//
+// ── THREE DYNAMIC PARAMETERS, NOT TWO ────────────────────────────────────
+// Every other fan-out in this package substitutes an owner and one
+// enumerated id. This route needs corporation_id, project_id AND
+// character_id, so the pair is split across the engine's two mechanisms: the
+// character rides on idParam (it is a genuine int64, which is what the
+// engine is built for), and the project's uuid rides in extraPathParams —
+// the same slot starbase detail uses for its system_id.
+//
+// The contributor set comes from app.corporation_project_contributor, which
+// the contributors sync populates. A corporation whose contributors have not
+// synced yet enumerates nothing and makes no calls, which is correct: there
+// is no such thing as a contribution by a contributor nobody has heard of.
+func (w *CorporationWorker) doProjectContributionFanout(ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute, corporationID, characterID int64, accessToken string) (int32, string, error) {
+	projects, err := s.ListCorporationProjects(ctx, corporationID)
+	if err != nil {
+		return 0, "", fmt.Errorf("worker: listing known projects for corp %d: %w", corporationID, err)
+	}
+
+	var items []fanoutDetailItem
+	for _, p := range projects {
+		contributors, cerr := s.ListCorporationProjectContributors(ctx, p.ProjectID)
+		if cerr != nil {
+			return 0, "", fmt.Errorf("worker: listing contributors of project %s: %w", p.ProjectID, cerr)
+		}
+		for _, c := range contributors {
+			items = append(items, fanoutDetailItem{
+				id:              c.CharacterID,
+				extraPathParams: map[string]string{"project_id": p.ProjectID.String()},
+			})
+		}
+	}
+
+	return w.fanoutDetail(ctx, s, sub, route, corporationID, characterID, accessToken, "character_id", items,
+		func(ctx context.Context, s *store.Store, item fanoutDetailItem, body []byte) (int32, error) {
+			projectID, perr := uuid.Parse(item.extraPathParams["project_id"])
+			if perr != nil {
+				return 0, fmt.Errorf("worker: contribution fan-out produced an unparseable project id %q: %w", item.extraPathParams["project_id"], perr)
+			}
+			dto, derr := handlers.ParseCorporationProjectContribution(body)
+			if derr != nil {
+				return 0, derr
+			}
+			res, serr := handlers.SyncCorporationProjectContribution(ctx, s, projectID, item.id, dto)
+			if serr != nil {
+				return 0, serr
+			}
+			return res.RowsAffected, nil
+		})
 }

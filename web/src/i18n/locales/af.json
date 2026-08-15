@@ -103,6 +103,7 @@
       "calendar": "Kalender",
       "industry": "Nywerheid",
       "killmails": "Doodmeldings",
+      "fittings": "Uitrustings",
       "intel": "Intel"
     },
     "sheet": {
@@ -154,6 +155,9 @@
     },
     "killmails": {
       "heading": "Doodmeldings"
+    },
+    "fittings": {
+      "heading": "Uitrustings"
     },
     "intel": {
       "heading": "Intel"

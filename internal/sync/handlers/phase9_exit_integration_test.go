@@ -231,7 +231,10 @@ func TestUUIDKeyedProjectInsertAndJoin(t *testing.T) {
 	projects, err := handlers.ParseCorporationProjects(mustReadCorpFixture9(t, "projects.json"))
 	require.NoError(t, err)
 	require.Len(t, projects, 1)
-	projectID := projects[0].ProjectID
+	// PHASE 20.7 (B50): the field is `ID`, decoded from ESI's `id`. It used
+	// to be `ProjectID` decoded from a `project_id` the response never had,
+	// which is why every project landed as the nil uuid.
+	projectID := projects[0].ID
 	require.NotEqual(t, uuid.Nil, projectID)
 
 	_, err = handlers.SyncCorporationProjects(ctx, s, corporationID, projects)

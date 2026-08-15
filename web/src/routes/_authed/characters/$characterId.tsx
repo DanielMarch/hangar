@@ -63,6 +63,10 @@ const TABS = [
     to: "/characters/$characterId/killmails",
     labelKey: "characters.tabs.killmails",
   },
+  {
+    to: "/characters/$characterId/fittings",
+    labelKey: "characters.tabs.fittings",
+  },
   { to: "/characters/$characterId/intel", labelKey: "characters.tabs.intel" },
 ] as const;
 

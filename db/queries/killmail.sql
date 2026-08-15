@@ -22,6 +22,19 @@ SELECT * FROM app.killmail
  ORDER BY killmail_time DESC
  LIMIT sqlc.arg(page_size);
 
+-- name: ListKnownKillmailIDs :many
+-- PHASE 20.7 (B48). The killmail ids this owner already has a stored detail
+-- for, so the two-stage sync can skip re-fetching them.
+--
+-- This is what makes the fan-out bounded. A killmail is IMMUTABLE — CCP
+-- never revises one — so a killmail already stored never needs fetching
+-- again, and in steady state the recent list returns almost entirely ids
+-- that are already here and the pass makes ZERO detail calls. Without this
+-- the sync would re-fetch every killmail in the recent window on every
+-- pass, forever, for data that cannot have changed.
+SELECT killmail_id FROM app.killmail
+ WHERE owner_kind = $1 AND owner_id = $2;
+
 -- name: UpsertKillmailAttacker :one
 INSERT INTO app.killmail_attacker AS t (
     owner_kind, owner_id, killmail_id, killmail_time, record_id, character_id,

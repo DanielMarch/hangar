@@ -62,8 +62,8 @@ ListUnparseableCharacterNotifications
 #
 # ListCorporationProjectContributions in particular now has data to return:
 # the contributors sync writes app.corporation_project_contribution with
-# `contributed` as the amount (B38's leftover, closed in the same phase).
-DeleteCharacterFittingsNotIn
+# `contributed` as the amount (B38's leftover, closed in the same phase), and
+# 20.7 added a second writer for it — the per-character contribution route.
 GetCalendarEventDetail
 GetPlanetColonyDetail
 GetStarbaseDetail
@@ -111,21 +111,26 @@ ListKillmailItems
 ListMailRecipients
 RecordApiTokenAccess
 
-# Writers whose only producer is a sync handler that is never dispatched
-# (B30), or whose live path uses hand-written SQL instead of the generated
-# query. UpsertReplicaHeartbeat is the latter: internal/telemetry/replica.go
-# issues its own statement because it must first probe to_regclass, so the
-# generated twin has never been used.
+# Writers with no production caller. PHASE 20.7 (B48) emptied most of this
+# block by wiring the handlers — fittings, killmails, insurance prices and
+# contact notifications all have callers now and were removed here in the
+# same commit that wired them.
+#
+# What is left is left for two different reasons, and they are not the same:
+#
+#   UpsertAlliance, UpsertLocation — capabilities #37 and #41. Handlers for
+#   both were written in 20.7 and DELETED unwired, because an unwired handler
+#   is defect class B20 and this very suite catches it. They need machinery
+#   that does not exist (an alliance-scoped acting-character elector; a
+#   location-id enumeration query), and internal/sync/worker/unmapped.go
+#   records both as ReasonNotBuilt so Gate 4 fails on the number.
+#
+#   UpsertReplicaHeartbeat — a deliberate keep: internal/telemetry/replica.go
+#   issues its own statement because it must first probe to_regclass, so the
+#   generated twin has never been used.
 UpsertAlliance
-UpsertCharacterFitting
-UpsertCharacterFittingItem
 UpsertCharacterIntelEdge
-UpsertInsurancePrice
-UpsertKillmail
-UpsertKillmailAttacker
-UpsertKillmailItem
 UpsertLocation
-UpsertNotificationContact
 UpsertReplicaHeartbeat
 
 # B45 — reads app.corporation_role, which has NO production writer anywhere

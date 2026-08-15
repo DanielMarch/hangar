@@ -103,6 +103,7 @@
       "calendar": "Calendrier",
       "industry": "Industrie",
       "killmails": "Kills",
+      "fittings": "Équipements",
       "intel": "Renseignement"
     },
     "sheet": {
@@ -154,6 +155,9 @@
     },
     "killmails": {
       "heading": "Kills"
+    },
+    "fittings": {
+      "heading": "Équipements"
     },
     "intel": {
       "heading": "Renseignement"

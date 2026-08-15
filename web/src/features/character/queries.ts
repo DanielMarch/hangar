@@ -40,4 +40,6 @@ export const characterIndustryJobsPath =
   "/api/v1/characters/{id}/industry/jobs" as const;
 export const characterKillmailsPath =
   "/api/v1/characters/{id}/killmails" as const;
+export const characterFittingsPath =
+  "/api/v1/characters/{id}/fittings" as const;
 export const characterIntelPath = "/api/v1/characters/{id}/intel" as const;

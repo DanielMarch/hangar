@@ -84,6 +84,36 @@ const (
 	// note. Per 04_RELEASE_GATES.md §0.4 a recorded failure is the correct
 	// artefact and a note is not.
 	ReasonNotBuilt UnmappedReason = "not-built"
+
+	// ReasonFetchedByParent — the route IS synced, inside another route's
+	// pass, because it cannot have a subscription of its own.
+	//
+	// This is not ReasonNotBuilt (a handler exists and runs) and it is not
+	// subscribable (there is nothing for a subscription to enumerate). The
+	// only member is /killmails/{killmail_id}/{killmail_hash}: app.killmail
+	// requires killmail_time NOT NULL and PARTITIONS on it, so no row can
+	// exist before its detail is fetched, so a detail subscription would
+	// enumerate an empty set forever. See worker/killmail_fanout.go.
+	//
+	// It is a distinct reason rather than a note on an existing one because
+	// the two questions a reader has — "does anything fetch this?" and "does
+	// anything schedule this?" — have different answers here, and collapsing
+	// them into either existing reason would make one of them a lie.
+	ReasonFetchedByParent UnmappedReason = "fetched-by-parent"
+
+	// ReasonScopeNotGranted — a handler exists and is dispatched, and the
+	// route's scope is not in the grant the acting token carries, so it
+	// cannot return data on THIS installation until an operator enables the
+	// scope in the developer portal and the character re-authorizes.
+	//
+	// Reserved deliberately and currently unused: the five scopes B48 needed
+	// (killmails ×2, fittings, universe structures, alliance contacts) were
+	// enabled by the operator during the phase, so the routes that need them
+	// are subscribable rather than unmapped. It stays defined because the
+	// NEXT route to need a new scope should be recorded as blocked on an
+	// operator action rather than mislabelled "not built" — which is what
+	// the 47th scope's disappearance (B47) cost a phase to discover.
+	ReasonScopeNotGranted UnmappedReason = "scope-not-granted"
 )
 
 // DeliberatelyUnmapped is every catalogued GET route that carries no sync
@@ -206,81 +236,102 @@ func DeliberatelyUnmapped() map[string]UnmappedReason {
 		"/alliances/{alliance_id}/icons":           ReasonNoCapability,
 		"/dogma/dynamic/items/{type_id}/{item_id}": ReasonNoCapability,
 
-		// ── ⚠ GATE 4 FAILURES, RECORDED (ReasonNotBuilt) ─────────────────
-		// Each line: the Appendix A capability that claims it, the table
-		// that exists for it, and the /api/v1 endpoint already serving that
-		// table's emptiness.
+		// ── SYNCED INSIDE ANOTHER ROUTE'S PASS ───────────────────────────
+		// Capability #39's detail route. It has a handler and it runs; what
+		// it does not have is a subscription, because app.killmail cannot
+		// hold a row before this route has answered (killmail_time is NOT
+		// NULL and is the partition key), so nothing would ever be there for
+		// a detail subscription to enumerate. Fetched by the two recent-list
+		// routes' own passes — worker/killmail_fanout.go.
+		killmailDetailPath: ReasonFetchedByParent,
 
-		// Capability #37–39 "Killmails (character, corporation, detail)".
-		// app.killmail / killmail_attacker / killmail_item exist;
-		// UpsertKillmail, UpsertKillmailAttacker and UpsertKillmailItem have
-		// no production caller. GET /api/v1/characters/{id}/killmails and
-		// /corporations/{id}/killmails read ListKillmailsByOwner and return
-		// [] on every installation.
-		"/characters/{character_id}/killmails/recent":     ReasonNotBuilt,
-		"/corporations/{corporation_id}/killmails/recent": ReasonNotBuilt,
-		"/killmails/{killmail_id}/{killmail_hash}":        ReasonNotBuilt,
+		// ── PHASE 20.7: RECLASSIFIED, NOT WIRED ──────────────────────────
+		//
+		// These four were recorded as ReasonNotBuilt by Phase 20.6's sweep,
+		// which derived them from "an INSERT with no production caller"
+		// intersected with the catalogue. That measurement was sound and its
+		// conclusion was wrong for these: the endpoints they were supposed
+		// to back are not backed by them at all.
+		//
+		// ── The two regional market routes ───────────────────────────────
+		// GET /api/v1/markets/{region_id}/orders is documented, in its own
+		// handler and in ListMarketOrdersByRegion's SQL comment, as "orders
+		// HANGAR has synced FOR TRACKED OWNERS in this region" — a
+		// region-scoped projection over app.market_order, which is written
+		// by the character and corporation order syncs and has been since
+		// Phase 8. /types is the same set's distinct type ids. Neither is a
+		// mirror of ESI's public regional order book, and mirroring one is a
+		// different product: ~300,000 live orders for a single major trade
+		// hub, re-fetched at the route's cadence, for a question no HANGAR
+		// screen asks. SRS §12 already places public/structure market orders
+		// in the post-v1.0 backlog, which is the same judgement.
+		//
+		// app.market_order holding 0 rows on the live installation is
+		// therefore NOT evidence of a missing writer. The writer exists and
+		// runs; CEODude simply has no market orders. Established the way
+		// every empty in this phase was — by reading the cached upstream
+		// body, not by trusting the count.
+		"/markets/{region_id}/orders": ReasonNoCapability,
+		"/markets/{region_id}/types":  ReasonNoCapability,
 
-		// Capability #1–14 "Fittings (+ EFT export)". app.character_fitting
-		// and character_fitting_item exist; UpsertCharacterFitting,
-		// UpsertCharacterFittingItem and DeleteCharacterFittingsNotIn have
-		// no production caller. Three /api/v1 handlers read
-		// ListCharacterFittings, including the EFT export.
-		"/characters/{character_id}/fittings": ReasonNotBuilt,
+		// ── /alliances, the global id list ───────────────────────────────
+		// Returns every alliance id in New Eden. HANGAR resolves the
+		// alliances it REFERENCES (the stubs the identity syncs create), not
+		// a directory of entities this installation has no relationship
+		// with — see handlers/alliance.go. Nothing reads a list of all
+		// alliance ids, and GET /api/v1/alliances serves app.alliance, which
+		// the per-alliance sheet sync fills.
+		"/alliances": ReasonNoCapability,
 
-		// Capability #1–14 "Notifications (+ contact notifications)".
-		// app.notification_contact exists; UpsertNotificationContact has no
-		// production caller.
-		"/characters/{character_id}/notifications/contacts": ReasonNotBuilt,
-
-		// Capability #40–44 "Insurance Prices". app.insurance_price exists;
-		// UpsertInsurancePrice has no production caller. GET
-		// /api/v1/tools/insurance reads ListInsurancePrices.
-		"/insurance/prices": ReasonNotBuilt,
-
-		// Capability #40–44 "ID & Name Resolution (+ affiliations,
-		// structures, stations)". app.location exists; UpsertLocation has no
-		// production caller. GET /api/v1/support/universe/{structures,
-		// stations} read GetLocation and 404 on every id.
-		"/universe/structures/{structure_id}": ReasonNotBuilt,
-		"/universe/stations/{station_id}":     ReasonNotBuilt,
-
-		// Capability #18–30 "Projects (list, detail, contributors,
-		// per-character contribution)". The list and contributors halves are
-		// synced; the project DETAIL route and the per-character
-		// contribution route have no handler.
-		// app.corporation_project_contribution exists.
-		"/corporations/{corporation_id}/projects/{project_id}":                             ReasonNotBuilt,
-		"/corporations/{corporation_id}/projects/{project_id}/contribution/{character_id}": ReasonNotBuilt,
-
-		// Capability #45 "ESI Service Health (/meta/status)", and Gate 4.6's
-		// requirement that /meta/status and /status be "present as two
-		// distinct capabilities". /status is delivered (globalDispatch, into
-		// app.setting). /meta/status is not: no dispatch entry, no handler,
-		// no table. GET /api/v1/meta/esi-status exists and answers from the
-		// blocked-route count with a hard-coded `"healthy": true` — a
-		// derived proxy for ESI's health that never asks ESI, so the field
-		// is asserted rather than measured and cannot ever report unhealthy.
-		"/meta/status": ReasonNotBuilt,
-
-		// Capability #34–36 "Global Market (regional orders, history, types,
-		// prices)". History and prices are in globalDispatch; regional
-		// ORDERS and TYPES are not, and app.market_order holds 0 rows.
-		"/markets/{region_id}/orders": ReasonNotBuilt,
-		"/markets/{region_id}/types":  ReasonNotBuilt,
-
-		// Capability #37–39 "Alliance Information, Members & Contacts".
-		// app.alliance exists but only UpsertAllianceStub is called (from
-		// the character/structure identity syncs, which write an id with an
-		// empty name); UpsertAlliance — the one that stores the real
-		// alliance sheet — has no production caller, and there is no
-		// alliance sync at all, so alliance contacts and member corporations
-		// are never fetched.
-		"/alliances":                               ReasonNotBuilt,
+		// ── ⚠ GATE 4 FAILURES STILL RECORDED (ReasonNotBuilt) ────────────
+		//
+		// Capability #37's contacts half. app.contact/contact_label carry an
+		// 'alliance' owner_kind and GET /api/v1/alliances/{id}/contacts reads
+		// it, and the two routes that would fill it are NOT wired.
+		//
+		// The blocker is structural, not clerical, and is recorded rather
+		// than worked around: both routes need a token from a character IN
+		// the alliance, which means an alliance-scoped acting-character
+		// election. internal/sync.EntityAlliance exists in the vocabulary,
+		// but there is no AllianceWorker and no elector for it — DispatchWorker
+		// routes character, corporation and global only. Making these two
+		// routes work means building that worker, which is a phase's own
+		// piece of work and not a map entry.
+		//
+		// The alliance SHEET and MEMBER-CORPORATION routes do not have this
+		// problem (both are public) and are also not wired, for the narrower
+		// reason that they need a global fan-out over app.alliance that this
+		// phase did not build. app.alliance holds 0 rows on this installation
+		// — HANGAR Corp is in no alliance — so neither route would have had
+		// anything to resolve.
+		//
+		// Handlers for all four WERE written in 20.7 and then DELETED, on
+		// purpose. Unwired handlers are defect class B20 — code that is
+		// built, tested and never called — and test/reachability catches it;
+		// keeping them would have been the same "written but unreachable"
+		// disease this phase spent itself removing, with a comment attached.
+		// The design is recorded here instead, which is where the next phase
+		// will look.
 		"/alliances/{alliance_id}":                 ReasonNotBuilt,
 		"/alliances/{alliance_id}/contacts":        ReasonNotBuilt,
 		"/alliances/{alliance_id}/contacts/labels": ReasonNotBuilt,
 		"/alliances/{alliance_id}/corporations":    ReasonNotBuilt,
+
+		// Capability #41's two resolution routes. app.location exists and
+		// UpsertLocation still has no production caller: both routes need a
+		// fan-out over the location ids HANGAR has already seen in its own
+		// synced rows (app.asset.location_id and friends), and that
+		// enumeration query has not been written. GET
+		// /api/v1/support/universe/{structures,stations} still 404 on every
+		// id.
+		//
+		// Handlers were written in 20.7 and DELETED unwired, for the same
+		// reason the alliance ones were — see above. Note that the ids ARE
+		// now available: app.asset holds character- and corporation-owned
+		// rows carrying location_ids, so the enumeration this needs would
+		// have something real to resolve on the next attempt.
+		"/universe/structures/{structure_id}": ReasonNotBuilt,
+		"/universe/stations/{station_id}":     ReasonNotBuilt,
 	}
 }
 

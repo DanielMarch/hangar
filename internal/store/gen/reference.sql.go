@@ -170,6 +170,14 @@ SELECT corporation_id, name, ticker, member_count, ceo_id, alliance_id, descript
 `
 
 // Phase 15 addition: GET /api/v1/alliances/{id}/corporations.
+//
+// SCOPE (Phase 20.7): this returns the member corporations HANGAR already
+// has rows for, which today means the ones it tracks a character in — no
+// alliance sync exists to widen it (capability #37 is recorded unreachable
+// in internal/sync/worker/unmapped.go). When one is built it must NOT
+// insert a stub per member id: a large alliance has hundreds, and
+// `(id, ”)` rows nothing ever resolves are precisely the empty-name defect
+// that made app.alliance useless for the whole life of the project.
 func (q *Queries) ListCorporationsByAlliance(ctx context.Context, allianceID *int64) ([]AppCorporation, error) {
 	rows, err := q.db.Query(ctx, listCorporationsByAlliance, allianceID)
 	if err != nil {

@@ -102,7 +102,12 @@ var capabilitySpecs = map[int]CapabilitySpec{
 	8: {
 		Routes:    []string{"/characters/{character_id}/fittings"},
 		Endpoints: []string{"/api/v1/characters/{id}/fittings", "/api/v1/characters/{id}/fittings/{fitting_id}/eft"},
-		Phase:     "7", Test: "(none — no sync handler exists)",
+		// PHASE 20.7 (B48): sync handler written and dispatched; verified on
+		// the live installation (1 fitting, 32 items, EFT export renders).
+		// The SPA screen was added in the same phase — capability #8 had a
+		// SECOND gap behind the writer: no fittings component and no route
+		// existed, so the data was invisible in the app even once it landed.
+		Phase: "7", Test: "(none automated yet — live-verified in 20.7; see defect B51)",
 	},
 	9: {
 		Routes: []string{
@@ -381,7 +386,12 @@ var capabilitySpecs = map[int]CapabilitySpec{
 		},
 		Controllers: []string{"AllianceController"},
 		Endpoints:   []string{"/api/v1/alliances/{id}"},
-		Phase:       "9", Test: "(none — no sync handler exists)",
+		// STILL UNREACHABLE after 20.7. Handlers exist (handlers/alliance.go)
+		// and no route is dispatched: the sheet and member-corporation routes
+		// need a global fan-out over app.alliance, and CONTACTS additionally
+		// needs an alliance-scoped acting-character elector that has no
+		// worker at all. See internal/sync/worker/unmapped.go.
+		Phase: "9", Test: "(none — no route dispatched; blocked, see unmapped.go)",
 	},
 	38: {
 		Routes: []string{
@@ -402,7 +412,13 @@ var capabilitySpecs = map[int]CapabilitySpec{
 			"/api/v1/characters/{id}/killmails",
 			"/api/v1/corporations/{id}/killmails",
 		},
-		Phase: "9", Test: "(none — no sync handler exists)",
+		// PHASE 20.7 (B48): two-stage fan-out (recent list -> per-killmail
+		// detail) written and dispatched. Verified on the live installation
+		// polling 200; landed 0 rows because the cached upstream body is `[]`
+		// — CEODude has no kills in ESI's recent window. The /api/v2 shim's
+		// three killmail routes remain UNSERVABLE, blocked on legacy's
+		// `attacker_hash` surrogate (internal/api/v2shim/classification.go).
+		Phase: "9", Test: "(none automated yet — live-verified in 20.7; see defect B51)",
 	},
 
 	// ── Utilities (40–44) ────────────────────────────────────────────────
@@ -421,12 +437,18 @@ var capabilitySpecs = map[int]CapabilitySpec{
 			"/api/v1/support/universe/structures",
 			"/api/v1/support/universe/stations",
 		},
-		Phase: "15", Test: "(none — no sync handler exists)",
+		// STILL UNREACHABLE after 20.7. handlers/location.go exists and
+		// neither route is dispatched: both need a fan-out over the location
+		// ids HANGAR has seen in its own synced rows, and that enumeration
+		// query has not been written.
+		Phase: "15", Test: "(none — no route dispatched; blocked, see unmapped.go)",
 	},
 	42: {
 		Routes:    []string{"/insurance/prices"},
 		Endpoints: []string{"/api/v1/tools/insurance"},
-		Phase:     "15", Test: "(none — no sync handler exists)",
+		// PHASE 20.7 (B48): global dispatch entry; verified on the live
+		// installation landing 3,414 rows.
+		Phase: "15", Test: "(none automated yet — live-verified in 20.7; see defect B51)",
 	},
 	43: {
 		Endpoints: []string{"/api/v1/tools/character/{id}/notes"},
@@ -441,7 +463,11 @@ var capabilitySpecs = map[int]CapabilitySpec{
 	45: {
 		Routes:    []string{"/meta/status"},
 		Endpoints: []string{"/api/v1/meta/esi-status"},
-		Phase:     "15.1", Test: "(none — no sync handler exists)",
+		// PHASE 20.7 (B48): global dispatch entry, and the endpoint's
+		// hard-coded `"healthy": true` replaced by a value derived from CCP's
+		// own per-route statuses. Verified live: 229 routes, 0 down, 0
+		// degraded.
+		Phase: "15.1", Test: "(none automated yet — live-verified in 20.7; see defect B51)",
 	},
 	46: {
 		Routes:    []string{"/status"},

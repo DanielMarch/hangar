@@ -26,3 +26,20 @@ RETURNING *;
 
 -- name: ListCharacterFittingItems :many
 SELECT * FROM app.character_fitting_item WHERE character_id = $1 AND fitting_id = $2 ORDER BY record_id;
+
+-- name: DeleteCharacterFittingItemsNotIn :exec
+-- PHASE 20.7 (B48). DeleteCharacterFittingsNotIn prunes whole fittings and
+-- app.character_fitting_item cascades with them, so a DELETED fitting takes
+-- its items along. An EDITED one does not: the fitting_id survives, and
+-- without this the modules a pilot removed would stay behind forever.
+--
+-- That is not a cosmetic staleness. Capability #8's headline feature is the
+-- EFT export, which is rendered by walking exactly these rows — a ghost
+-- module produces a fitting block that the pilot never saved and that will
+-- not fit the hull. Pruning by absence is safe here in a way it is not for
+-- reference data (see SyncInsurancePrices' note): this set is the complete
+-- item list for ONE fitting, delivered in the same response as the fitting
+-- itself, so "absent" is unambiguous.
+DELETE FROM app.character_fitting_item
+ WHERE character_id = $1 AND fitting_id = $2
+   AND NOT (record_id = ANY(sqlc.arg(keep_record_ids)::bigint[]));

@@ -17,6 +17,26 @@ RETURNING *;
 -- name: GetCorporationProject :one
 SELECT * FROM app.corporation_project WHERE project_id = $1;
 
+-- name: UpdateCorporationProjectDetail :exec
+-- PHASE 20.7 (B48/B50). The fields only the project DETAIL route carries.
+--
+-- This exists because UpsertCorporationProject's ON CONFLICT clause updates
+-- ONLY state and current_progress — deliberately, so that the frequently
+-- running list sync cannot blank what the detail sync wrote. The corollary
+-- is that the detail sync cannot write through that upsert either, because
+-- for an existing project it would take the same conflict path. So the two
+-- routes write disjoint column sets through two statements, and neither can
+-- erase the other's.
+--
+-- contribution_type is derived from the detail response's `configuration`,
+-- whose oneOf key names the kind of contribution the project wants
+-- ('mine_material', 'manufacture_item', 'destroy_npc', ...); expires_at is
+-- `details.expires`. Neither appears on the list route at all.
+UPDATE app.corporation_project
+   SET contribution_type = $2, expires_at = $3, updated_at = now()
+ WHERE project_id = $1
+   AND (contribution_type, expires_at) IS DISTINCT FROM ($2, $3);
+
 -- name: ListCorporationProjects :many
 SELECT * FROM app.corporation_project WHERE corporation_id = $1 ORDER BY expires_at NULLS LAST;
 

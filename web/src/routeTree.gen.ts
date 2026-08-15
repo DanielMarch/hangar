@@ -34,6 +34,7 @@ import { Route as AuthedCharactersCharacterIdIndexRouteImport } from './routes/_
 import { Route as AuthedCharactersCharacterIdAssetsRouteImport } from './routes/_authed/characters/$characterId/assets'
 import { Route as AuthedCharactersCharacterIdCalendarRouteImport } from './routes/_authed/characters/$characterId/calendar'
 import { Route as AuthedCharactersCharacterIdContractsRouteImport } from './routes/_authed/characters/$characterId/contracts'
+import { Route as AuthedCharactersCharacterIdFittingsRouteImport } from './routes/_authed/characters/$characterId/fittings'
 import { Route as AuthedCharactersCharacterIdIndustryRouteImport } from './routes/_authed/characters/$characterId/industry'
 import { Route as AuthedCharactersCharacterIdIntelRouteImport } from './routes/_authed/characters/$characterId/intel'
 import { Route as AuthedCharactersCharacterIdKillmailsRouteImport } from './routes/_authed/characters/$characterId/killmails'
@@ -184,6 +185,12 @@ const AuthedCharactersCharacterIdContractsRoute =
   AuthedCharactersCharacterIdContractsRouteImport.update({
     id: '/contracts',
     path: '/contracts',
+    getParentRoute: () => AuthedCharactersCharacterIdRoute,
+  } as any)
+const AuthedCharactersCharacterIdFittingsRoute =
+  AuthedCharactersCharacterIdFittingsRouteImport.update({
+    id: '/fittings',
+    path: '/fittings',
     getParentRoute: () => AuthedCharactersCharacterIdRoute,
   } as any)
 const AuthedCharactersCharacterIdIndustryRoute =
@@ -337,6 +344,7 @@ export interface FileRoutesByFullPath {
   '/characters/$characterId/assets': typeof AuthedCharactersCharacterIdAssetsRoute
   '/characters/$characterId/calendar': typeof AuthedCharactersCharacterIdCalendarRoute
   '/characters/$characterId/contracts': typeof AuthedCharactersCharacterIdContractsRoute
+  '/characters/$characterId/fittings': typeof AuthedCharactersCharacterIdFittingsRoute
   '/characters/$characterId/industry': typeof AuthedCharactersCharacterIdIndustryRoute
   '/characters/$characterId/intel': typeof AuthedCharactersCharacterIdIntelRoute
   '/characters/$characterId/killmails': typeof AuthedCharactersCharacterIdKillmailsRoute
@@ -380,6 +388,7 @@ export interface FileRoutesByTo {
   '/characters/$characterId/assets': typeof AuthedCharactersCharacterIdAssetsRoute
   '/characters/$characterId/calendar': typeof AuthedCharactersCharacterIdCalendarRoute
   '/characters/$characterId/contracts': typeof AuthedCharactersCharacterIdContractsRoute
+  '/characters/$characterId/fittings': typeof AuthedCharactersCharacterIdFittingsRoute
   '/characters/$characterId/industry': typeof AuthedCharactersCharacterIdIndustryRoute
   '/characters/$characterId/intel': typeof AuthedCharactersCharacterIdIntelRoute
   '/characters/$characterId/killmails': typeof AuthedCharactersCharacterIdKillmailsRoute
@@ -429,6 +438,7 @@ export interface FileRoutesById {
   '/_authed/characters/$characterId/assets': typeof AuthedCharactersCharacterIdAssetsRoute
   '/_authed/characters/$characterId/calendar': typeof AuthedCharactersCharacterIdCalendarRoute
   '/_authed/characters/$characterId/contracts': typeof AuthedCharactersCharacterIdContractsRoute
+  '/_authed/characters/$characterId/fittings': typeof AuthedCharactersCharacterIdFittingsRoute
   '/_authed/characters/$characterId/industry': typeof AuthedCharactersCharacterIdIndustryRoute
   '/_authed/characters/$characterId/intel': typeof AuthedCharactersCharacterIdIntelRoute
   '/_authed/characters/$characterId/killmails': typeof AuthedCharactersCharacterIdKillmailsRoute
@@ -478,6 +488,7 @@ export interface FileRouteTypes {
     | '/characters/$characterId/assets'
     | '/characters/$characterId/calendar'
     | '/characters/$characterId/contracts'
+    | '/characters/$characterId/fittings'
     | '/characters/$characterId/industry'
     | '/characters/$characterId/intel'
     | '/characters/$characterId/killmails'
@@ -521,6 +532,7 @@ export interface FileRouteTypes {
     | '/characters/$characterId/assets'
     | '/characters/$characterId/calendar'
     | '/characters/$characterId/contracts'
+    | '/characters/$characterId/fittings'
     | '/characters/$characterId/industry'
     | '/characters/$characterId/intel'
     | '/characters/$characterId/killmails'
@@ -569,6 +581,7 @@ export interface FileRouteTypes {
     | '/_authed/characters/$characterId/assets'
     | '/_authed/characters/$characterId/calendar'
     | '/_authed/characters/$characterId/contracts'
+    | '/_authed/characters/$characterId/fittings'
     | '/_authed/characters/$characterId/industry'
     | '/_authed/characters/$characterId/intel'
     | '/_authed/characters/$characterId/killmails'
@@ -776,6 +789,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedCharactersCharacterIdContractsRouteImport
       parentRoute: typeof AuthedCharactersCharacterIdRoute
     }
+    '/_authed/characters/$characterId/fittings': {
+      id: '/_authed/characters/$characterId/fittings'
+      path: '/fittings'
+      fullPath: '/characters/$characterId/fittings'
+      preLoaderRoute: typeof AuthedCharactersCharacterIdFittingsRouteImport
+      parentRoute: typeof AuthedCharactersCharacterIdRoute
+    }
     '/_authed/characters/$characterId/industry': {
       id: '/_authed/characters/$characterId/industry'
       path: '/industry'
@@ -960,6 +980,7 @@ interface AuthedCharactersCharacterIdRouteChildren {
   AuthedCharactersCharacterIdAssetsRoute: typeof AuthedCharactersCharacterIdAssetsRoute
   AuthedCharactersCharacterIdCalendarRoute: typeof AuthedCharactersCharacterIdCalendarRoute
   AuthedCharactersCharacterIdContractsRoute: typeof AuthedCharactersCharacterIdContractsRoute
+  AuthedCharactersCharacterIdFittingsRoute: typeof AuthedCharactersCharacterIdFittingsRoute
   AuthedCharactersCharacterIdIndustryRoute: typeof AuthedCharactersCharacterIdIndustryRoute
   AuthedCharactersCharacterIdIntelRoute: typeof AuthedCharactersCharacterIdIntelRoute
   AuthedCharactersCharacterIdKillmailsRoute: typeof AuthedCharactersCharacterIdKillmailsRoute
@@ -978,6 +999,8 @@ const AuthedCharactersCharacterIdRouteChildren: AuthedCharactersCharacterIdRoute
       AuthedCharactersCharacterIdCalendarRoute,
     AuthedCharactersCharacterIdContractsRoute:
       AuthedCharactersCharacterIdContractsRoute,
+    AuthedCharactersCharacterIdFittingsRoute:
+      AuthedCharactersCharacterIdFittingsRoute,
     AuthedCharactersCharacterIdIndustryRoute:
       AuthedCharactersCharacterIdIndustryRoute,
     AuthedCharactersCharacterIdIntelRoute:

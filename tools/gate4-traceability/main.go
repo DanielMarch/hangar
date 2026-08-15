@@ -123,6 +123,16 @@ func run(repoRoot, version string) error {
 			failures = append(failures, "Gate 4.2: route neither mapped nor recorded: "+row.Route)
 		}
 	}
+	// Gate 4.1's evidence, checked rather than taken on trust (defect B51 —
+	// see tools/gate4-traceability/verification_tests.go). A row is only
+	// "verified" if the test it cites exists.
+	missingTests, err := checkVerificationTests(repoRoot, rows)
+	if err != nil {
+		return fmt.Errorf("checking verification tests: %w", err)
+	}
+	for _, m := range missingTests {
+		failures = append(failures, "Gate 4.1: "+m)
+	}
 	if len(failures) > 0 {
 		fmt.Fprintln(os.Stderr, "\nGATE 4 IS NOT MET. The artefacts above record it, which is the point:")
 		for _, f := range failures {

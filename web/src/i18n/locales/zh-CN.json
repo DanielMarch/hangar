@@ -103,6 +103,7 @@
       "calendar": "日历",
       "industry": "工业",
       "killmails": "击杀记录",
+      "fittings": "装配",
       "intel": "情报"
     },
     "sheet": {
@@ -154,6 +155,9 @@
     },
     "killmails": {
       "heading": "击杀记录"
+    },
+    "fittings": {
+      "heading": "装配"
     },
     "intel": {
       "heading": "情报"

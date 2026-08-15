@@ -76,11 +76,43 @@ var globalDispatch = map[string]globalHandler{
 		}
 		return res.RowsAffected, nil
 	},
+
+	// ── PHASE 20.7 (B48) ─────────────────────────────────────────────────
+	// Two more parameterless, unauthenticated routes whose tables and
+	// endpoints shipped without a writer. Both belong here for exactly the
+	// reason /markets/prices does: no path parameter, no scope, no token, no
+	// owner to elect.
+	insurancePricesPath: func(ctx context.Context, s *store.Store, body []byte) (int32, error) {
+		dto, err := handlers.ParseInsurancePrices(body)
+		if err != nil {
+			return 0, err
+		}
+		res, err := handlers.SyncInsurancePrices(ctx, s, dto)
+		if err != nil {
+			return 0, err
+		}
+		return res.RowsAffected, nil
+	},
+	metaStatusPath: func(ctx context.Context, s *store.Store, body []byte) (int32, error) {
+		dto, err := handlers.ParseEsiStatus(body)
+		if err != nil {
+			return 0, err
+		}
+		res, err := handlers.SyncEsiStatus(ctx, s, dto)
+		if err != nil {
+			return 0, err
+		}
+		return res.RowsAffected, nil
+	},
 }
 
 const (
 	marketPricesPath  = "/markets/prices"
 	marketHistoryPath = "/markets/{region_id}/history"
+
+	// PHASE 20.7 (B48). Capability #42's and #45's upstream routes.
+	insurancePricesPath = "/insurance/prices"
+	metaStatusPath      = "/meta/status"
 
 	// maxMarketHistoryPairs bounds one pass of the market-history fan-out.
 	//

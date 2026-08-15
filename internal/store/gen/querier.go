@@ -266,6 +266,19 @@ type Querier interface {
 	// shows up again in the response, so without this a destroyed clone would
 	// linger forever.
 	DeleteCharacterClonesNotIn(ctx context.Context, characterID int64, keepJumpCloneIds []int64) error
+	// PHASE 20.7 (B48). DeleteCharacterFittingsNotIn prunes whole fittings and
+	// app.character_fitting_item cascades with them, so a DELETED fitting takes
+	// its items along. An EDITED one does not: the fitting_id survives, and
+	// without this the modules a pilot removed would stay behind forever.
+	//
+	// That is not a cosmetic staleness. Capability #8's headline feature is the
+	// EFT export, which is rendered by walking exactly these rows — a ghost
+	// module produces a fitting block that the pilot never saved and that will
+	// not fit the hull. Pruning by absence is safe here in a way it is not for
+	// reference data (see SyncInsurancePrices' note): this set is the complete
+	// item list for ONE fitting, delivered in the same response as the fitting
+	// itself, so "absent" is unambiguous.
+	DeleteCharacterFittingItemsNotIn(ctx context.Context, characterID int64, fittingID int64, keepRecordIds []int64) error
 	DeleteCharacterFittingsNotIn(ctx context.Context, characterID int64, keepFittingIds []int64) error
 	// PHASE 7 FIX: cast was ::int[] (int32) against a type_id column Phase 1b
 	// had migrated as `integer` — the live spec declares type_id int64
@@ -732,6 +745,14 @@ type Querier interface {
 	ListCorporationStructures(ctx context.Context, corporationID int64) ([]AppCorporationStructure, error)
 	ListCorporationTitles(ctx context.Context, corporationID int64) ([]AppCorporationTitle, error)
 	// Phase 15 addition: GET /api/v1/alliances/{id}/corporations.
+	//
+	// SCOPE (Phase 20.7): this returns the member corporations HANGAR already
+	// has rows for, which today means the ones it tracks a character in — no
+	// alliance sync exists to widen it (capability #37 is recorded unreachable
+	// in internal/sync/worker/unmapped.go). When one is built it must NOT
+	// insert a stub per member id: a large alliance has hundreds, and
+	// `(id, '')` rows nothing ever resolves are precisely the empty-name defect
+	// that made app.alliance useless for the whole life of the project.
 	ListCorporationsByAlliance(ctx context.Context, allianceID *int64) ([]AppCorporation, error)
 	// The admin-visible dead-letter queue (§4.4: "an alert is lost only if it
 	// was neither delivered nor dead-lettered; dead-lettering is a visible
@@ -796,6 +817,16 @@ type Querier interface {
 	ListKillmailAttackers(ctx context.Context, ownerKind string, ownerID int64, killmailID int64) ([]AppKillmailAttacker, error)
 	ListKillmailItems(ctx context.Context, ownerKind string, ownerID int64, killmailID int64) ([]AppKillmailItem, error)
 	ListKillmailsByOwner(ctx context.Context, ownerKind string, ownerID int64, pageSize int32) ([]AppKillmail, error)
+	// PHASE 20.7 (B48). The killmail ids this owner already has a stored detail
+	// for, so the two-stage sync can skip re-fetching them.
+	//
+	// This is what makes the fan-out bounded. A killmail is IMMUTABLE — CCP
+	// never revises one — so a killmail already stored never needs fetching
+	// again, and in steady state the recent list returns almost entirely ids
+	// that are already here and the pass makes ZERO detail calls. Without this
+	// the sync would re-fetch every killmail in the recent window on every
+	// pass, forever, for data that cannot have changed.
+	ListKnownKillmailIDs(ctx context.Context, ownerKind string, ownerID int64) ([]int64, error)
 	// clustered -> solo: enumerate every bucket the shared table knows about so
 	// the fast path can be primed for all of them before it engages, not just
 	// the one the next request happens to touch.
@@ -1493,6 +1524,21 @@ type Querier interface {
 	SyncCharacterSheet(ctx context.Context, arg SyncCharacterSheetParams) (AppCharacter, error)
 	TouchApiTokenLastUsed(ctx context.Context, tokenID uuid.UUID) error
 	TouchUserLastLogin(ctx context.Context, userID uuid.UUID) error
+	// PHASE 20.7 (B48/B50). The fields only the project DETAIL route carries.
+	//
+	// This exists because UpsertCorporationProject's ON CONFLICT clause updates
+	// ONLY state and current_progress — deliberately, so that the frequently
+	// running list sync cannot blank what the detail sync wrote. The corollary
+	// is that the detail sync cannot write through that upsert either, because
+	// for an existing project it would take the same conflict path. So the two
+	// routes write disjoint column sets through two statements, and neither can
+	// erase the other's.
+	//
+	// contribution_type is derived from the detail response's `configuration`,
+	// whose oneOf key names the kind of contribution the project wants
+	// ('mine_material', 'manufacture_item', 'destroy_npc', ...); expires_at is
+	// `details.expires`. Neither appears on the list route at all.
+	UpdateCorporationProjectDetail(ctx context.Context, projectID uuid.UUID, contributionType *string, expiresAt *time.Time) error
 	// Updates only desired/actual groups and the reconciliation timestamp —
 	// deliberately narrower than UpsertProvisioningState, which would clobber
 	// remote_identity/challenge_token/linked_at with NULLs on every

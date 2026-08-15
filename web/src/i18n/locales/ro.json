@@ -103,6 +103,7 @@
       "calendar": "Calendar",
       "industry": "Industrie",
       "killmails": "Killmail-uri",
+      "fittings": "Configurații",
       "intel": "Informații"
     },
     "sheet": {
@@ -154,6 +155,9 @@
     },
     "killmails": {
       "heading": "Killmail-uri"
+    },
+    "fittings": {
+      "heading": "Configurații"
     },
     "intel": {
       "heading": "Informații"

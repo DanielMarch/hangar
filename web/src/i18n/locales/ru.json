@@ -103,6 +103,7 @@
       "calendar": "Календарь",
       "industry": "Промышленность",
       "killmails": "Килмейлы",
+      "fittings": "Фиты",
       "intel": "Разведка"
     },
     "sheet": {
@@ -154,6 +155,9 @@
     },
     "killmails": {
       "heading": "Килмейлы"
+    },
+    "fittings": {
+      "heading": "Фиты"
     },
     "intel": {
       "heading": "Разведка"

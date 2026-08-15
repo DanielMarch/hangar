@@ -43,12 +43,44 @@ For a real deployment later, register a **second** application with the public H
 rather than editing this one — the localhost registration stays useful for development, and CCP
 allows only one callback URL per application.
 
-## 3. Scopes — 47, and why each
+## 3. Scopes — 50, and why each
 
-HANGAR's sync set is 88 routes, and 47 distinct scopes are declared across their `GET`
+HANGAR's sync set is 93 routes, and 50 distinct scopes are declared across their `GET`
 operations. That is the complete set, and it is a **read-only** set.
 
-> ### ⚠ This count moved from 46 to 47 in Phase 20.6 (defect B47)
+> ### ⚠ This count moved from 47 to 50 in Phase 20.7 (defect B48)
+>
+> Phase 20.7 wired sync handlers for capabilities whose tables, store queries and `/api/v1`
+> endpoints had shipped with **no writer at all**. Three of the newly dispatched routes are
+> scoped, so the derived set grew by three:
+>
+> | Scope | Route | Capability |
+> | :-- | :-- | :-- |
+> | `esi-fittings.read_fittings.v1` | `GET /characters/{character_id}/fittings` | #8 Fittings (+ EFT export) |
+> | `esi-killmails.read_killmails.v1` | `GET /characters/{character_id}/killmails/recent` | #39 Killmails |
+> | `esi-killmails.read_corporation_killmails.v1` | `GET /corporations/{corporation_id}/killmails/recent` | #39 Killmails |
+>
+> The other newly wired routes need no scope: `/insurance/prices`, `/meta/status` and
+> `/killmails/{killmail_id}/{killmail_hash}` are unauthenticated, and contact notifications and
+> the two corporation-project routes reuse scopes the grant already carried.
+>
+> **The same re-authorization rule as B47 applies, for the same reason.** Enabling the three in
+> the developer portal is necessary and not sufficient — a stored token carries the grant it was
+> minted with, and `DisableUnscopedSubscriptions` refuses to create a subscription for a route
+> whose scopes the acting character's token does not hold. Observed exactly so on the
+> development installation: after the rebuilt binary reconciled, subscriptions went 88 -> 93 and
+> the three scoped routes above were **not** among them, staying correctly unsubscribed rather
+> than failing at fetch time with a 403.
+>
+> **Two scopes were enabled in the portal and are deliberately NOT requested.**
+> `esi-universe.read_structures.v1` and `esi-alliances.read_contacts.v1` back capability #41's
+> structure resolution and #37's alliance contacts, which this phase did **not** wire — see
+> `internal/sync/worker/unmapped.go` for the recorded reason (both need machinery that does not
+> exist yet: a location-id enumeration query, and an alliance-scoped acting-character elector).
+> A scope enabled in the portal but absent from the derived set costs nothing and is not
+> requested at login; it will be picked up automatically when those routes are wired.
+
+> ### This count moved from 46 to 47 in Phase 20.6 (defect B47)
 >
 > The scope set is **derived from the sync set** — `go run ./tools/scopedump` reads
 > `worker.SyncSet()` against the embedded spec snapshot and prints it. That derivation is only
@@ -100,7 +132,9 @@ Grouped as the portal's tree presents them:
 | `esi-clones` | `read_clones.v1`, `read_implants.v1` |
 | `esi-contracts` | `read_character_contracts.v1`, `read_corporation_contracts.v1` |
 | `esi-corporations` | `read_blueprints.v1`, `read_contacts.v1`, `read_container_logs.v1`, `read_corporation_membership.v1`, `read_divisions.v1`, `read_facilities.v1`, `read_medals.v1`, `read_projects.v1`, `read_standings.v1`, `read_starbases.v1`, `read_structures.v1`, `read_titles.v1`, `track_members.v1` |
+| `esi-fittings` | `read_fittings.v1` |
 | `esi-industry` | `read_character_jobs.v1`, `read_character_mining.v1`, `read_corporation_jobs.v1`, `read_corporation_mining.v1` |
+| `esi-killmails` | `read_corporation_killmails.v1`, `read_killmails.v1` |
 | `esi-location` | `read_location.v1`, `read_online.v1`, `read_ship_type.v1` |
 | `esi-mail` | `read_mail.v1` |
 | `esi-markets` | `read_character_orders.v1`, `read_corporation_orders.v1` |

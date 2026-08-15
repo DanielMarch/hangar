@@ -351,21 +351,59 @@ func locationLookupHandler(deps api.Deps, locationType string) func(context.Cont
 // esiStatusHandler answers /meta/esi-status — ESI's own service health,
 // which drives internal/esi gateway decisions (never conflated with
 // serverStatusHandler's Tranquility player/VIP/version data, per the
-// roadmap's explicit "two status endpoints, never conflated"). This phase
-// wires it to the route catalogue's blocked-route count as the simplest
-// honest signal available without a dedicated ESI health-check table;
-// internal/esi's breaker/rate-limit state (Phase 3/4) would be a richer
-// source for a later phase to wire in.
+// roadmap's explicit "two status endpoints, never conflated").
+//
+// ── DEFECT B48 (PHASE 20.7): THE FIELD THAT COULD NEVER SAY NO ───────────
+// This used to answer `{"blocked_route_count": n, "healthy": true}` — with
+// `true` as a LITERAL. The one field an operator reads to decide whether ESI
+// is the problem was asserted, not measured, and could not report unhealthy
+// on any installation under any circumstance. The blocked-route count it
+// stood next to is a fact about HANGAR's own compatibility pin, not about
+// ESI's health, so the endpoint never asked ESI anything at all.
+//
+// It now reads the snapshot GET /meta/status syncs into app.setting
+// (handlers.SyncEsiStatus) and reports what CCP actually said: how many
+// routes are Down, how many Degraded, and a `healthy` derived from those.
+// The blocked-route count stays — it is genuinely useful and genuinely
+// HANGAR's — but it is no longer mistaken for an ESI health signal.
+//
+// Before the first successful sync there is nothing to report, and that
+// renders as UNAVAILABLE with an explanation rather than as a cheerful
+// default. "Healthy" with no measurement behind it is the bug, and
+// defaulting to it on the empty case would reintroduce it for exactly the
+// installations least able to notice — the new ones.
 func esiStatusHandler(deps api.Deps) func(context.Context, *EmptyIn) (*ItemOut, error) {
 	return func(ctx context.Context, _ *EmptyIn) (*ItemOut, error) {
 		blocked, err := deps.Store.ListBlockedEsiRoutes(ctx)
 		if err != nil {
 			return nil, api.Internal("checking esi status", err)
 		}
-		data := map[string]any{"blocked_route_count": len(blocked), "healthy": true}
-		return &ItemOut{Body: api.Item[map[string]any]{Data: &data, Sync: api.Sync{}}}, nil
+
+		row, err := deps.Store.GetSetting(ctx, handlers.EsiStatusSettingKey)
+		if err != nil {
+			scheduled, schedErr := deps.Store.SubscriptionEnabledForPath(ctx, esiMetaStatusRoutePath)
+			if schedErr != nil || scheduled {
+				return &ItemOut{Body: api.UnavailableItem[map[string]any](
+					"ESI service health has not been synced yet — ESI's /meta/status route is scheduled but has not completed a successful run on this installation")}, nil
+			}
+			return &ItemOut{Body: api.UnavailableItem[map[string]any](
+				"ESI service health is not being synced on this installation — no subscription for ESI's /meta/status route is enabled")}, nil
+		}
+
+		var snapshot map[string]any
+		if err := json.Unmarshal(row.Value, &snapshot); err != nil {
+			return nil, api.Internal("decoding the stored esi status snapshot", err)
+		}
+		snapshot["blocked_route_count"] = len(blocked)
+		return &ItemOut{Body: api.Item[map[string]any]{Data: &snapshot, Sync: api.Sync{}}}, nil
 	}
 }
+
+// esiMetaStatusRoutePath is ESI's per-route health endpoint as app.esi_route
+// stores it (verbatim, Principle 5). Named here so the "is it scheduled?"
+// check and internal/sync/worker's globalDispatch key cannot drift apart —
+// the same discipline serverStatusRoutePath applies next door.
+const esiMetaStatusRoutePath = "/meta/status"
 
 // serverStatusRoutePath is ESI's status route as app.esi_route stores it
 // (verbatim, Principle 5). Named here so the "is it scheduled?" check and

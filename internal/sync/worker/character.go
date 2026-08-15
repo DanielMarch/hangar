@@ -61,6 +61,12 @@ const (
 	// on it.
 	characterAssetsPath = "/characters/{character_id}/assets"
 
+	// characterKillmailsPath is stage 1 of the killmail two-stage sync
+	// (PHASE 20.7, B48). Its detail route is fetched inside this route's own
+	// pass — killmail_fanout.go explains why it cannot have a subscription of
+	// its own.
+	characterKillmailsPath = "/characters/{character_id}/killmails/recent"
+
 	// ── DEFECT B47 (PHASE 20.6) ──────────────────────────────────────────
 	// The character half of the contract detail fan-outs. The CORPORATION
 	// half has been wired since Phase 9 (contractItemsPath/contractBidsPath
@@ -247,6 +253,23 @@ var characterDispatch = map[string]characterHandler{
 	// handlers behind it are B30's and were never dispatched either.
 	"/characters/{character_id}/calendar":      wrap(handlers.ParseCalendarEvents, handlers.SyncCalendarEvents),
 	"/characters/{character_id}/notifications": wrap(handlers.ParseCharacterNotifications, handlers.SyncCharacterNotifications),
+
+	// ── PHASE 20.7 (B48) ─────────────────────────────────────────────────
+	// Two capabilities whose tables, store queries and /api/v1 endpoints all
+	// shipped without a sync handler.
+	//
+	// Fittings backs THREE endpoints including the EFT export, which has
+	// been rendering an empty document on every installation. Its scope,
+	// esi-fittings.read_fittings.v1, was NOT in the 47-scope grant that
+	// existed when this entry was written — adding the entry is what moves
+	// the DERIVED scope set (tools/scopedump) and so what tells an operator
+	// to enable it; see docs/SSO_APPLICATION.md.
+	//
+	// Contact notifications is the second half of capability #11, whose
+	// first half (the character notifications feed) has been synced since
+	// Phase 9. Its scope was already held.
+	"/characters/{character_id}/fittings":               wrap(handlers.ParseFittings, handlers.SyncFittings),
+	"/characters/{character_id}/notifications/contacts": wrap(handlers.ParseContactNotifications, handlers.SyncContactNotifications),
 }
 
 // dataLevel404Routes marks the routes where the roadmap's edge case
@@ -328,6 +351,11 @@ func (w *CharacterWorker) Work(ctx context.Context, job *river.Job[planner.SyncJ
 		rowsAffected, outcome, syncErr = w.doContractItemsFanout(ctx, s, sub, route, args.EntityID, tok.Value)
 	case characterContractBidsPath:
 		rowsAffected, outcome, syncErr = w.doContractBidsFanout(ctx, s, sub, route, args.EntityID, tok.Value)
+	case characterKillmailsPath:
+		// PHASE 20.7 (B48). Two-stage: the recent list, then each unseen
+		// killmail's detail. See killmail_fanout.go for why both stages live
+		// in one subscription.
+		rowsAffected, outcome, syncErr = w.doKillmailFanout(ctx, s, sub, route, args.EntityID, tok.Value)
 	default:
 		handler, ok := characterDispatch[route.UpstreamPath]
 		if !ok {
@@ -601,7 +629,7 @@ func (w *CharacterWorker) fanoutDetail(
 	ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute,
 	characterID int64, accessToken, idPathParamName string,
 	items []fanoutDetailItem,
-	syncOne func(ctx context.Context, s *store.Store, id int64, body []byte) (int32, error),
+	syncOne func(ctx context.Context, s *store.Store, item fanoutDetailItem, body []byte) (int32, error),
 ) (int32, string, error) {
 	return runDetailFanout(ctx, w.Gateway, w.Policy, s, detailFanout{
 		sub: sub, route: route,
@@ -630,7 +658,8 @@ func (w *CharacterWorker) doCalendarEventDetailFanout(ctx context.Context, s *st
 		items[i] = fanoutDetailItem{id: e.EventID}
 	}
 	return w.fanoutDetail(ctx, s, sub, route, characterID, accessToken, "event_id", items,
-		func(ctx context.Context, s *store.Store, eventID int64, body []byte) (int32, error) {
+		func(ctx context.Context, s *store.Store, item fanoutDetailItem, body []byte) (int32, error) {
+			eventID := item.id
 			dto, err := handlers.ParseCalendarEventDetail(body)
 			if err != nil {
 				return 0, err
@@ -655,7 +684,8 @@ func (w *CharacterWorker) doCalendarAttendeesFanout(ctx context.Context, s *stor
 		items[i] = fanoutDetailItem{id: e.EventID}
 	}
 	return w.fanoutDetail(ctx, s, sub, route, characterID, accessToken, "event_id", items,
-		func(ctx context.Context, s *store.Store, eventID int64, body []byte) (int32, error) {
+		func(ctx context.Context, s *store.Store, item fanoutDetailItem, body []byte) (int32, error) {
+			eventID := item.id
 			dto, err := handlers.ParseCalendarAttendees(body)
 			if err != nil {
 				return 0, err
@@ -681,7 +711,8 @@ func (w *CharacterWorker) doPlanetColonyDetailFanout(ctx context.Context, s *sto
 		items[i] = fanoutDetailItem{id: int64(c.PlanetID)}
 	}
 	return w.fanoutDetail(ctx, s, sub, route, characterID, accessToken, "planet_id", items,
-		func(ctx context.Context, s *store.Store, planetID int64, body []byte) (int32, error) {
+		func(ctx context.Context, s *store.Store, item fanoutDetailItem, body []byte) (int32, error) {
+			planetID := item.id
 			dto, err := handlers.ParsePlanetColonyDetail(body)
 			if err != nil {
 				return 0, err
@@ -715,7 +746,8 @@ func (w *CharacterWorker) doContractItemsFanout(ctx context.Context, s *store.St
 		return 0, "", err
 	}
 	return w.fanoutDetail(ctx, s, sub, route, characterID, accessToken, "contract_id", items,
-		func(ctx context.Context, s *store.Store, contractID int64, body []byte) (int32, error) {
+		func(ctx context.Context, s *store.Store, item fanoutDetailItem, body []byte) (int32, error) {
+			contractID := item.id
 			dto, err := handlers.ParseContractItems(body)
 			if err != nil {
 				return 0, err
@@ -737,7 +769,8 @@ func (w *CharacterWorker) doContractBidsFanout(ctx context.Context, s *store.Sto
 		return 0, "", err
 	}
 	return w.fanoutDetail(ctx, s, sub, route, characterID, accessToken, "contract_id", items,
-		func(ctx context.Context, s *store.Store, contractID int64, body []byte) (int32, error) {
+		func(ctx context.Context, s *store.Store, item fanoutDetailItem, body []byte) (int32, error) {
+			contractID := item.id
 			dto, err := handlers.ParseContractBids(body)
 			if err != nil {
 				return 0, err

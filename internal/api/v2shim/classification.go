@@ -109,10 +109,27 @@ const (
 	// reasonKillmailHash is KillmailsController's specific blocker, separate
 	// from reasonNoKeysetWindow because building the store query would not
 	// resolve it.
-	reasonKillmailHash = "shimmable in shape, blocked on two things: legacy's `attacker_hash` is a " +
-		"SeAT-internal surrogate app.killmail_attacker has no column for (APPENDIX_C_MIGRATION.md §7), " +
-		"and app.killmail has NO WRITER at all — the killmail sync handler was never built " +
-		"(defect B47's not-built class), so the table is empty on every installation."
+	// PHASE 20.7 (B48): one of this reason's two blockers is now GONE and the
+	// other is unchanged, which is why the route is still not servable.
+	//
+	// The killmail SYNC was built this phase — a two-stage fan-out over the
+	// recent-list routes into app.killmail/killmail_attacker/killmail_item
+	// (internal/sync/worker/killmail_fanout.go) — so "the table is empty on
+	// every installation" is no longer true.
+	//
+	// What remains is the surrogate, and it is not a matter of effort:
+	// legacy's `attacker_hash` is a value SeAT COMPUTED FOR ITSELF to
+	// deduplicate attacker rows. It is not in any ESI response, so HANGAR
+	// cannot derive it from upstream data, and app.killmail_attacker
+	// deliberately has no column for it (APPENDIX_C_MIGRATION.md §7). A
+	// byte-identical response is therefore impossible for these three routes
+	// no matter how complete the sync becomes — which is exactly the
+	// distinction Gate 7 exists to record: SYNC CLOSED, SHIM NOT.
+	reasonKillmailHash = "shimmable in shape, blocked on legacy's `attacker_hash`: a SeAT-internal " +
+		"surrogate app.killmail_attacker has no column for and no ESI response carries " +
+		"(APPENDIX_C_MIGRATION.md §7), so it cannot be derived. The sync half of this blocker was " +
+		"CLOSED in Phase 20.7 (B48) — app.killmail now has a writer — but the surrogate is not " +
+		"recoverable from upstream data at any level of effort."
 
 	// reasonMySQLDoubleRounding is a MEASURED conflict between the corpus and
 	// this package's own double formatter, found in Phase 20.6 by writing the
@@ -124,22 +141,32 @@ const (
 	//	strconv.ParseFloat("9007199254740993.01", 64) == 9007199254740994
 	//	9007199254741000                              != 9007199254740994   (3 ulps apart)
 	//
-	// So legacy's at-rest value is not the IEEE-754 value nearest the number
-	// it was given — 9007199254741000 is that number rounded to FOURTEEN
-	// significant digits. encode.go's formatPHPDouble implements the shortest
-	// round-tripping form on the stated premise that "PHP's default
-	// serialize_precision is -1", and given the float 9007199254741000 it
-	// emits the right bytes (encode_test.go pins exactly that). The conflict
-	// is upstream of the encoder: either the recorder's PHP rendered at
-	// precision 14, or MySQL's DOUBLE column did not hold what strtod would.
+	// ── SETTLED IN PHASE 20.7, AND THE 14-DIGIT READING WAS WRONG ────────
+	// The measurement 20.6 asked for was taken: the recorder's own pinned
+	// interpreter (php:8.2-cli, resolving to 8.2.33) run with
+	// serialize_precision instrumented. It reports
 	//
-	// Every OTHER double in the corpus (5.55, 0.1, 27289.0) is short enough
-	// that shortest-round-trip and 14 significant digits are indistinguishable
-	// — so the one value that can tell the two rules apart lives in the one
-	// route nobody had implemented, and the ambiguity has never been
-	// exercised. That is the finding, and it is not resolvable from inside Go:
-	// settling it means re-running testdata/legacy-api-v2/recorder against PHP
-	// 8.2.33 with serialize_precision instrumented.
+	//	serialize_precision = -1        (the default since PHP 7.1)
+	//	precision           = 14
+	//	json_encode(9007199254740993.01) = 9007199254740994
+	//
+	// so json_encode uses SHORTEST ROUND-TRIP, exactly as formatPHPDouble
+	// already assumed. The 14-significant-digit hypothesis is refuted twice
+	// over: forcing serialize_precision=14 produces "9.007199254741e+15",
+	// EXPONENT form, which is not the corpus's "9007199254741000" either.
+	//
+	// What the corpus records is therefore not a rounded rendering of
+	// ...993.01 at all — 9007199254741000.0 is an exactly representable
+	// double three ulps away, and PHP prints it as those digits because that
+	// IS its shortest round-trip form. The divergence is in what legacy's
+	// MySQL DOUBLE column came to hold, upstream of any encoder.
+	//
+	// formatPHPDouble is consequently UNCHANGED and now pinned against the
+	// transcript, including the exponent-form boundary
+	// (encode_php_precision_test.go). The shim can reproduce money above
+	// 2^53; what it cannot do is reproduce a value legacy stored as a
+	// different double from the one it was given, which is a corpus fact and
+	// not an encoder defect.
 	//
 	// Seeding HANGAR with 9007199254741000 to force a match was considered and
 	// REJECTED: legacy was GIVEN ...993.01 and stored ...741000; HANGAR is
@@ -148,9 +175,10 @@ const (
 	// fixture would be making the test agree with itself.
 	reasonMySQLDoubleRounding = "blocked on a MEASURED corpus conflict, not on missing code. The " +
 		"recording's `amount` (9007199254741000) is a different float64 from the value the fixture " +
-		"seeds (9007199254740993.01 parses to 9007199254740994) — legacy's loss is MySQL's/PHP's " +
-		"14-significant-digit rounding, not IEEE-754 nearest, so Money's float64 round-trip cannot " +
-		"reproduce it. Resolving it needs the PHP recorder re-run with serialize_precision measured."
+		"seeds (9007199254740993.01 parses to 9007199254740994, 3 ulps away). MEASURED in 20.7 against " +
+		"PHP 8.2.33: serialize_precision is -1 (shortest round-trip), NOT 14-significant-digit rounding, " +
+		"so the encoder is correct and unchanged — the two systems genuinely hold different doubles, " +
+		"and no formatting rule can make HANGAR's exact NUMERIC(30,2) emit legacy's lossy DOUBLE."
 
 	// reasonSurrogateID is the blocker three of the four wallet routes hit
 	// and the fourth does not, which is why byte-verification is the test

@@ -18,16 +18,54 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// ProjectProgress is a project's progress pair. CCP reports progress as
+// int64 COUNTS (see the contributors note below: `contributed` is progress,
+// not isk), which is why these are integers and the columns they land in are
+// numeric(30,2) — numeric holds an int64 exactly and the column predates the
+// discovery that the field is not money.
+type ProjectProgress struct {
+	Current int64 `json:"current"`
+	Desired int64 `json:"desired"`
+}
+
+// ProjectReward is a project's isk pool: `initial` is what the corporation
+// reserved, `remaining` is what is still unawarded.
+type ProjectReward struct {
+	Initial   float64 `json:"initial"`
+	Remaining float64 `json:"remaining"`
+}
+
 // CorporationProjectDTO mirrors one element of GET /corporations/{id}/projects.
+//
+// ── DEFECT B50 (PHASE 20.7) ──────────────────────────────────────────────
+// Every field on this struct was wrong, and none of it had ever run.
+//
+// The struct read `project_id`, `current_progress`, `target_progress`,
+// `reward_isk`, `contribution_type` and `expires_at`. The live spec's list
+// element has `id`, `last_modified`, `name`, `progress {current, desired}`,
+// `reward {initial, remaining}` and `state` — and does not carry
+// contribution_type or expires_at at ALL; those two come from the project
+// DETAIL route, which is precisely why Appendix A counts the detail as a
+// separate deliverable.
+//
+// The consequence was not a missing column here and there. `project_id` is
+// the PRIMARY KEY and `id` is what CCP sends, so every project would have
+// decoded to the nil uuid — and a corporation with five projects would have
+// upserted five times over ONE row, leaving one nameless project and
+// silently discarding the rest.
+//
+// It survived for the same reason B49 did, and was found the same way: the
+// corporation on the live installation has no projects (the cached body for
+// its last run is `{"projects":[]}`, 16 bytes), so this parser had never
+// been handed a project. Fixed by reading the schema rather than the field
+// names, exactly as B49's note instructs.
 type CorporationProjectDTO struct {
-	ContributionType *string             `json:"contribution_type,omitempty"`
-	CurrentProgress  decimal.NullDecimal `json:"current_progress"`
-	ExpiresAt        time.Time           `json:"expires_at,omitempty"`
-	Name             string              `json:"name"`
-	ProjectID        uuid.UUID           `json:"project_id"`
-	RewardIsk        decimal.NullDecimal `json:"reward_isk"`
-	State            string              `json:"state"`
-	TargetProgress   decimal.NullDecimal `json:"target_progress"`
+	ID           uuid.UUID       `json:"id"`
+	LastModified time.Time       `json:"last_modified"`
+	Name         string          `json:"name"`
+	Progress     ProjectProgress `json:"progress"`
+	Reward       *ProjectReward  `json:"reward,omitempty"`
+	State        string          `json:"state"`
 }
 
 // corporationProjectsListing is the ENVELOPE GET
@@ -65,17 +103,43 @@ func ParseCorporationProjects(body []byte) ([]CorporationProjectDTO, error) {
 	return listing.Projects, nil
 }
 
+// SyncCorporationProjects upserts the project list.
+//
+// contribution_type and expires_at are passed as nil because THIS ROUTE DOES
+// NOT CARRY THEM (B50). They are written by the project-detail sync, and
+// UpsertCorporationProject's ON CONFLICT clause deliberately updates only
+// state and current_progress — so a list pass following a detail pass cannot
+// blank the two fields the detail pass is the only source of.
 func SyncCorporationProjects(ctx context.Context, s *store.Store, corporationID int64, projects []CorporationProjectDTO) (SyncResult, error) {
 	for _, p := range projects {
 		if _, err := s.UpsertCorporationProject(ctx, gen.UpsertCorporationProjectParams{
-			ProjectID: p.ProjectID, CorporationID: corporationID, Name: p.Name, State: p.State,
-			ContributionType: p.ContributionType, TargetProgress: p.TargetProgress,
-			CurrentProgress: p.CurrentProgress, RewardIsk: p.RewardIsk, ExpiresAt: nilIfZero(p.ExpiresAt),
+			ProjectID: p.ID, CorporationID: corporationID, Name: p.Name, State: p.State,
+			ContributionType: nil,
+			TargetProgress:   decimal.NewNullDecimal(decimal.NewFromInt(p.Progress.Desired)),
+			CurrentProgress:  decimal.NewNullDecimal(decimal.NewFromInt(p.Progress.Current)),
+			RewardIsk:        projectRewardIsk(p.Reward),
+			ExpiresAt:        nil,
 		}); ignoreUnchanged(err) != nil {
-			return SyncResult{}, fmt.Errorf("handlers: upserting corporation project %s for corporation %d: %w", p.ProjectID, corporationID, err)
+			return SyncResult{}, fmt.Errorf("handlers: upserting corporation project %s for corporation %d: %w", p.ID, corporationID, err)
 		}
 	}
 	return SyncResult{RowsAffected: int32(len(projects))}, nil
+}
+
+// projectRewardIsk maps the reward pair onto app.corporation_project's single
+// reward_isk column.
+//
+// `initial` is chosen, not `remaining`: reward_isk names what the project is
+// WORTH, which is a fixed property of the project, whereas `remaining` falls
+// as contributors are paid and would make a fully-paid project read as a
+// zero-reward one. `remaining` is not persisted anywhere — there is no
+// column for it, and inventing one to hold a value nothing reads would be a
+// migration for its own sake.
+func projectRewardIsk(r *ProjectReward) decimal.NullDecimal {
+	if r == nil {
+		return decimal.NullDecimal{}
+	}
+	return decimal.NewNullDecimal(decimal.NewFromFloat(r.Initial))
 }
 
 // ── DEFECT B38's LEFTOVER, CLOSED IN PHASE 20.5 ──────────────────────────

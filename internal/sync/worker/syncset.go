@@ -45,6 +45,15 @@ func fanoutRoutes() map[string]sync.EntityKind {
 		characterContractItemsPath: sync.EntityCharacter,
 		characterContractBidsPath:  sync.EntityCharacter,
 
+		// PHASE 20.7 (B48). The killmail recent-list routes are listed as
+		// fan-outs because each one's pass makes MORE than the single call a
+		// dispatch-table entry describes: it walks the list, then fetches the
+		// detail of every killmail it has not seen. The route that is not
+		// here is /killmails/{id}/{hash} itself — it has no subscription,
+		// because a killmail cannot be persisted before its detail is
+		// fetched, so there would be nothing for it to enumerate.
+		characterKillmailsPath: sync.EntityCharacter,
+
 		// Corporation-owned detail and per-division fan-outs.
 		walletJournalPath:         sync.EntityCorporation,
 		walletTransactionsPath:    sync.EntityCorporation,
@@ -55,6 +64,12 @@ func fanoutRoutes() map[string]sync.EntityKind {
 		contractItemsPath:         sync.EntityCorporation,
 		contractBidsPath:          sync.EntityCorporation,
 		projectContributorsPath:   sync.EntityCorporation,
+
+		// PHASE 20.7 (B48): capability #25's two remaining routes and the
+		// corporation half of the killmail sync.
+		projectDetailPath:        sync.EntityCorporation,
+		projectContributionPath:  sync.EntityCorporation,
+		corporationKillmailsPath: sync.EntityCorporation,
 
 		// Global fan-out: one subscription, fanning out over the
 		// (region_id, type_id) pairs this installation actually tracks.

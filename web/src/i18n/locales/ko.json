@@ -103,6 +103,7 @@
       "calendar": "캘린더",
       "industry": "산업",
       "killmails": "킬메일",
+      "fittings": "피팅",
       "intel": "정보"
     },
     "sheet": {
@@ -154,6 +155,9 @@
     },
     "killmails": {
       "heading": "킬메일"
+    },
+    "fittings": {
+      "heading": "피팅"
     },
     "intel": {
       "heading": "정보"

@@ -161,6 +161,40 @@ func (q *Queries) ListKillmailsByOwner(ctx context.Context, ownerKind string, ow
 	return items, nil
 }
 
+const listKnownKillmailIDs = `-- name: ListKnownKillmailIDs :many
+SELECT killmail_id FROM app.killmail
+ WHERE owner_kind = $1 AND owner_id = $2
+`
+
+// PHASE 20.7 (B48). The killmail ids this owner already has a stored detail
+// for, so the two-stage sync can skip re-fetching them.
+//
+// This is what makes the fan-out bounded. A killmail is IMMUTABLE — CCP
+// never revises one — so a killmail already stored never needs fetching
+// again, and in steady state the recent list returns almost entirely ids
+// that are already here and the pass makes ZERO detail calls. Without this
+// the sync would re-fetch every killmail in the recent window on every
+// pass, forever, for data that cannot have changed.
+func (q *Queries) ListKnownKillmailIDs(ctx context.Context, ownerKind string, ownerID int64) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listKnownKillmailIDs, ownerKind, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var killmail_id int64
+		if err := rows.Scan(&killmail_id); err != nil {
+			return nil, err
+		}
+		items = append(items, killmail_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertKillmail = `-- name: UpsertKillmail :one
 
 INSERT INTO app.killmail AS t (
