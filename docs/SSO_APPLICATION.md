@@ -48,6 +48,24 @@ allows only one callback URL per application.
 HANGAR's sync set is 102 routes, and 52 distinct scopes are declared across their `GET`
 operations. That is the complete set, and it is a **read-only** set.
 
+> ### Phase 20.9 did NOT move the count, and re-derived it to prove that
+>
+> 20.9's work was the `/api/v2` shim (eight routes moved from `pending` to `served`) and one
+> persistence gap (`app.character_skill_summary`). The shim is **read-only by construction** and
+> reads HANGAR's own store rather than ESI, so it declares no scopes; the new table is written by
+> a route already in the sync set. `go run ./tools/scopedump` re-run at this commit still prints
+> **52**, and the diff against `app.character_token_scope` is unchanged from 20.8: the same two
+> scopes are derived and not granted.
+>
+> **The re-authorization is STILL OUTSTANDING**, and one expectation about it is now measured
+> rather than predicted. When the grant lands, `/universe/structures/{structure_id}` will be
+> subscribed and will resolve **nothing** — not 403, *nothing*. `ListCharacterStructureIDs`
+> unions four sources (character assets in structures, clones in structures,
+> `character_location.structure_id`, and structures owned by member corporations) and **all four
+> hold zero rows** on this installation, so the fan-out enumerates an empty set and issues no
+> requests at all. The 403-is-data reading applies to an installation that references an Upwell
+> structure; this one does not.
+
 > ### ⚠ This count moved from 50 to 52 in Phase 20.8 (capabilities #37 and #41)
 >
 > Phase 20.8 wired the last two unreachable Appendix A capabilities. Both needed machinery

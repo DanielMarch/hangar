@@ -62,3 +62,33 @@ func optInt(v *int64) any {
 	}
 	return Int(*v)
 }
+
+// optInt32 is optInt for the columns sqlc types as *int32 — every `integer`
+// column, as against `bigint`. Separate rather than generic because the two
+// pointer types are what the generated models actually hand over and a
+// conversion at every call site would bury the nil check.
+func optInt32(v *int32) any {
+	if v == nil {
+		return nil
+	}
+	return Int(int64(*v))
+}
+
+// legacyTypeObjectOrNullID is legacyTypeObject for a NULLABLE foreign key.
+//
+// UNMEASURED, and marked as such: every recording that carries a
+// withDefault-closure type object carries a non-null id, so what legacy
+// emitted for a null one is inference. Laravel resolves `belongsTo` on a null
+// key to the default model and runs the closure over it, so the closure's
+// `$type->typeID = $job->product_type_id` assigns null — hence `typeID: null`
+// beside the same `"Unknown"`. The alternative reading, that the whole object
+// would be null, is inconsistent with the relation having a default at all.
+//
+// Only app.industry_job.product_type_id reaches this; every other column
+// feeding a type object is NOT NULL.
+func legacyTypeObjectOrNullID(typeID *int32) *Obj {
+	if typeID == nil {
+		return NewObj(2).Set("typeID", nil).Set("typeName", legacyUnknownEntityName)
+	}
+	return legacyTypeObject(int64(*typeID))
+}

@@ -153,8 +153,13 @@ var capabilitySpecs = map[int]CapabilitySpec{
 			"/characters/{character_id}/attributes",
 		},
 		Controllers: []string{"CharacterController"},
-		Endpoints:   []string{"/api/v1/characters/{id}/skills"},
-		Phase:       "6", Test: "TestSyncCharacterSkills",
+		// PHASE 20.9 (B56): the summary route is cited because the skills
+		// response carries three things and the list endpoint exposes one of
+		// them. total_sp and unallocated_sp were parsed and discarded on
+		// every sync, and this row read as verified throughout — the cited
+		// test asserted the DTO PARSED them, which it did.
+		Endpoints: []string{"/api/v1/characters/{id}/skills", "/api/v1/characters/{id}/skills/summary"},
+		Phase:     "6", Test: "TestSyncCharacterSkills",
 	},
 	14: {
 		Routes: []string{

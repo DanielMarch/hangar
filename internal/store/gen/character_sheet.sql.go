@@ -175,6 +175,22 @@ func (q *Queries) GetCharacterLocation(ctx context.Context, characterID int64) (
 	return i, err
 }
 
+const getCharacterSkillSummary = `-- name: GetCharacterSkillSummary :one
+SELECT character_id, total_sp, unallocated_sp, updated_at FROM app.character_skill_summary WHERE character_id = $1
+`
+
+func (q *Queries) GetCharacterSkillSummary(ctx context.Context, characterID int64) (AppCharacterSkillSummary, error) {
+	row := q.db.QueryRow(ctx, getCharacterSkillSummary, characterID)
+	var i AppCharacterSkillSummary
+	err := row.Scan(
+		&i.CharacterID,
+		&i.TotalSp,
+		&i.UnallocatedSp,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listCharacterAgentResearch = `-- name: ListCharacterAgentResearch :many
 SELECT character_id, agent_id, skill_type_id, started_at, points_per_day, remainder_points, updated_at FROM app.character_agent_research WHERE character_id = $1 ORDER BY agent_id
 `
@@ -1049,6 +1065,31 @@ func (q *Queries) UpsertCharacterSkill(ctx context.Context, arg UpsertCharacterS
 		&i.ActiveLevel,
 		&i.TrainedLevel,
 		&i.Skillpoints,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertCharacterSkillSummary = `-- name: UpsertCharacterSkillSummary :one
+INSERT INTO app.character_skill_summary AS t (character_id, total_sp, unallocated_sp)
+VALUES ($1,$2,$3)
+ON CONFLICT (character_id) DO UPDATE
+   SET total_sp = EXCLUDED.total_sp, unallocated_sp = EXCLUDED.unallocated_sp, updated_at = now()
+ WHERE (t.total_sp, t.unallocated_sp) IS DISTINCT FROM (EXCLUDED.total_sp, EXCLUDED.unallocated_sp)
+RETURNING character_id, total_sp, unallocated_sp, updated_at
+`
+
+// PHASE 20.9 (B56). total_sp and unallocated_sp arrive on the same response
+// as the per-skill array and were discarded for nineteen phases; neither can
+// be recovered from app.character_skill afterwards. See migration 00046 for
+// why this is its own table and why unallocated_sp is nullable.
+func (q *Queries) UpsertCharacterSkillSummary(ctx context.Context, characterID int64, totalSp int64, unallocatedSp *int64) (AppCharacterSkillSummary, error) {
+	row := q.db.QueryRow(ctx, upsertCharacterSkillSummary, characterID, totalSp, unallocatedSp)
+	var i AppCharacterSkillSummary
+	err := row.Scan(
+		&i.CharacterID,
+		&i.TotalSp,
+		&i.UnallocatedSp,
 		&i.UpdatedAt,
 	)
 	return i, err

@@ -476,6 +476,7 @@ type Querier interface {
 	// read query — only the sync-side Upsert existed before this phase.
 	GetCharacterJumpFatigue(ctx context.Context, characterID int64) (AppCharacterJumpFatigue, error)
 	GetCharacterLocation(ctx context.Context, characterID int64) (AppCharacterLocation, error)
+	GetCharacterSkillSummary(ctx context.Context, characterID int64) (AppCharacterSkillSummary, error)
 	GetCharacterToken(ctx context.Context, characterID int64) (AppCharacterToken, error)
 	// Affected set for a squad_member change (one character joining or
 	// leaving a squad): just that character's own user, if linked.
@@ -1697,6 +1698,11 @@ type Querier interface {
 	UpsertCharacterOnlineOnly(ctx context.Context, arg UpsertCharacterOnlineOnlyParams) (AppCharacterLocation, error)
 	UpsertCharacterShipOnly(ctx context.Context, arg UpsertCharacterShipOnlyParams) (AppCharacterLocation, error)
 	UpsertCharacterSkill(ctx context.Context, arg UpsertCharacterSkillParams) (AppCharacterSkill, error)
+	// PHASE 20.9 (B56). total_sp and unallocated_sp arrive on the same response
+	// as the per-skill array and were discarded for nineteen phases; neither can
+	// be recovered from app.character_skill afterwards. See migration 00046 for
+	// why this is its own table and why unallocated_sp is nullable.
+	UpsertCharacterSkillSummary(ctx context.Context, characterID int64, totalSp int64, unallocatedSp *int64) (AppCharacterSkillSummary, error)
 	// Minimal character row so app.corporation_member's FK has something to
 	// point at (defect B48).
 	//

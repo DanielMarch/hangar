@@ -105,8 +105,8 @@ cannot fix this for you.
 | Legacy controller | Status | HANGAR equivalent |
 | :-- | :-- | :-- |
 | `AllianceController` | **shimmed** | `/api/v1/alliances/*` |
-| `CharacterController` | **partly shimmed** | `/api/v1/characters/*` |
-| `CorporationController` | **partly shimmed** | `/api/v1/corporations/*` |
+| `CharacterController` | **partly shimmed** — 7 of 15 routes | `/api/v1/characters/*` |
+| `CorporationController` | **partly shimmed** — 5 of 11 routes | `/api/v1/corporations/*` |
 | `KillmailsController` | **not yet shimmed** | `/api/v1/{characters,corporations}/{id}/killmails` |
 | `RoleController` | **410 Gone — breaking** | `/api/v1/admin/roles`, `/api/v1/admin/scopes` |
 | `RoleLookupController` | **410 Gone — breaking** | `/api/v1/admin/users/{id}`, `/api/v1/me` |
@@ -114,7 +114,7 @@ cannot fix this for you.
 | `UserController` | **501 — not translatable** | `/api/v1/admin/users`, `/api/v1/me` |
 | `ApiController` | n/a | framework base class, no routes |
 
-Shimmed today, byte-identical to recorded legacy responses:
+Shimmed today, byte-identical to recorded legacy responses — **13 of 34**:
 
 ```
 GET /api/v2/alliance/contacts/{alliance_id}
@@ -122,6 +122,14 @@ GET /api/v2/character/contacts/{character_id}
 GET /api/v2/character/corporation-history/{character_id}
 GET /api/v2/corporation/contacts/{corporation_id}
 GET /api/v2/corporation/sheet/{corporation_id}          [added in Phase 20.6]
+GET /api/v2/character/industry/{character_id}           [added in Phase 20.9]
+GET /api/v2/character/jump-clones/{character_id}        [added in Phase 20.9]
+GET /api/v2/character/market-orders/{character_id}      [added in Phase 20.9]
+GET /api/v2/character/skills/{character_id}             [added in Phase 20.9]
+GET /api/v2/character/skill-queue/{character_id}        [added in Phase 20.9]
+GET /api/v2/corporation/industry/{corporation_id}       [added in Phase 20.9]
+GET /api/v2/corporation/market-orders/{corporation_id}  [added in Phase 20.9]
+GET /api/v2/corporation/member-tracking/{corporation_id} [added in Phase 20.9]
 ```
 
 ### The per-route classification is the authority **[Phase 20.6]**
@@ -148,26 +156,52 @@ path — a page-2 and an empty-set case) plus the two role routes, which were ne
 because they are breaking. The count is now derived in the test rather than asserted — the same
 correction B6 applied to the Phase 0 baseline.
 
-Three `pending` reasons are worth naming here, because they are not "nobody wrote it yet":
+**Eight routes moved from `pending` to `served` in Phase 20.9, and the reason they had been
+pending was wrong.** From 20.6 to 20.8, thirteen routes shared one blocker: "needs a store query
+that can return the full ordered set for a window … not yet written". That is a claim about
+HANGAR's store, and nobody had checked it against the store. Nine of the thirteen already had
+exactly such a query — `SELECT * … ORDER BY …` with no `LIMIT` and no cursor — and every one of
+them was **already being called in production** by the `/api/v1` route serving the same data
+(defect **B55**). Eight are now served and byte-verified against the corpus; the ninth,
+`corporation.structures`, turned out to have a different and real blocker.
 
-* **`character.sheet`** carries `user_id`, a legacy MySQL integer with no honest HANGAR value
-  (see §7), *and* `skillpoints.total_sp` / `unallocated_sp`, which HANGAR **parses from ESI and
-  discards** — `CharacterSkillsDTO` reads both on every skills sync and `SyncCharacterSkills`
-  writes only the per-skill rows, so no column holds either.
+The blocker survives, narrowed to the four routes it was always true of: **assets, contracts,
+mail and notifications**, whose store queries genuinely are keyset pages (`LIMIT` plus a cursor
+predicate) because `OFFSET` is prohibited (SRS §6). Those four still need a full-set query and
+corpus fixtures.
+
+The `pending` reasons worth naming, because none of them is "nobody wrote it yet":
+
+* **`character.sheet`** is blocked on `user_id`, a legacy MySQL integer with no honest HANGAR
+  value (see §7). Its *second* blocker is now **closed**: `skillpoints.total_sp` and
+  `unallocated_sp` were parsed from ESI and discarded on every skills sync, and Phase 20.9
+  (**B56**) added `app.character_skill_summary`, wrote both, and exposed them at
+  `GET /api/v1/characters/{id}/skills/summary`. That fixed a real HANGAR gap and **did not** make
+  this route servable — two blockers minus one is one. Note also that the old text here claimed
+  `total_sp` "could be summed from `app.character_skill`"; it could not. ESI's total *includes*
+  unallocated points, so the sum differs from the total by exactly the number that was missing.
+* **`corporation.structures`** is no longer blocked on the store. It is blocked on `services`:
+  legacy's is a `HasMany` onto `corporation_structure_services` and HANGAR's is a `jsonb` array of
+  ESI `{name, state}` objects, and `fixtures.php` seeds **no services at all** — so the recording
+  holds `[]` and does not pin the element shape. Byte-identity cannot be claimed from a field the
+  corpus never exercised, and a structure with services online is the common case, not the corner.
+  Closing it needs a **re-recording**, not more code. (Its two `reinforce_weekday` fields are
+  already settled: the live ESI spec has no such properties, so no current installation of either
+  system can hold a value for them.)
 * **`character.wallet-transactions`, `corporation.wallet-journal`, `corporation.wallet-transactions`**
   lead with SeAT's own MySQL auto-increment key (`id` / `internal_id`), a SeAT-internal surrogate
   HANGAR has no column for — the same class as `attacker_hash` in §7.
 * **`character.wallet-journal`** is blocked on a measured conflict, not on missing code: the
   recording's `"amount": 9007199254741000` is a *different float64* from the value its own
-  fixture seeds (`9007199254740993.01` parses to `9007199254740994`). Legacy's loss is
-  MySQL's/PHP's 14-significant-digit rounding, not IEEE-754 nearest, so the shim's `Money()`
-  round-trip — which reproduces IEEE-754 nearest — cannot produce those bytes. Every other double
-  in the corpus is short enough that the two rules are indistinguishable, so this is the only
-  value that could have revealed it. Resolving it means re-running the PHP recorder with
-  `serialize_precision` instrumented.
-
-The remaining routes are shimmable — keyed by EVE identifiers HANGAR stores unchanged — and need
-a full-set store query plus corpus fixtures. Track them rather than designing around them.
+  fixture seeds (`9007199254740993.01` parses to `9007199254740994`, three ulps away).
+  **[Corrected in Phase 20.7]** This document previously blamed "MySQL's/PHP's
+  14-significant-digit rounding". That was refuted by measurement against the recorder's own
+  pinned interpreter, PHP 8.2.33: `serialize_precision` is `-1`, so `json_encode` uses **shortest
+  round-trip** — exactly what `formatPHPDouble` already did — and forcing `serialize_precision=14`
+  produces `9.007199254741e+15`, exponent form, which is not the corpus's digits either. The
+  divergence is in what legacy's MySQL `DOUBLE` column *came to hold*, upstream of any encoder.
+  No formatting rule can make HANGAR's exact `NUMERIC(30,2)` emit a value legacy stored as a
+  different double, so the shim's encoder is correct and unchanged.
 
 ### Write routes are not shimmed, and answer 501 rather than 404
 
@@ -305,13 +339,31 @@ things in those bytes have no HANGAR source, and are recorded here rather than h
 | `attacker_hash` | killmail attackers | A SeAT-internal surrogate. `app.killmail_attacker` has `record_id` instead. |
 | `id`, `internal_id` | wallet transactions, corporation wallet journal | **[Phase 20.6]** SeAT's own MySQL auto-increment primary key, emitted as the row's leading field. `app.wallet_transaction` is keyed on `(owner_kind, owner_id, transaction_id, date)` and has no such column; a synthesised counter would differ between two installations holding identical data. |
 | `user_id` | character sheet | **[Phase 20.6]** A legacy MySQL integer. `app.character.user_id` is a `uuid` (§4.1) — the same identifier-space break that makes `UserController` unshimmable, inside an otherwise reproducible route. Emitting the uuid breaks every client parsing it as an integer; synthesising an integer invents an id nobody stored. |
-| `skillpoints.total_sp`, `skillpoints.unallocated_sp` | character sheet | **[Phase 20.6]** HANGAR ingests both from ESI on every skills sync (`CharacterSkillsDTO`) and persists neither — `SyncCharacterSkills` writes only the per-skill rows. `total_sp` could be summed from `app.character_skill`; `unallocated_sp` cannot be derived at all. |
+| ~~`skillpoints.total_sp`, `skillpoints.unallocated_sp`~~ | character sheet | **[CLOSED in Phase 20.9, B56]** HANGAR ingested both on every skills sync and persisted neither. `app.character_skill_summary` now holds them and `GET /api/v1/characters/{id}/skills/summary` returns them. The 20.6 note that `total_sp` "could be summed from `app.character_skill`" was wrong — ESI's total includes unallocated points. `character.sheet` remains unshimmable on `user_id` alone. |
+| `station_id` | **corporation** industry jobs | **[Phase 20.9]** Reproduced as a constant `null`, which is the *legacy* value. ESI names this field `station_id` on `/characters/{id}/industry/jobs` and `location_id` on `/corporations/{id}/industry/jobs`; SeAT mirrored both, so its corporation table has a hidden `location_id` and a vestigial `station_id` no sync ever writes. HANGAR normalised them into one `NOT NULL` column — which is the better schema, and exactly why byte-identity requires emitting legacy's dead one. `/api/v1` has the real value. |
+| `services` | corporation structures | **[Phase 20.9]** Not a missing source — an **unpinned** one. Legacy's is a `HasMany` onto `corporation_structure_services`; HANGAR's is a `jsonb` array of ESI `{name, state}`. `fixtures.php` seeds no services, so the recording holds `[]` and the element shape was never captured. This is why `corporation.structures` is still `pending` despite every other field being reproducible. |
 | the resolved entity `name` | every embedded `{entity_id, …}` object | **[Phase 20.6]** Legacy resolved these from its `universe_names` table and the corpus was recorded with that table empty, so every entity in every recording reads `"Unknown"`. HANGAR usually **knows** the name and deliberately does not use it here: the shim's contract is byte-identity with the recorded response, and `/api/v1` has always served the resolved name. Same rule the SDE `type` object already followed. |
 
 The corpus is recorded against an installation with no SDE imported — a real, supported state —
 where legacy's `withDefault()` emits a small deterministic `{"typeID":N,"typeName":"Unknown",…}`
 that the shim *does* reproduce exactly. On an SDE-populated legacy installation those objects are
 fuller than the shim can produce.
+
+**"The SDE relation" is not one shape — it is three, and only the recording distinguishes them.**
+Phase 20.9 found the same `invTypes` table eager-loaded three different ways in the routes it
+implemented:
+
+| Value | Route | Laravel cause |
+| :-- | :-- | :-- |
+| `{"typeID":34,"typeName":"Unknown"}` | market orders, industry `blueprint`/`product` | `withDefault(closure)` — the closure copies the foreign key across and sets the name |
+| `null` | skills `type`, skill-queue `type`, structures `type` | no `withDefault` at all |
+| `[]` | member-tracking `ship` | `withDefault()` with **no arguments** — an attribute-less Eloquent model, whose `toArray()` is PHP's empty array, which `json_encode` renders `[]` rather than `{}` |
+
+A shim written from the schema would have picked one and been wrong twice. Note the consequence
+for `character.skills` in particular: because its `type` is `null` and `skill_id` is hidden behind
+it, legacy's response reports how many skillpoints are in a skill **without saying which skill**.
+That is legacy's behaviour on an SDE-less installation, it is what the recording holds, and the
+shim reproduces it. `/api/v1/characters/{id}/skills` has the `skill_id`.
 
 ---
 

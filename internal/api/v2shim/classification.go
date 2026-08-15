@@ -90,14 +90,81 @@ const (
 	migrationCorporations = "/api/v1/corporations/{id}"
 	migrationKillmails    = "/api/v1/{characters,corporations}/{id}/killmails"
 
-	// reasonNoKeysetWindow is the shared blocker for the list routes that
-	// remain. Legacy loaded the whole relation and paginated in PHP; HANGAR's
-	// store exposes keyset pages (OFFSET is prohibited — SRS §6, enforced by
-	// sqlc's no-offset rule), so each of these needs a store query that can
-	// return the full ordered set for a window, and a fixture matching the
-	// recorded corpus. Mechanical, but not free, and not guessable.
+	// ── DEFECT B55 (PHASE 20.9): reasonNoKeysetWindow WAS FALSE FOR NINE ──
+	// From Phase 20.6 to 20.8 thirteen routes shared one blocker, whose text
+	// read: "each of these needs a store query that can return the full
+	// ordered set for a window ... not yet written". It was a claim about the
+	// store, and nobody had checked it against the store.
+	//
+	// Nine of the thirteen already had exactly such a query, and had since
+	// Phase 1b:
+	//
+	//	ListMarketOrdersByOwner        SELECT * … ORDER BY issued DESC
+	//	ListIndustryJobsByOwner        SELECT * … ORDER BY start_date DESC
+	//	ListCharacterSkills            SELECT * … ORDER BY skill_id
+	//	ListCharacterSkillqueue        SELECT * … ORDER BY queue_position
+	//	ListCharacterClones            SELECT * … ORDER BY jump_clone_id
+	//	ListCorporationMemberTracking  SELECT * … ORDER BY character_id
+	//	ListCorporationStructures      SELECT * … ORDER BY structure_id
+	//
+	// No LIMIT, no keyset, no OFFSET — the whole ordered relation — and every
+	// one of them ALREADY CALLED IN PRODUCTION by the /api/v1 route serving
+	// the same data. The blocker was not merely stale; it had never been true
+	// for those routes, and it was load-bearing: it is the sentence a client
+	// reads in the 501 body and the sentence the Gate 7 evidence counts.
+	//
+	// Found the way 20.8 found B52 — by asking whether a column's stated
+	// values held up against something outside the artefact that stated them.
+	// Eight of the nine are now SERVED and byte-verified against the corpus;
+	// the ninth (corporation.structures) turned out to have a DIFFERENT and
+	// real blocker, which is reasonStructureServices below.
+	//
+	// reasonNoKeysetWindow survives, narrowed to the four routes it was
+	// always true of: assets, contracts, mail and notifications are the ones
+	// whose store query really is a keyset page.
 	reasonNoKeysetWindow = "shimmable: keyed by EVE identifiers HANGAR stores unchanged. " +
-		"Needs a full-set store query and corpus fixtures; not yet written."
+		"The store exposes this relation ONLY as a keyset page (LIMIT + a cursor predicate) because " +
+		"OFFSET is prohibited (SRS §6, enforced by sqlc's no-offset rule), and legacy paginated the " +
+		"whole relation in PHP. Needs a full-set store query and corpus fixtures; not yet written. " +
+		"MEASURED per route in Phase 20.9 (B55) rather than assumed for the family: nine routes that " +
+		"carried this reason already had a full-set query and eight of them are now served."
+
+	// reasonStructureServices is corporation.structures' real blocker, and it
+	// is not the one it carried for three phases.
+	//
+	// The store query exists (ListCorporationStructures, full ordered set) and
+	// fourteen of the row's seventeen fields are reproducible: HANGAR holds
+	// every column, and the two the recording shows as `reinforce_weekday` /
+	// `next_reinforce_weekday` are constants because the LIVE ESI SPEC HAS
+	// NEITHER PROPERTY — measured against the ingested catalogue at
+	// compatibility date 2026-08-04 — so no current installation of either
+	// system can hold a value for them.
+	//
+	// `services` is the one that stops it. In legacy it is a HasMany onto
+	// `corporation_structure_services`, so each element is a full Eloquent
+	// row with whatever column set and `$hidden` that table has; in HANGAR it
+	// is `app.corporation_structure.services`, a jsonb array of ESI's
+	// `{name, state}` objects. Those are different shapes, and the recording
+	// CANNOT SAY HOW DIFFERENT: fixtures.php seeds no services at all, so the
+	// recorded value is `[]` and the element shape is unpinned.
+	//
+	// Serving the route on that evidence would mean claiming byte-identity
+	// from a recording that never exercised the field — and every structure
+	// that matters has services online, so the untested branch is the common
+	// case, not the corner. That is precisely the mistake StatusServed exists
+	// to prevent, and the same standard that reclassified three wallet routes
+	// in 20.6 after they were written and run.
+	//
+	// Closing it needs a NEW RECORDING with a populated
+	// corporation_structure_services table, not more code.
+	reasonStructureServices = "shimmable in shape and no longer blocked on the store (B55: " +
+		"ListCorporationStructures returns the full ordered set, and the two `reinforce_weekday` " +
+		"fields are constants because the live ESI spec has no such properties). Blocked on " +
+		"`services`: legacy's is a HasMany onto corporation_structure_services and HANGAR's is a " +
+		"jsonb array of ESI `{name, state}` objects, and fixtures.php seeds NO services — so the " +
+		"recording holds `[]` and does not pin the element shape at all. Byte-identity cannot be " +
+		"claimed from a field the corpus never exercised, and a structure with services online is " +
+		"the common case. Needs a re-recording with services present, not more code."
 
 	reasonIdentitySpace = "HANGAR's user and squad ids are uuids where legacy's were MySQL " +
 		"auto-increment integers. `\"id\":1` and `\"id\":\"019ff31f-…\"` are different " +
@@ -210,14 +277,31 @@ const (
 
 	// reasonCharacterSheetFields is why the one obvious single-resource
 	// route is NOT the one implemented.
-	reasonCharacterSheetFields = "NOT shimmable today, for two independent reasons. (1) `user_id` is a " +
-		"legacy MySQL integer; HANGAR's app.character.user_id is a uuid, so the field has no honest " +
-		"value — the same identifier-space break that makes UserController unshimmable, appearing " +
-		"inside an otherwise reproducible route. (2) `skillpoints.total_sp` and " +
-		"`skillpoints.unallocated_sp` are PARSED FROM ESI AND DISCARDED: " +
-		"handlers.CharacterSkillsDTO reads both fields on every skills sync and " +
-		"SyncCharacterSkills writes only the per-skill rows, so no column holds either. " +
-		"total_sp could be summed from app.character_skill; unallocated_sp cannot be derived at all."
+	//
+	// ── PHASE 20.9: ONE OF THE TWO BLOCKERS IS CLOSED, AND THE ROUTE IS ──
+	// ── STILL NOT SERVABLE. BOTH HALVES OF THAT SENTENCE MATTER. ─────────
+	// The second blocker was a REAL GAP in HANGAR independent of the shim,
+	// and it is fixed on its own merits as defect B56: migration 00046 adds
+	// app.character_skill_summary, SyncCharacterSkills writes total_sp and
+	// unallocated_sp instead of discarding them, and
+	// GET /api/v1/characters/{id}/skills/summary reads them back. A column
+	// nothing writes and a column nothing reads are the same defect one step
+	// apart, so the writer and the reader landed together.
+	//
+	// That does NOT make character.sheet servable. `user_id` is unchanged and
+	// unchangeable: legacy's is a MySQL auto-increment integer and HANGAR's
+	// app.character.user_id is a uuid, so the field has no honest value at
+	// any level of effort. Two blockers minus one is one blocker, not zero,
+	// and the note that "total_sp could be summed from app.character_skill"
+	// was itself wrong — ESI's total INCLUDES unallocated points, so the sum
+	// differs from the total by exactly the number that was missing.
+	reasonCharacterSheetFields = "NOT shimmable, blocked on `user_id`: legacy's is a MySQL " +
+		"auto-increment integer and HANGAR's app.character.user_id is a uuid, so the field has no " +
+		"honest value — the same identifier-space break that makes UserController unshimmable, " +
+		"appearing inside an otherwise reproducible route. This route's SECOND blocker is CLOSED as " +
+		"of Phase 20.9 (B56): `skillpoints.total_sp` and `skillpoints.unallocated_sp` were parsed " +
+		"from ESI and discarded on every sync, and app.character_skill_summary now holds both. " +
+		"Closing it removed one blocker of two and changed nothing about this route's status."
 )
 
 // Classification is every legacy /api/v2 read route and what the shim does
@@ -256,20 +340,20 @@ func Classification() []LegacyRoute {
 			migrationCharacters+"/assets", reasonNoKeysetWindow),
 		pending("CharacterController", Prefix+"/character/contracts/{id}", "character.contracts",
 			migrationCharacters+"/contracts", reasonNoKeysetWindow),
-		pending("CharacterController", Prefix+"/character/industry/{id}", "character.industry",
-			migrationCharacters+"/industry", reasonNoKeysetWindow),
-		pending("CharacterController", Prefix+"/character/jump-clones/{id}", "character.jump-clones",
-			migrationCharacters+"/clones", reasonNoKeysetWindow),
+		served("CharacterController", Prefix+"/character/industry/{id}", "character.industry",
+			"characters.view", characterIndustry),
+		served("CharacterController", Prefix+"/character/jump-clones/{id}", "character.jump-clones",
+			"characters.view", characterJumpClones),
 		pending("CharacterController", Prefix+"/character/mail/{id}", "character.mail",
 			migrationCharacters+"/mail", reasonNoKeysetWindow),
-		pending("CharacterController", Prefix+"/character/market-orders/{id}", "character.market-orders",
-			migrationCharacters+"/orders", reasonNoKeysetWindow),
+		served("CharacterController", Prefix+"/character/market-orders/{id}", "character.market-orders",
+			"characters.view", characterMarketOrders),
 		pending("CharacterController", Prefix+"/character/notifications/{id}", "character.notifications",
 			migrationCharacters+"/notifications", reasonNoKeysetWindow),
-		pending("CharacterController", Prefix+"/character/skills/{id}", "character.skills",
-			migrationCharacters+"/skills", reasonNoKeysetWindow),
-		pending("CharacterController", Prefix+"/character/skill-queue/{id}", "character.skill-queue",
-			migrationCharacters+"/skillqueue", reasonNoKeysetWindow),
+		served("CharacterController", Prefix+"/character/skills/{id}", "character.skills",
+			"characters.view", characterSkills),
+		served("CharacterController", Prefix+"/character/skill-queue/{id}", "character.skill-queue",
+			"characters.view", characterSkillQueue),
 		pending("CharacterController", Prefix+"/character/killmails/{id}", "killmails.character",
 			migrationKillmails, reasonKillmailHash),
 
@@ -287,14 +371,14 @@ func Classification() []LegacyRoute {
 			migrationCorporations+"/assets", reasonNoKeysetWindow),
 		pending("CorporationController", Prefix+"/corporation/contracts/{id}", "corporation.contracts",
 			migrationCorporations+"/contracts", reasonNoKeysetWindow),
-		pending("CorporationController", Prefix+"/corporation/industry/{id}", "corporation.industry",
-			migrationCorporations+"/industry", reasonNoKeysetWindow),
-		pending("CorporationController", Prefix+"/corporation/market-orders/{id}", "corporation.market-orders",
-			migrationCorporations+"/orders", reasonNoKeysetWindow),
-		pending("CorporationController", Prefix+"/corporation/member-tracking/{id}", "corporation.member-tracking",
-			migrationCorporations+"/membertracking", reasonNoKeysetWindow),
+		served("CorporationController", Prefix+"/corporation/industry/{id}", "corporation.industry",
+			"corporations.view", corporationIndustry),
+		served("CorporationController", Prefix+"/corporation/market-orders/{id}", "corporation.market-orders",
+			"corporations.view", corporationMarketOrders),
+		served("CorporationController", Prefix+"/corporation/member-tracking/{id}", "corporation.member-tracking",
+			"corporations.view", corporationMemberTracking),
 		pending("CorporationController", Prefix+"/corporation/structures/{id}", "corporation.structures",
-			migrationCorporations+"/structures", reasonNoKeysetWindow),
+			migrationCorporations+"/structures", reasonStructureServices),
 		pending("CorporationController", Prefix+"/corporation/killmails/{id}", "killmails.corporation",
 			migrationKillmails, reasonKillmailHash),
 

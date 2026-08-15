@@ -347,6 +347,15 @@ type AppCharacterSkill struct {
 	UpdatedAt    time.Time
 }
 
+// The aggregate half of GET /characters/{character_id}/skills: total_sp and unallocated_sp, which are not derivable from app.character_skill. Written by the same sync that fills app.character_skill (Phase 20.9, B56).
+type AppCharacterSkillSummary struct {
+	CharacterID int64
+	TotalSp     int64
+	// NULL means ESI omitted the field (it is optional in the spec); 0 means ESI reported none. Different facts, deliberately distinguishable.
+	UnallocatedSp *int64
+	UpdatedAt     time.Time
+}
+
 type AppCharacterSkillqueue struct {
 	CharacterID     int64
 	QueuePosition   int32

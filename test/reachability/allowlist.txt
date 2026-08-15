@@ -49,10 +49,32 @@
 #
 # Closing these needs the PHP recorder re-run with serialize_precision
 # measured — not more Go.
-internal/api/v2shim.Money
-internal/api/v2shim.MoneyOrNull
+#
+# ── PHASE 20.9: THREE OF THE FOUR ARE GONE ───────────────────────────────
+# Money, MoneyOrNull and numericString are REACHABLE and removed from this
+# file. The route that reached them was not a wallet route at all: defect B55
+# established that character/corporation market-orders were never blocked on
+# a missing store query, and `price` (NOT NULL) and `escrow` (nullable) are
+# both NUMERIC(30,2). Money and MoneyOrNull are called from
+# translate_market.go, MoneyOrNull again from translate_industry.go's `cost`,
+# and numericString from Money. All three are now pinned by a byte comparison
+# against the recorded corpus rather than by a unit test of the formatter.
+#
+# The paragraph above stands as written: it was true of the wallet routes, it
+# is why those three stayed unreachable through 20.8, and the correction is
+# that "waiting for the routes that would use it" was pointing at the wrong
+# routes. The money path was one already-existing SELECT away the whole time.
+#
+# MoneyOrZero alone remains, and its reason is now specific rather than
+# inherited: it exists for a NOT NULL money column read through a NULLABLE Go
+# type, so that a NULL is REPORTED instead of quietly becoming 0. No served
+# route has that combination — app.market_order.price and every other NOT NULL
+# money column sqlc sees arrives as decimal.Decimal, not decimal.NullDecimal.
+# It becomes reachable when a route reads a NOT NULL money column through an
+# outer join or a UNION, which none does today. Kept rather than deleted
+# because the alternative at such a call site is a bare .Decimal that turns a
+# schema violation into a zero balance, and a zero balance is not an incident.
 internal/api/v2shim.MoneyOrZero
-internal/api/v2shim.numericString
 
 # PHASE 20.6 — build-time classification, no runtime consumer BY CONSTRUCTION.
 #

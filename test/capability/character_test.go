@@ -259,17 +259,27 @@ func TestSyncPlanetColonies(t *testing.T) {
 // every skills screen leads with and neither appears in the per-skill array
 // — a DTO that modelled only the array would render a character with no
 // skill points at all.
+//
+// ── PHASE 20.9 (B56): THIS TEST WAS PASSING OVER A DEFECT ────────────────
+// It asserted the DTO PARSED both numbers, and it did. SyncCharacterSkills
+// then discarded them, and nothing here looked. So the endpoint assertion
+// below now names the summary route as well: the question "does the DTO read
+// it" and the question "can anyone get it back out" are different, and only
+// the second one is a capability.
 func TestSyncCharacterSkills(t *testing.T) {
 	requireDispatched(t, char,
 		"/characters/{character_id}/skills",
 		"/characters/{character_id}/skillqueue",
 		"/characters/{character_id}/attributes")
-	requireEndpoints(t, "/api/v1/characters/{id}/skills")
+	requireEndpoints(t, "/api/v1/characters/{id}/skills", "/api/v1/characters/{id}/skills/summary")
 	requireDTOCoversSpec(t, "/characters/{character_id}/skills", "", handlers.CharacterSkillsDTO{})
 
 	skills := parsed(t, "character/skills.json", handlers.ParseCharacterSkills)
 	require.Equal(t, int64(45280450), skills.TotalSP)
-	require.Equal(t, int64(60000), skills.UnallocatedSP)
+	require.NotNil(t, skills.UnallocatedSP,
+		"unallocated_sp is optional in the spec, so the DTO holds a pointer — a nil here would mean "+
+			"the recorded response omitted it, which it does not")
+	require.Equal(t, int64(60000), *skills.UnallocatedSP)
 	requireLen(t, skills.Skills, 2, "skills")
 	require.EqualValues(t, 3300, skills.Skills[0].SkillID)
 	require.EqualValues(t, 5, skills.Skills[0].TrainedSkillLevel)

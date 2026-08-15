@@ -58,6 +58,21 @@ RETURNING *;
 -- name: ListCharacterSkills :many
 SELECT * FROM app.character_skill WHERE character_id = $1 ORDER BY skill_id;
 
+-- name: UpsertCharacterSkillSummary :one
+-- PHASE 20.9 (B56). total_sp and unallocated_sp arrive on the same response
+-- as the per-skill array and were discarded for nineteen phases; neither can
+-- be recovered from app.character_skill afterwards. See migration 00046 for
+-- why this is its own table and why unallocated_sp is nullable.
+INSERT INTO app.character_skill_summary AS t (character_id, total_sp, unallocated_sp)
+VALUES ($1,$2,$3)
+ON CONFLICT (character_id) DO UPDATE
+   SET total_sp = EXCLUDED.total_sp, unallocated_sp = EXCLUDED.unallocated_sp, updated_at = now()
+ WHERE (t.total_sp, t.unallocated_sp) IS DISTINCT FROM (EXCLUDED.total_sp, EXCLUDED.unallocated_sp)
+RETURNING *;
+
+-- name: GetCharacterSkillSummary :one
+SELECT * FROM app.character_skill_summary WHERE character_id = $1;
+
 -- name: DeleteCharacterSkillsNotIn :exec
 -- Phase 7 addition: skills is a full-state list (a skill can vanish via
 -- skill extraction) but Phase 1b's stub had no prune query for it.

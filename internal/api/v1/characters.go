@@ -27,6 +27,15 @@ func registerCharacters(hapi huma.API, deps api.Deps) {
 		ownerListHandler(func(ctx context.Context, id int64) ([]gen.AppCharacterSkill, error) {
 			return deps.Store.ListCharacterSkills(ctx, id)
 		}))
+	// PHASE 20.9 (B56). The per-skill list above cannot answer "how many
+	// skill points does this character have" — ESI's total includes
+	// unallocated points, which are in no skill row. Persisting the two
+	// numbers without a way to read them would have moved the defect one
+	// step rather than closing it, so the route lands in the same commit.
+	get[IDIn, ItemOut](hapi, deps, permCharView, "/api/v1/characters/{id}/skills/summary", "get-character-skill-summary", "Total and unallocated skill points", charTag,
+		ownerDetailHandler(func(ctx context.Context, id int64) (gen.AppCharacterSkillSummary, error) {
+			return deps.Store.GetCharacterSkillSummary(ctx, id)
+		}))
 	get[IDIn, CollectionOut](hapi, deps, permCharView, "/api/v1/characters/{id}/skillqueue", "list-character-skillqueue", "Skill training queue", charTag,
 		ownerListHandler(func(ctx context.Context, id int64) ([]gen.AppCharacterSkillqueue, error) {
 			return deps.Store.ListCharacterSkillqueue(ctx, id)

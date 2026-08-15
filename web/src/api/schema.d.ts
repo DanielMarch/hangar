@@ -1489,6 +1489,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/characters/{id}/skills/summary": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Total and unallocated skill points */
+    get: operations["get-character-skill-summary"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/characters/{id}/standings": {
     parameters: {
       query?: never;
@@ -6497,6 +6514,38 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CollectionMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "get-character-skill-summary": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Numeric EVE id (character, corporation, alliance...). */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ItemMapStringInterface {}"];
         };
       };
       /** @description Error */

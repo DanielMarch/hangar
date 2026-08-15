@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 
@@ -156,6 +157,114 @@ func corpusFixture(t testing.TB, s *store.Store) {
 	}
 
 	corpusSheetFixture(t, s, corpID, charID, allianceID)
+	corpusListFixture(t, s, corpID, charID)
+}
+
+// corpusListFixture seeds the six collections Phase 20.9 turned from pending
+// into served — market orders, industry jobs, jump clones, skills, the skill
+// queue and member tracking.
+//
+// Transcribed from fixtures.php the same way corpusSheetFixture is, and the
+// transcription is load-bearing in one place worth naming: fixtures.php
+// inserts the corporation industry job's location column as `location_id` and
+// the character's as `station_id`, and BOTH recordings emit `station_id`.
+// HANGAR has one column, so the fixture writes one — but the difference is
+// the reason the shim was written against the recording rather than the
+// fixture.
+func corpusListFixture(t testing.TB, s *store.Store, corpID, charID int64) {
+	t.Helper()
+	ctx := context.Background()
+
+	at := func(value string) time.Time {
+		t.Helper()
+		parsed, err := time.Parse(time.RFC3339, value)
+		require.NoError(t, err)
+		return parsed
+	}
+	ptr := func(value time.Time) *time.Time { return &value }
+	minVolume := int64(1)
+	division := int16(1)
+	issuedBy := charID
+
+	// ── market orders ────────────────────────────────────────────────────
+	// `escrow` 5550000.0 is recorded as `5550000` and `price` 10000000.5 as
+	// `10000000.5`: both go through NUMERIC(30,2) here, so the fixture proves
+	// the exact-decimal → PHP-double conversion end to end rather than the
+	// formatter in isolation.
+	_, err := s.UpsertMarketOrder(ctx, gen.UpsertMarketOrderParams{
+		OwnerKind: "character", OwnerID: charID, OrderID: 9001, TypeID: 34,
+		RegionID: 10000002, LocationID: 60003760, Range: "station",
+		IsBuyOrder: true, IsCorporation: false,
+		Escrow:      decimal.NewNullDecimal(decimal.RequireFromString("5550000.00")),
+		Price:       decimal.RequireFromString("5.55"),
+		VolumeTotal: 1000000, VolumeRemain: 999999, MinVolume: &minVolume,
+		Duration: 90, Issued: at("2026-07-27T12:00:00Z"),
+	})
+	require.NoError(t, err)
+
+	_, err = s.UpsertMarketOrder(ctx, gen.UpsertMarketOrderParams{
+		OwnerKind: "corporation", OwnerID: corpID, OrderID: 9002, TypeID: 587,
+		RegionID: 10000002, LocationID: 60003760, Range: "region",
+		IsBuyOrder: false, IsCorporation: false,
+		Price:       decimal.RequireFromString("10000000.50"),
+		VolumeTotal: 5, VolumeRemain: 5, MinVolume: &minVolume,
+		Duration: 30, Issued: at("2026-07-26T12:00:00Z"),
+		WalletDivision: &division, IssuedBy: &issuedBy,
+	})
+	require.NoError(t, err)
+
+	// ── industry jobs ────────────────────────────────────────────────────
+	productType := int32(34)
+	for _, job := range []struct {
+		ownerKind string
+		ownerID   int64
+		jobID     int64
+	}{{"character", charID, 5001}, {"corporation", corpID, 5002}} {
+		_, err = s.UpsertIndustryJob(ctx, gen.UpsertIndustryJobParams{
+			OwnerKind: job.ownerKind, OwnerID: job.ownerID, JobID: job.jobID,
+			InstallerID: charID, FacilityID: 60003760, StationID: 60003760,
+			ActivityID: 1, BlueprintID: 1000000000003, BlueprintTypeID: 587,
+			BlueprintLocationID: 60003760, OutputLocationID: 60003760, Runs: 10,
+			Cost:          decimal.NewNullDecimal(decimal.RequireFromString("1234567.89")),
+			ProductTypeID: &productType, Status: "active", Duration: 3600,
+			StartDate: at("2026-07-31T00:00:00Z"), EndDate: at("2026-07-31T01:00:00Z"),
+		})
+		require.NoError(t, err)
+	}
+
+	// ── jump clones ──────────────────────────────────────────────────────
+	// Implants is `[]int64{}` and not nil: the recording says `[]`, and a nil
+	// slice reaching the translator would encode as `null`.
+	cloneName := "Home"
+	_, err = s.UpsertCharacterClone(ctx, gen.UpsertCharacterCloneParams{
+		CharacterID: charID, JumpCloneID: 6001, LocationID: 60003760,
+		LocationType: "station", Name: &cloneName, Implants: []int64{},
+	})
+	require.NoError(t, err)
+
+	// ── skills and the skill queue ───────────────────────────────────────
+	_, err = s.UpsertCharacterSkill(ctx, gen.UpsertCharacterSkillParams{
+		CharacterID: charID, SkillID: 587, ActiveLevel: 5, TrainedLevel: 5, Skillpoints: 256000,
+	})
+	require.NoError(t, err)
+
+	trainingStart, levelStart, levelEnd := int64(1000), int64(16000), int64(90510)
+	_, err = s.ReplaceCharacterSkillqueue(ctx, gen.ReplaceCharacterSkillqueueParams{
+		CharacterID: charID, QueuePosition: 0, SkillID: 34, FinishedLevel: 4,
+		TrainingStartSp: &trainingStart, LevelStartSp: &levelStart, LevelEndSp: &levelEnd,
+		StartDate: ptr(at("2026-08-01T00:00:00Z")), FinishDate: ptr(at("2026-09-01T00:00:00Z")),
+	})
+	require.NoError(t, err)
+
+	// ── member tracking ──────────────────────────────────────────────────
+	shipType := int32(587)
+	location := int64(60003760)
+	_, err = s.UpsertCorporationMemberTracking(ctx, gen.UpsertCorporationMemberTrackingParams{
+		CorporationID: corpID, CharacterID: charID, LocationID: &location,
+		LogoffDate: ptr(at("2026-07-30T10:00:00Z")), LogonDate: ptr(at("2026-07-30T08:00:00Z")),
+		ShipTypeID: &shipType, StartDate: ptr(at("2020-01-01T00:00:00Z")),
+	})
+	require.NoError(t, err)
 }
 
 // corpusSheetFixture seeds the corporation.sheet recording's corporation and

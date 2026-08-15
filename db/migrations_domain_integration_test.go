@@ -42,7 +42,11 @@ var expectedDomainTables = []string{
 	// Social (5)
 	"contact", "contact_label", "standing", "medal", "medal_issued",
 	// Character sheet (11)
-	"character_skill", "character_skillqueue", "character_attributes", "character_clone",
+	// character_skill_summary is Phase 20.9 (B56): total_sp and unallocated_sp
+	// arrive on the same ESI response as character_skill's rows and are not
+	// derivable from them, so they need somewhere to live. See migration 00046
+	// for why it is a separate table rather than two columns on app.character.
+	"character_skill", "character_skill_summary", "character_skillqueue", "character_attributes", "character_clone",
 	"character_implant", "character_jump_fatigue", "character_loyalty_point",
 	"character_agent_research", "character_title", "character_role", "character_location",
 	// Fittings (2)
@@ -80,7 +84,14 @@ var defaultPartitionTables = []string{
 // PLUS Phase 12's one legitimate platform-table addition,
 // discord_invalid_budget, PLUS Phase 13's one legitimate platform-table
 // addition, teamspeak_challenge (see expectedPlatformTables' PHASE 8/12/13
-// ADDITION comments in migrations_integration_test.go), for 137 total.
+// ADDITION comments in migrations_integration_test.go), PLUS Phase 20.9's one
+// legitimate DOMAIN-table addition, character_skill_summary (B56), for 138
+// total.
+//
+// The total is DERIVED from the three lists below rather than hard-coded, so
+// adding a table means adding it to a list and nothing else; the number in
+// this comment and in the failure message is documentation of what the lists
+// currently sum to.
 func TestAllDomainTablesPresent(t *testing.T) {
 	_, sqlDB := newMigratedContainer(t)
 
@@ -104,7 +115,8 @@ func TestAllDomainTablesPresent(t *testing.T) {
 
 	wantTotal := len(expectedPlatformTables) + len(expectedDomainTables) + len(defaultPartitionTables)
 	require.Len(t, got, wantTotal,
-		"table count must match 52 platform (51 + Phase 8's sync_acting_character_history) + 78 domain + 5 default partitions = %d: %v", wantTotal, got)
+		"table count must match 52 platform (51 + Phase 8's sync_acting_character_history) + 79 domain "+
+			"(78 + Phase 20.9's character_skill_summary) + 5 default partitions = %d: %v", wantTotal, got)
 }
 
 // TestAssetTreeRecursiveCTE — 5-level nesting resolves; an injected cycle
