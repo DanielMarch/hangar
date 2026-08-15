@@ -121,12 +121,53 @@ GET /api/v2/alliance/contacts/{alliance_id}
 GET /api/v2/character/contacts/{character_id}
 GET /api/v2/character/corporation-history/{character_id}
 GET /api/v2/corporation/contacts/{corporation_id}
+GET /api/v2/corporation/sheet/{corporation_id}          [added in Phase 20.6]
 ```
 
-The remaining `CharacterController`/`CorporationController` read routes and all three
-`KillmailsController` routes are shimmable — they are keyed by EVE identifiers HANGAR stores
-unchanged — and are **not yet implemented**. They answer `501` with a message saying so. Track
-them rather than designing around them.
+### The per-route classification is the authority **[Phase 20.6]**
+
+`internal/api/v2shim.Classification()` names **every** legacy read route with one of four
+statuses and, for the three that are not `served`, the reason. The router derives every response
+from it — there is no second list, and no path falls through to a generic answer.
+
+| Status | HTTP | Meaning |
+| :-- | :-- | :-- |
+| `served` | 200 | Shimmed **and** byte-identical to its recording. A route that returns plausible JSON but does not match those bytes is not served. |
+| `pending` | 501 | Shimmable, not yet shimmed. Unfinished work, recorded as unfinished. |
+| `unshimmable` | 501 | Cannot ever be byte-compatible — HANGAR's identifier space differs from legacy's. |
+| `breaking` | 410 | The underlying model changed; the concept no longer exists. |
+
+`pending` and `unshimmable` share a status code and carry **different bodies** on purpose: "wait
+for a release" and "rewrite your integration" are different instructions, and before 20.6 both
+answered the same generic sentence.
+
+**The route count was wrong.** This document and the shim's own comments said legacy `/api/v2`
+has 33 read routes. Measured from `testdata/legacy-api-v2/MANIFEST.json`, it is **34**: 32
+distinct recorded route patterns (34 recordings, two of which are a second capture of the same
+path — a page-2 and an empty-set case) plus the two role routes, which were never recorded
+because they are breaking. The count is now derived in the test rather than asserted — the same
+correction B6 applied to the Phase 0 baseline.
+
+Three `pending` reasons are worth naming here, because they are not "nobody wrote it yet":
+
+* **`character.sheet`** carries `user_id`, a legacy MySQL integer with no honest HANGAR value
+  (see §7), *and* `skillpoints.total_sp` / `unallocated_sp`, which HANGAR **parses from ESI and
+  discards** — `CharacterSkillsDTO` reads both on every skills sync and `SyncCharacterSkills`
+  writes only the per-skill rows, so no column holds either.
+* **`character.wallet-transactions`, `corporation.wallet-journal`, `corporation.wallet-transactions`**
+  lead with SeAT's own MySQL auto-increment key (`id` / `internal_id`), a SeAT-internal surrogate
+  HANGAR has no column for — the same class as `attacker_hash` in §7.
+* **`character.wallet-journal`** is blocked on a measured conflict, not on missing code: the
+  recording's `"amount": 9007199254741000` is a *different float64* from the value its own
+  fixture seeds (`9007199254740993.01` parses to `9007199254740994`). Legacy's loss is
+  MySQL's/PHP's 14-significant-digit rounding, not IEEE-754 nearest, so the shim's `Money()`
+  round-trip — which reproduces IEEE-754 nearest — cannot produce those bytes. Every other double
+  in the corpus is short enough that the two rules are indistinguishable, so this is the only
+  value that could have revealed it. Resolving it means re-running the PHP recorder with
+  `serialize_precision` instrumented.
+
+The remaining routes are shimmable — keyed by EVE identifiers HANGAR stores unchanged — and need
+a full-set store query plus corpus fixtures. Track them rather than designing around them.
 
 ### Write routes are not shimmed, and answer 501 rather than 404
 
@@ -262,6 +303,10 @@ things in those bytes have no HANGAR source, and are recorded here rather than h
 | eager-loaded `type` object | assets, orders, skills, transactions | Legacy embeds the Fuzzwork `invTypes` row (`typeID`, `typeName`, `portionSize`, `basePrice`, …). HANGAR's `sde.*` comes from CCP's modern JSONL export and keeps promoted columns plus the raw row as `jsonb`, so it cannot reproduce that object field-for-field. |
 | `SquadResource.logo` | squad rows | `Squad::getLogoAttribute()` *always* returns a rendered PNG data-URL, generating a placeholder avatar when none is stored. No translation layer reproduces a raster image. |
 | `attacker_hash` | killmail attackers | A SeAT-internal surrogate. `app.killmail_attacker` has `record_id` instead. |
+| `id`, `internal_id` | wallet transactions, corporation wallet journal | **[Phase 20.6]** SeAT's own MySQL auto-increment primary key, emitted as the row's leading field. `app.wallet_transaction` is keyed on `(owner_kind, owner_id, transaction_id, date)` and has no such column; a synthesised counter would differ between two installations holding identical data. |
+| `user_id` | character sheet | **[Phase 20.6]** A legacy MySQL integer. `app.character.user_id` is a `uuid` (§4.1) — the same identifier-space break that makes `UserController` unshimmable, inside an otherwise reproducible route. Emitting the uuid breaks every client parsing it as an integer; synthesising an integer invents an id nobody stored. |
+| `skillpoints.total_sp`, `skillpoints.unallocated_sp` | character sheet | **[Phase 20.6]** HANGAR ingests both from ESI on every skills sync (`CharacterSkillsDTO`) and persists neither — `SyncCharacterSkills` writes only the per-skill rows. `total_sp` could be summed from `app.character_skill`; `unallocated_sp` cannot be derived at all. |
+| the resolved entity `name` | every embedded `{entity_id, …}` object | **[Phase 20.6]** Legacy resolved these from its `universe_names` table and the corpus was recorded with that table empty, so every entity in every recording reads `"Unknown"`. HANGAR usually **knows** the name and deliberately does not use it here: the shim's contract is byte-identity with the recorded response, and `/api/v1` has always served the resolved name. Same rule the SDE `type` object already followed. |
 
 The corpus is recorded against an installation with no SDE imported — a real, supported state —
 where legacy's `withDefault()` emits a small deterministic `{"typeID":N,"typeName":"Unknown",…}`

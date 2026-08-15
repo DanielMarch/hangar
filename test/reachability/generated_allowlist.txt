@@ -137,3 +137,20 @@ UpsertReplicaHeartbeat
 # legitimate consumer. Its remaining caller is the admin surface that does
 # not exist yet.
 ListCorporationRoles
+
+# ── PHASE 20.6: THREE QUERIES THIS GUARD HAD BEEN FALSELY PASSING ────────
+# Until 20.6 the caller scan read RAW FILE BYTES, so a query named in a
+# COMMENT counted as a production caller. generated_test.go now tokenises and
+# keeps only identifiers, and these three fell out the moment it did: each
+# appears in the tree exactly once, in prose.
+#
+# UpsertSyncSubscription is the one that matters. It is defect B42's OWN
+# query — "nothing in production ever called UpsertSyncSubscription" — and
+# the comment in internal/sync/subscribe/reconcile.go that documents B42 was
+# the only thing making it look called. B42 was closed by wiring the three
+# Reconcile*Subscriptions queries, not this one; the generated twin has never
+# had a caller, and the guard built to catch precisely that was hiding it
+# behind the sentence explaining it.
+CheckPermission
+ListPendingProvisioningAudit
+UpsertSyncSubscription

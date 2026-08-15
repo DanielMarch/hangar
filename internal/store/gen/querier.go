@@ -684,7 +684,22 @@ type Querier interface {
 	ListCharacterIntelEdges(ctx context.Context, sourceCharacterID int64) ([]AppCharacterIntelEdge, error)
 	ListCharacterLoyaltyPoints(ctx context.Context, characterID int64) ([]AppCharacterLoyaltyPoint, error)
 	ListCharacterNotes(ctx context.Context, characterID int64) ([]AppCharacterNote, error)
-	ListCharacterNotificationsPage(ctx context.Context, characterID int64, beforeSentAt time.Time, pageSize int32) ([]AppCharacterNotification, error)
+	// ── DEFECT B46 (PHASE 20.6) ──────────────────────────────────────────────
+	// This one never returned 500, which is why it outlived the three that did:
+	// a single timestamptz argument types correctly, so it compiled and ran. It
+	// was broken in the other direction. ESI delivers notifications in batches
+	// that share a `timestamp` to the second, so `sent_at <` with no tiebreak
+	// cannot address a page boundary that falls inside such a batch: the next
+	// page either re-serves the tied rows or steps over them, and which one
+	// happens depends on data the cursor does not carry.
+	//
+	// ORDER BY sent_at DESC alone is also not a total order, so the rows within
+	// a tie could come back in any order Postgres liked between two calls —
+	// pagination over a non-deterministic sort is not pagination.
+	//
+	// The keyset is now (sent_at, notification_id), matching the other four
+	// pages in this family. The casts are load-bearing (see wallet.sql).
+	ListCharacterNotificationsPage(ctx context.Context, arg ListCharacterNotificationsPageParams) ([]AppCharacterNotification, error)
 	ListCharacterRoles(ctx context.Context, characterID int64) ([]AppCharacterRole, error)
 	ListCharacterSkillqueue(ctx context.Context, characterID int64) ([]AppCharacterSkillqueue, error)
 	ListCharacterSkills(ctx context.Context, characterID int64) ([]AppCharacterSkill, error)
@@ -860,6 +875,14 @@ type Querier interface {
 	// (*int32) and the callers subtract where the nil case is explicit.
 	ListLedgerDivergence(ctx context.Context) ([]ListLedgerDivergenceRow, error)
 	ListLiveReplicas(ctx context.Context, liveThreshold time.Duration) ([]AppEsiReplica, error)
+	// ── DEFECT B46 (PHASE 20.6) ──────────────────────────────────────────────
+	// Identical to the two wallet keyset queries: an uncast row comparison made
+	// sqlc generate `BeforeMailID time.Time`, the call site passed the same
+	// time.Time to both parameters, and GET /api/v1/characters/{id}/mail
+	// returned the same 22P02 on every call. B46 was reported as "the wallet
+	// screen"; the mail screen was broken by the same line of SQL and was found
+	// by probing the running installation rather than by reading the report.
+	// The casts are load-bearing — see the note on ListWalletJournalPage.
 	ListMailHeadersPage(ctx context.Context, arg ListMailHeadersPageParams) ([]AppMailHeader, error)
 	// Drives the per-mail body fanout (roadmap: "Mail bodies are one ESI
 	// request per mail"; HANGAR must route each through the catalogue, never
@@ -1108,7 +1131,28 @@ type Querier interface {
 	// linked to a user account at all.
 	ListUsersWithRoleViaSquad(ctx context.Context, roleID uuid.UUID) ([]uuid.NullUUID, error)
 	ListWalletBalances(ctx context.Context, ownerKind string, ownerID int64) ([]AppWalletBalance, error)
+	// ── DEFECT B46 (PHASE 20.6) ──────────────────────────────────────────────
+	// The row comparison was written `(date, journal_id) < (sqlc.arg(before_date),
+	// sqlc.arg(before_journal_id))` with NO casts. sqlc types a row-comparison's
+	// right-hand side from the leftmost column it can resolve and applies that
+	// one type to every argument in the tuple, so BOTH parameters generated as
+	// time.Time — including the one bound to a bigint column. Every call site
+	// then had to pass the same time.Time twice to compile, and Postgres
+	// rejected it on arrival: `invalid input syntax for type bigint:
+	// "9999-01-01 00:00:00 +0000 UTC" (SQLSTATE 22P02)`. This route has
+	// returned 500 on every call, with or without a cursor, since Phase 15.
+	//
+	// The casts are the fix and they are load-bearing, not decoration: they are
+	// what makes sqlc emit `BeforeDate time.Time, BeforeJournalID int64`. Do not
+	// remove them to "tidy up" — the types silently collapse again.
+	//
+	// The row-comparison form (rather than an expanded OR) is kept deliberately:
+	// it is the form that matches ORDER BY date DESC, journal_id DESC exactly,
+	// so the index added in 00045 satisfies both the filter and the sort in one
+	// backwards index scan.
 	ListWalletJournalPage(ctx context.Context, arg ListWalletJournalPageParams) ([]AppWalletJournal, error)
+	// Same defect, same fix, same reasoning as ListWalletJournalPage above
+	// (defect B46) — the casts are what keep BeforeTransactionID a bigint.
 	ListWalletTransactionsPage(ctx context.Context, arg ListWalletTransactionsPageParams) ([]AppWalletTransaction, error)
 	// PHASE 20.5: `AND enabled` removed. An endpoint HANGAR auto-disabled after
 	// consecutive failures is the one its owner most needs to see — hiding it

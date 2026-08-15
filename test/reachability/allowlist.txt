@@ -18,17 +18,55 @@
 # are gone rather than annotated — 26 symbols across five defects, plus the
 # whole of internal/sde. This section is now down to one open group.
 #
-# GATE7 (closed by Phase 20.6) — shim helper awaiting the routes that use it (only 4 of 33 read routes are served)
-internal/api/v2shim.BreakingControllers
-internal/api/v2shim.Float
-internal/api/v2shim.FloatValue
-internal/api/v2shim.ItemEnvelope
+# GATE7 — PARTLY CLOSED IN PHASE 20.6. Six of the ten entries are gone:
+#
+#   * BreakingControllers, PendingControllers and UnshimmableControllers were
+#     DELETED, not wired. They returned one representative path per
+#     controller, which cannot describe CharacterController now that it spans
+#     a served route and pending routes with three different reasons.
+#     v2shim.Classification() replaces them per-ROUTE and Register() reads it,
+#     so the router no longer hard-codes anything.
+#   * ItemEnvelope, Float and FloatValue became reachable: corporation.sheet
+#     is the shim's first single-resource route (ItemEnvelope, and tax_rate
+#     through Float), and contacts' NOT NULL standing now states itself with
+#     FloatValue instead of a bare Num.
+#
+# The four below are the money path, and they are NOT "waiting for the routes
+# that would use it" — that reason was wrong twice over, and both corrections
+# were made by writing the route and running it:
+#
+#  1. They took pgtype.Numeric. sqlc.yaml overrides every numeric column to
+#     shopspring/decimal (Principle 9), so no store row has ever produced a
+#     pgtype.Numeric and these were UNCALLABLE, not merely uncalled. Fixed in
+#     20.6 — they now take decimal.Decimal / decimal.NullDecimal.
+#  2. The one route that would exercise them, character.wallet-journal, was
+#     written and then RECLASSIFIED as pending on measurement: the corpus
+#     records "amount": 9007199254741000, and 9007199254740993.01 parses to
+#     the different float64 9007199254740994. Legacy's loss is MySQL's/PHP's
+#     14-significant-digit rounding, not IEEE-754 nearest, so Money's
+#     round-trip cannot reproduce those bytes. See reasonMySQLDoubleRounding
+#     in internal/api/v2shim/classification.go.
+#
+# Closing these needs the PHP recorder re-run with serialize_precision
+# measured — not more Go.
 internal/api/v2shim.Money
 internal/api/v2shim.MoneyOrNull
 internal/api/v2shim.MoneyOrZero
-internal/api/v2shim.PendingControllers
-internal/api/v2shim.UnshimmableControllers
 internal/api/v2shim.numericString
+
+# PHASE 20.6 — build-time classification, no runtime consumer BY CONSTRUCTION.
+#
+# These enumerate what the running system deliberately does NOT do, so there
+# is nothing for cmd/hangar to call: worker.DeliberatelyUnmapped names every
+# catalogued GET route that carries no sync subscription and why (Gate 4.2's
+# "recorded as deliberately unmapped WITH A REASON"), and the two grouping
+# views serve the guard tests and tools/gate4-traceability, which is a
+# separate binary. They are the "API published for callers outside this
+# binary" case this file's contract allows, and each is exercised by a test
+# that fails if the classification stops being total.
+internal/api/v2shim.ByStatus
+internal/sync/worker.DeliberatelyUnmapped
+internal/sync/worker.UnmappedByReason
 
 # == NOT DEFECTS ==========================================================
 

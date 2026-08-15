@@ -38,17 +38,20 @@ import (
 	"github.com/hangar-project/hangar/internal/sync/handlers"
 )
 
-// ── WHY THERE IS NO CORPORATION BINDING HERE (PHASE 20.5) ────────────────
-// POST /corporations/{corporation_id}/assets/names exists in the catalogue
-// and syncAssetNames is owner-generic, so the corporation half is one call
-// site away. It is deliberately not made, because there is nothing to
-// enrich: GET /corporations/{corporation_id}/assets is absent from
-// corporationDispatch entirely — a corporation's assets have never synced on
-// any installation, so app.asset holds no corporation-owned rows to name.
-// Found while wiring this and recorded in docs/PRODUCTION_CALLER_AUDIT.md
-// rather than fixed, because it is a MISSING DISPATCH ENTRY and not one of
-// B30's thirteen unreachable handlers; wiring the list route is the fix, and
-// this enrichment follows it for free when that happens.
+// ── THE CORPORATION BINDING, AND WHY IT ARRIVED A PHASE LATE (B47) ───────
+// Phase 20.5 wired the character half only, and recorded why the
+// corporation half was deliberately left out: there was nothing to enrich.
+// GET /corporations/{corporation_id}/assets was absent from
+// corporationDispatch entirely, so a corporation's assets had never synced
+// on any installation and app.asset held no corporation-owned rows to name.
+// That omission was the symptom; the missing dispatch entry was the defect,
+// and it is B47.
+//
+// Phase 20.6 wires the list route (see corporationAssetsPath in
+// corporation.go), and this enrichment follows it in the same commit — the
+// "for free" that 20.5 predicted. Both owners now take the identical path
+// through syncAssetNames, which is why the function was written
+// owner-generic in the first place.
 const (
 	characterAssetNamesPath = "/characters/{character_id}/assets/names"
 

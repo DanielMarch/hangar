@@ -250,6 +250,32 @@ check-static-binary: ## §9.2 (Phase 0) — TestStaticBinaryHasNoDynamicLinks: l
 check-reachability:  ## B20 class (Phase 20.1) — every subsystem has a production caller, or is a declared exception
 	go test -tags=reachability -timeout=10m ./test/reachability/...
 
+# ── Gate 4 evidence (Phase 20.6) ─────────────────────────────────────────────
+#
+# Emits docs/gate-evidence/$(VERSION)/gate4/ from the dispatch tables, the
+# route classification and the parsed specification. §4.2 requires the
+# traceability matrix as a committed artefact; producing it mechanically is
+# what stops it being a document that agrees with itself.
+#
+# DELIBERATELY NOT IN `ci`. The generator EXITS NON-ZERO while any capability
+# row is unreachable, which is the correct behaviour — §0.4 says a recorded
+# failure is the artefact, and a generator that exited 0 on a failing gate
+# would make the file's existence look like the gate's success. Wiring that
+# into `make ci` would either break every build until Gate 4 passes, or
+# force the exit code to be ignored, and the second is how a gate stops
+# meaning anything. Run it at gate time; read the SUMMARY.md it writes.
+#
+# GATE_VERSION defaults to the phase rather than to $(VERSION). $(VERSION) is
+# `git describe --tags --always --dirty`, which on an untagged tree is a SHA
+# that changes with every commit — so the artefact would land in a new
+# directory each time and the committed evidence would never be updated, only
+# accumulated. Pass GATE_VERSION=v1.0.0 at release time.
+GATE_VERSION ?= phase-20.6
+
+.PHONY: gate4-evidence
+gate4-evidence: ## (Phase 20.6) Emit docs/gate-evidence/$(GATE_VERSION)/gate4 — non-zero exit means the gate is not met
+	go run ./tools/gate4-traceability -version "$(GATE_VERSION)"
+
 # ── composite ────────────────────────────────────────────────────────────────
 .PHONY: ci ci-strict
 ci: verify-generated lint test web-ci e2e check-money check-identifiers check-alert-sources check-locales check-css check-no-ice check-static-binary check-reachability ## Phase 0 exit criterion; strengthens automatically as phases land

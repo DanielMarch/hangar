@@ -58,7 +58,7 @@ func (q *Queries) InsertMailRecipient(ctx context.Context, arg InsertMailRecipie
 
 const listMailHeadersPage = `-- name: ListMailHeadersPage :many
 SELECT character_id, mail_id, from_id, subject, sent_at, is_read, labels, updated_at FROM app.mail_header
- WHERE character_id = $1 AND (sent_at, mail_id) < ($2, $3)
+ WHERE character_id = $1 AND (sent_at, mail_id) < ($2::timestamptz, $3::bigint)
  ORDER BY sent_at DESC, mail_id DESC
  LIMIT $4
 `
@@ -66,10 +66,18 @@ SELECT character_id, mail_id, from_id, subject, sent_at, is_read, labels, update
 type ListMailHeadersPageParams struct {
 	CharacterID  int64
 	BeforeSentAt time.Time
-	BeforeMailID time.Time
+	BeforeMailID int64
 	PageSize     int32
 }
 
+// ── DEFECT B46 (PHASE 20.6) ──────────────────────────────────────────────
+// Identical to the two wallet keyset queries: an uncast row comparison made
+// sqlc generate `BeforeMailID time.Time`, the call site passed the same
+// time.Time to both parameters, and GET /api/v1/characters/{id}/mail
+// returned the same 22P02 on every call. B46 was reported as "the wallet
+// screen"; the mail screen was broken by the same line of SQL and was found
+// by probing the running installation rather than by reading the report.
+// The casts are load-bearing — see the note on ListWalletJournalPage.
 func (q *Queries) ListMailHeadersPage(ctx context.Context, arg ListMailHeadersPageParams) ([]AppMailHeader, error) {
 	rows, err := q.db.Query(ctx, listMailHeadersPage,
 		arg.CharacterID,

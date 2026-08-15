@@ -36,24 +36,87 @@ type Deps struct {
 // its /api/v1 counterpart uses, so a shim route cannot be a way around a
 // check — including the API token's own permission cap, which
 // RequirePermission applies (Phase 18, defect B21).
+// ── PHASE 20.6 (GATE 7): Classification() IS THE AUTHORITY ───────────────
+// Every registration below is derived from Classification(). Before 20.6 the
+// three classification functions existed and this function consulted none of
+// them — it hard-coded the two role prefixes and let all 29 unserved routes
+// fall through to one generic "not shimmed" 501. The lists were documentation
+// that happened to compile, and all three sat on the reachability allowlist
+// as unreachable symbols, correctly.
+//
+// The practical consequence was that a client could not tell a PERMANENT
+// break from unfinished work: /api/v2/users (never translatable) and
+// /api/v2/character/assets (shimmable, just not written) returned the same
+// sentence. Now each status has its own body, and adding a route to
+// Classification() is what makes it answer — there is no second place to
+// edit and therefore no way for the two to disagree.
 func Register(mux *http.ServeMux, deps Deps) {
-	for _, route := range Routes() {
-		mux.Handle(route.Method+" "+route.Pattern, route.handler(deps))
+	for _, route := range Classification() {
+		switch route.Status {
+		case StatusServed:
+			mux.Handle(route.Method+" "+route.Pattern, route.served().handler(deps))
+
+		case StatusBreaking:
+			// Registered as PREFIXES so EVERY path beneath them answers,
+			// including ones this shim has never heard of: a client calling
+			// /api/v2/roles/query/anything must be told the grant model
+			// changed, not handed a 404 that reads as "wrong URL, try again".
+			handler := breakingChangeHandler(breakingMessage(route.Controller))
+			mux.Handle(route.Pattern, handler)
+			mux.Handle(strings.TrimSuffix(route.Pattern, "/")+"/", handler)
+
+		case StatusPending, StatusUnshimmable:
+			mux.Handle(route.Method+" "+route.Pattern, unservedHandler(route))
+		}
 	}
 
-	// The reshaped controllers. Registered as prefixes so EVERY path under
-	// them answers, including ones this shim has never heard of: a client
-	// calling `/api/v2/roles/query/anything` must be told the grant model
-	// changed, not handed a 404 that reads as "wrong URL, try again".
-	mux.Handle("/api/v2/roles/query/", breakingChangeHandler(roleLookupBreak))
-	mux.Handle("/api/v2/roles", breakingChangeHandler(roleBreak))
-	mux.Handle("/api/v2/roles/", breakingChangeHandler(roleBreak))
-
-	// Anything else under /api/v2 that this shim does not serve. Without
-	// this, an unmatched /api/v2 path falls through to the SPA handler,
-	// which answers 200 with HTML for a client expecting JSON.
+	// Anything else under /api/v2 — a path no legacy controller owned, or a
+	// write method. Without this, an unmatched /api/v2 path falls through to
+	// the SPA handler, which answers 200 with HTML for a client expecting
+	// JSON.
 	mux.Handle(Prefix+"/", notShimmedHandler())
 	mux.Handle(Prefix, notShimmedHandler())
+}
+
+// served narrows a classified route to the mountable shape.
+func (route LegacyRoute) served() Route {
+	return Route{
+		Controller: route.Controller, Method: route.Method, Pattern: route.Pattern,
+		Corpus: route.Corpus, Permission: route.Permission,
+		Appends: route.Appends, Handle: route.Handle,
+	}
+}
+
+// breakingMessage picks the long-form explanation for a reshaped controller.
+func breakingMessage(controller string) string {
+	if controller == "RoleLookupController" {
+		return roleLookupBreak
+	}
+	return roleBreak
+}
+
+// unservedHandler answers a route the shim knows about and does not serve,
+// with the reason THAT ROUTE carries rather than one generic sentence.
+//
+// The distinction is the whole point of separating StatusPending from
+// StatusUnshimmable: "wait for a later release" and "rewrite your
+// integration" are different instructions, and a client that acts on the
+// wrong one wastes real time. Both are 501 — see UnshimmableControllers for
+// why an identifier-space mismatch is not 410 Gone.
+func unservedHandler(route LegacyRoute) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		var message string
+		if route.Status == StatusUnshimmable {
+			message = "This /api/v2 route is not shimmed and cannot be: " + route.Reason
+		} else {
+			message = "This /api/v2 route is not shimmed yet — " + route.Reason
+		}
+		if route.Migration != "" {
+			message += " Use " + route.Migration + "."
+		}
+		message += " See " + DeprecationDocsURL + "."
+		writeLegacyError(w, http.StatusNotImplemented, message)
+	})
 }
 
 // Route is one legacy read route.

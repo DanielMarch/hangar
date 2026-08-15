@@ -5,6 +5,7 @@ package handlers_test
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -110,7 +111,10 @@ func TestUnparseableNotificationYAMLImportsAsJSONB(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 3, res.RowsAffected)
 
-	good, err := s.ListCharacterNotificationsPage(ctx, characterID, notifications[0].Timestamp.AddDate(1, 0, 0), 10)
+	good, err := s.ListCharacterNotificationsPage(ctx, gen.ListCharacterNotificationsPageParams{
+		CharacterID: characterID, BeforeSentAt: notifications[0].Timestamp.AddDate(1, 0, 0),
+		BeforeNotificationID: math.MaxInt64, PageSize: 10,
+	})
 	require.NoError(t, err)
 	require.Len(t, good, 3)
 

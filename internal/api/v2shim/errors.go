@@ -32,6 +32,15 @@ var errBadID = &shimError{
 	Message: "The given data was invalid.",
 }
 
+// errShimNotFound is a single-resource route whose id does not exist.
+// Laravel's implicit route-model binding answered a bare-string 404 body
+// here, the same shape §6.5 records for every other error on this surface —
+// so this is a 404 with legacy's body, not Huma's problem+json.
+var errShimNotFound = &shimError{
+	Status:  http.StatusNotFound,
+	Message: "Not Found",
+}
+
 // errFilterUnsupported answers legacy's OData `$filter` query parameter.
 //
 // ── WHY THE SHIM REFUSES RATHER THAN IGNORES ─────────────────────────────

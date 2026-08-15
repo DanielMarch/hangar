@@ -32,7 +32,11 @@ func contactRow(contact gen.AppContact, labelNames map[int64]string) *Obj {
 
 	return NewObj(6).
 		Set("contact_id", Int(contact.ContactID)).
-		Set("standing", Num(contact.Standing)).
+		// standing is a float in BOTH schemas and NOT NULL in HANGAR's, which
+		// is exactly what FloatValue is for. It was Num(...) until Phase 20.6
+		// — same output, but it left the float/money distinction implicit at
+		// the one call site where a reader most wants to see it stated.
+		Set("standing", FloatValue(contact.Standing)).
 		Set("contact_type", contact.ContactType).
 		Set("is_watched", contact.IsWatched).
 		Set("is_blocked", contact.IsBlocked).

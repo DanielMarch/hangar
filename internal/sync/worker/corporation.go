@@ -103,6 +103,23 @@ var corporationDispatch = map[string]corporationHandler{
 	"/corporations/{corporation_id}/standings":       wrapCorp(handlers.ParseCorporationStandings, handlers.SyncCorporationStandings),
 	"/corporations/{corporation_id}/contacts":        wrapCorp(handlers.ParseCorporationContacts, handlers.SyncCorporationContacts),
 	"/corporations/{corporation_id}/contacts/labels": wrapCorp(handlers.ParseCorporationContactLabels, handlers.SyncCorporationContactLabels),
+	// DEFECT B47 (Phase 20.6): the entry that was never written. Deliberately
+	// spelled the same way as characterDispatch's assets entry, including the
+	// nil names argument — the names enrichment is a second upstream call
+	// made by doSync after this handler commits, not something this function
+	// can do, because it needs the raw response body (see corporationAfterOK
+	// in doSync and worker/assetnames.go for why).
+	corporationAssetsPath: func(ctx context.Context, s *store.Store, corporationID int64, body []byte) (int32, error) {
+		dto, err := handlers.ParseAssets(body)
+		if err != nil {
+			return 0, err
+		}
+		res, err := handlers.SyncAssets(ctx, s, "corporation", corporationID, dto, nil)
+		if err != nil {
+			return 0, err
+		}
+		return res.RowsAffected, nil
+	},
 	"/corporations/{corporation_id}/wallets": func(ctx context.Context, s *store.Store, corporationID int64, body []byte) (int32, error) {
 		dto, err := handlers.ParseCorporationWalletBalances(body)
 		if err != nil {
@@ -216,6 +233,11 @@ var pagePaginatedRoutes = map[string]bool{
 	"/corporations/{corporation_id}/orders":                     true,
 	"/corporations/{corporation_id}/orders/history":             true,
 	"/corporations/{corporation_id}/wallets/{division}/journal": true,
+	// B47: assets are X-Pages paginated exactly as the character half is
+	// (characterPagePaginatedRoutes lists the same route). A corporation
+	// hangar is the largest asset set ESI serves, so omitting this would
+	// sync page 1 and silently drop the rest — B31's defect, reintroduced.
+	corporationAssetsPath: true,
 }
 
 // CorporationWorker executes "sync_route" jobs for entity_kind =
@@ -415,6 +437,20 @@ const (
 	// spelling for three phases while naming the contributors path, which is
 	// exactly how the wrong DTO stayed attached to it.
 	projectContributorsPath = "/corporations/{corporation_id}/projects/{project_id}/contributors"
+
+	// ── DEFECT B47 (PHASE 20.6) ──────────────────────────────────────────
+	// The corporation half of the assets sync. handlers.SyncAssets has been
+	// owner-generic since Phase 6 and characterDispatch has bound it since
+	// then; corporationDispatch simply never gained the entry. Nothing
+	// failed and nothing logged, because a route with no dispatch entry is
+	// not a route that errors — it is a route the reconciler never creates a
+	// subscription for, so it is never scheduled, so no code path runs.
+	// Measured consequence: app.asset held zero corporation-owned rows on
+	// every installation ever deployed, and GET
+	// /api/v1/corporations/{id}/assets (plus the asset tree) served an empty
+	// array as though the corporation owned nothing.
+	corporationAssetsPath     = "/corporations/{corporation_id}/assets"
+	corporationAssetNamesPath = "/corporations/{corporation_id}/assets/names"
 )
 
 func strPtr(s string) *string { return &s }
@@ -604,6 +640,24 @@ func (w *CorporationWorker) doSync(ctx context.Context, s *store.Store, sub gen.
 		n, syncErr := handler(ctx, s, corporationID, resp.Body)
 		if syncErr != nil {
 			return 0, outcome, syncErr
+		}
+		// PHASE 20.6 (B47): the assets/names enrichment, mirroring
+		// CharacterWorker exactly. 20.5 wired the character half and left
+		// this one deliberately unwired, recording the reason: there was
+		// nothing to enrich, because corporation assets never synced. Wiring
+		// the list route above is what makes it meaningful, so it follows
+		// here in the same commit rather than becoming a second omission.
+		//
+		// The acting character is the one election picked for this route;
+		// it is the token the names call must use, since the corporation
+		// itself has no token.
+		if route.UpstreamPath == corporationAssetsPath {
+			named, nerr := syncAssetNames(ctx, w.Gateway, s, corporationAssetNamesPath,
+				"corporation_id", "corporation", corporationID, characterID, accessToken, resp.Body)
+			if nerr != nil {
+				return n, outcome, nerr
+			}
+			n += named
 		}
 		next, err := sync.PlanNextDueAt(sync.DueTimeInput{
 			Route: routeCfg, Policy: w.Policy, LastSuccess: time.Now(),

@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -153,6 +154,41 @@ func corpusFixture(t testing.TB, s *store.Store) {
 		})
 		require.NoError(t, err)
 	}
+
+	corpusSheetFixture(t, s, corpID, charID, allianceID)
+}
+
+// corpusSheetFixture seeds the corporation.sheet recording's corporation and
+// its alliance. Values are read off the recording, not invented.
+func corpusSheetFixture(t testing.TB, s *store.Store, corpID, ceoID, allianceID int64) {
+	t.Helper()
+	ctx := context.Background()
+
+	allianceFounded := time.Date(2014, 2, 3, 4, 5, 6, 0, time.UTC)
+	ticker := "TSTA"
+	creator, creatorCorp, executor := ceoID, corpID, corpID
+	_, err := s.UpsertAlliance(ctx, gen.UpsertAllianceParams{
+		AllianceID: allianceID, Name: "Test Alliance", Ticker: &ticker,
+		CreatorID: &creator, CreatorCorporationID: &creatorCorp,
+		ExecutorCorporationID: &executor, DateFounded: &allianceFounded,
+	})
+	require.NoError(t, err)
+
+	corpFounded := time.Date(2014, 1, 2, 3, 4, 5, 0, time.UTC)
+	memberCount := int32(42)
+	taxRate := 0.1
+	description := "Corp description"
+	url := "https://example.invalid/corp"
+	homeStation := int64(60003760)
+	shares := int64(1000)
+	_, err = s.UpsertCorporation(ctx, gen.UpsertCorporationParams{
+		CorporationID: corpID, Name: "Test Corporation", Ticker: "TSTC",
+		MemberCount: &memberCount, CeoID: &ceoID, AllianceID: &allianceID,
+		Description: &description, TaxRate: &taxRate, DateFounded: &corpFounded,
+		CreatorID: &ceoID, Url: &url, HomeStationID: &homeStation, Shares: &shares,
+		Palette: json.RawMessage(`{}`),
+	})
+	require.NoError(t, err)
 }
 
 // grantedToken creates a user with `permissions` materialised, plus an API
@@ -217,19 +253,27 @@ func corpusBytes(t testing.TB, name string) []byte {
 // ── Phase 19 exit criteria ───────────────────────────────────────────────
 
 // TestShimByteCompatibleForAllNineControllers is the roadmap's
-// byte-compatibility criterion.
+// byte-compatibility criterion, iterated PER ROUTE.
 //
-// It iterates ALL NINE legacy controllers explicitly and asserts the right
-// outcome for each, rather than only checking the ones that happen to be
-// implemented — a test that silently skipped a controller would report
-// coverage it does not have:
+// ── WHY THIS TEST CHANGED IN PHASE 20.6 ──────────────────────────────────
+// It used to iterate CONTROLLERS, and a controller counted as "covered" the
+// moment any one of its routes was served. CharacterController passed on the
+// strength of 2 routes out of 15. So the test that existed to police the
+// shim's coverage was structurally unable to see 29 of the 33 routes, and
+// the honest "4 of 33" number lived only in a comment.
 //
-//   - the shimmed controllers must be BYTE-IDENTICAL to their recordings;
-//   - RoleController / RoleLookupController must answer 410 with a pointer;
-//   - UserController / SquadController must answer the "not shimmed" 501,
-//     because HANGAR's uuid user and squad ids are a different identifier
-//     space from legacy's integers;
-//   - ApiController is the framework base class and owns no route at all.
+// Now every route in Classification() gets its own assertion, chosen by its
+// status:
+//
+//   - StatusServed must be BYTE-IDENTICAL to its recording;
+//   - StatusBreaking must answer 410 with a migration pointer;
+//   - StatusUnshimmable and StatusPending must answer 501 — with DIFFERENT
+//     bodies, because "rewrite your integration" and "wait for a release"
+//     are different instructions and a client acting on the wrong one wastes
+//     real time.
+//
+// The controller roll-up is kept as a final subtest, because ApiController
+// owning no route at all is still worth asserting.
 func TestShimByteCompatibleForAllNineControllers(t *testing.T) {
 	pool := newMigratedPool(t)
 	s := store.New(pool)
@@ -242,45 +286,47 @@ func TestShimByteCompatibleForAllNineControllers(t *testing.T) {
 	auth := map[string]string{"Authorization": "Bearer " + credential}
 
 	covered := map[string]bool{}
-	for _, route := range v2shim.Routes() {
+	for _, route := range v2shim.Classification() {
 		route := route
 		covered[route.Controller] = true
-		t.Run(route.Corpus, func(t *testing.T) {
-			path := corpusPath(t, route.Corpus)
-			rec := get(t, handler, path, auth)
-			require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
-			require.Equal(t, string(corpusBytes(t, route.Corpus)), rec.Body.String(),
-				"route %s is not byte-identical to its recording", route.Pattern)
+
+		name := route.Corpus
+		if name == "" {
+			name = route.Controller
+		}
+		t.Run(string(route.Status)+"/"+name, func(t *testing.T) {
+			switch route.Status {
+			case v2shim.StatusServed:
+				require.NotEmpty(t, route.Corpus,
+					"a served route with no recording cannot be byte-verified, so it is not served")
+				path := corpusPath(t, route.Corpus)
+				rec := get(t, handler, path, auth)
+				require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+				require.Equal(t, string(corpusBytes(t, route.Corpus)), rec.Body.String(),
+					"route %s is not byte-identical to its recording", route.Pattern)
+
+			case v2shim.StatusBreaking:
+				rec := get(t, handler, legacyPathFor(t, route), auth)
+				require.Equal(t, http.StatusGone, rec.Code, "body: %s", rec.Body.String())
+				require.Contains(t, rec.Body.String(), "BREAKING CHANGE",
+					"a 410 must say what broke, not merely refuse")
+
+			case v2shim.StatusUnshimmable:
+				rec := get(t, handler, legacyPathFor(t, route), auth)
+				require.Equal(t, http.StatusNotImplemented, rec.Code, "body: %s", rec.Body.String())
+				require.Contains(t, rec.Body.String(), "cannot be",
+					"an unshimmable route must say the break is permanent")
+				require.NotEmpty(t, route.Reason, "an unshimmable route must carry its reason")
+
+			case v2shim.StatusPending:
+				rec := get(t, handler, legacyPathFor(t, route), auth)
+				require.Equal(t, http.StatusNotImplemented, rec.Code, "body: %s", rec.Body.String())
+				require.Contains(t, rec.Body.String(), "not shimmed yet",
+					"a pending route must read as unfinished work, never as a permanent break")
+				require.NotEmpty(t, route.Reason, "a pending route must carry the reason it is not done")
+			}
 		})
 	}
-
-	t.Run("reshaped controllers answer 410", func(t *testing.T) {
-		for controller, path := range v2shim.BreakingControllers() {
-			covered[controller] = true
-			rec := get(t, handler, path, auth)
-			require.Equal(t, http.StatusGone, rec.Code, "%s: %s", controller, rec.Body.String())
-		}
-	})
-
-	t.Run("identity-mismatched controllers answer 501 not-shimmed", func(t *testing.T) {
-		for controller, path := range v2shim.UnshimmableControllers() {
-			covered[controller] = true
-			rec := get(t, handler, path, auth)
-			require.Equal(t, http.StatusNotImplemented, rec.Code, "%s: %s", controller, rec.Body.String())
-			require.Contains(t, rec.Body.String(), "not shimmed")
-		}
-	})
-
-	t.Run("shimmable-but-unimplemented controllers say 'not yet'", func(t *testing.T) {
-		// Named separately from the identity-mismatched ones so a
-		// temporary gap is never mistaken for a permanent break. This
-		// subtest passing is NOT the same as the controller being done.
-		for controller, path := range v2shim.PendingControllers() {
-			covered[controller] = true
-			rec := get(t, handler, path, auth)
-			require.Equal(t, http.StatusNotImplemented, rec.Code, "%s: %s", controller, rec.Body.String())
-		}
-	})
 
 	t.Run("every legacy controller is accounted for", func(t *testing.T) {
 		// ApiController is the abstract base class: it declares the
@@ -296,6 +342,75 @@ func TestShimByteCompatibleForAllNineControllers(t *testing.T) {
 				"legacy controller %s has no shim route, no documented break and no 501 — it would 404 silently", controller)
 		}
 	})
+
+	// ── PHASE 20.6: THE ROUTE COUNT IS MEASURED, NOT ASSERTED ────────────
+	// This package's own comments said "legacy's /api/v2 has 33 GET routes"
+	// for five phases. Nothing measured it, and it is wrong: MANIFEST.json
+	// holds 34 recordings which collapse to 32 distinct route patterns (two
+	// are second recordings of the same path — a page-2 and an empty-set
+	// case), and the two role routes were never recorded because they are
+	// breaking. 32 + 2 = 34.
+	//
+	// That is exactly defect B6's shape — a count stated rather than
+	// derived — so the expected number is computed from the corpus here
+	// rather than replacing one hard-coded number with another.
+	t.Run("classification covers every legacy read route", func(t *testing.T) {
+		recorded := distinctRecordedRoutePatterns(t)
+		byStatus := v2shim.ByStatus()
+		breaking := len(byStatus[v2shim.StatusBreaking])
+
+		total := 0
+		for _, routes := range byStatus {
+			total += len(routes)
+		}
+		require.Equal(t, recorded+breaking, total,
+			"Classification must name every recorded route plus the unrecorded breaking ones "+
+				"(%d recorded patterns + %d breaking)", recorded, breaking)
+
+		t.Logf("legacy read routes = %d (%d recorded patterns + %d unrecorded breaking): "+
+			"served=%d pending=%d unshimmable=%d breaking=%d",
+			total, recorded, breaking,
+			len(byStatus[v2shim.StatusServed]), len(byStatus[v2shim.StatusPending]),
+			len(byStatus[v2shim.StatusUnshimmable]), breaking)
+	})
+}
+
+// distinctRecordedRoutePatterns counts the route patterns MANIFEST.json
+// covers, collapsing the recordings that are second captures of the same
+// path (character.wallet-journal.page2, character.assets.empty) onto the
+// pattern they exercise.
+func distinctRecordedRoutePatterns(t testing.TB) int {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	require.NoError(t, err)
+	raw, err := os.ReadFile(filepath.Join(root, "testdata", "legacy-api-v2", "MANIFEST.json"))
+	require.NoError(t, err)
+
+	var manifest []struct {
+		Path string `json:"path"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &manifest))
+
+	trailingID := regexp.MustCompile(`/\d+$`)
+	patterns := map[string]bool{}
+	for _, entry := range manifest {
+		patterns[trailingID.ReplaceAllString(entry.Path, "/{id}")] = true
+	}
+	require.NotEmpty(t, patterns, "the manifest yielded no routes — the count would be vacuous")
+	return len(patterns)
+}
+
+// legacyPathFor turns a classified route into a concrete request path. A
+// route with a recording uses the recorded path, so the test asks for
+// exactly what a legacy client asked for; the two role controllers have no
+// recording (they were never shimmable) and use their pattern with the id
+// placeholder filled in.
+func legacyPathFor(t testing.TB, route v2shim.LegacyRoute) string {
+	t.Helper()
+	if route.Corpus != "" {
+		return corpusPath(t, route.Corpus)
+	}
+	return strings.ReplaceAll(route.Pattern, "{id}", "1")
 }
 
 // corpusPath reads the legacy path a recording was made at straight out of
@@ -398,7 +513,7 @@ func TestShimStripsSyncEnvelope(t *testing.T) {
 	handler := shimServer(t, pool)
 	auth := map[string]string{"Authorization": "Bearer " + credential}
 
-	for _, route := range v2shim.Routes() {
+	for _, route := range v2shim.ByStatus()[v2shim.StatusServed] {
 		t.Run(route.Corpus, func(t *testing.T) {
 			rec := get(t, handler, corpusPath(t, route.Corpus), auth)
 			require.Equal(t, http.StatusOK, rec.Code)
@@ -412,9 +527,25 @@ func TestShimStripsSyncEnvelope(t *testing.T) {
 			var envelope map[string]json.RawMessage
 			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
 			require.Contains(t, envelope, "data")
-			require.Contains(t, envelope, "links")
-			require.Contains(t, envelope, "meta")
 			require.NotContains(t, envelope, "page", "`page` is /api/v1's cursor block; legacy had `meta`")
+
+			// PHASE 20.6: which envelope to expect is read off the RECORDING
+			// rather than from a second list here. Legacy's collection routes
+			// carry links/meta and its single-resource routes (corporation
+			// sheet, killmail detail, squad/user show) carry only `data` —
+			// so asserting links/meta unconditionally, as this test did until
+			// corporation.sheet became the first served item route, would
+			// fail a route for being correctly shaped.
+			var recorded map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(corpusBytes(t, route.Corpus), &recorded))
+			if _, isCollection := recorded["links"]; isCollection {
+				require.Contains(t, envelope, "links")
+				require.Contains(t, envelope, "meta")
+			} else {
+				require.NotContains(t, envelope, "links",
+					"a single-resource route must not grow a pagination envelope the recording does not have")
+				require.NotContains(t, envelope, "meta")
+			}
 		})
 	}
 }

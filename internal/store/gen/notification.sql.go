@@ -13,13 +13,41 @@ import (
 
 const listCharacterNotificationsPage = `-- name: ListCharacterNotificationsPage :many
 SELECT character_id, notification_id, sent_at, sender_id, sender_type, type, text, is_read, payload, parse_failed FROM app.character_notification
- WHERE character_id = $1 AND sent_at < $2
- ORDER BY sent_at DESC
- LIMIT $3
+ WHERE character_id = $1
+   AND (sent_at, notification_id) < ($2::timestamptz, $3::bigint)
+ ORDER BY sent_at DESC, notification_id DESC
+ LIMIT $4
 `
 
-func (q *Queries) ListCharacterNotificationsPage(ctx context.Context, characterID int64, beforeSentAt time.Time, pageSize int32) ([]AppCharacterNotification, error) {
-	rows, err := q.db.Query(ctx, listCharacterNotificationsPage, characterID, beforeSentAt, pageSize)
+type ListCharacterNotificationsPageParams struct {
+	CharacterID          int64
+	BeforeSentAt         time.Time
+	BeforeNotificationID int64
+	PageSize             int32
+}
+
+// ── DEFECT B46 (PHASE 20.6) ──────────────────────────────────────────────
+// This one never returned 500, which is why it outlived the three that did:
+// a single timestamptz argument types correctly, so it compiled and ran. It
+// was broken in the other direction. ESI delivers notifications in batches
+// that share a `timestamp` to the second, so `sent_at <` with no tiebreak
+// cannot address a page boundary that falls inside such a batch: the next
+// page either re-serves the tied rows or steps over them, and which one
+// happens depends on data the cursor does not carry.
+//
+// ORDER BY sent_at DESC alone is also not a total order, so the rows within
+// a tie could come back in any order Postgres liked between two calls —
+// pagination over a non-deterministic sort is not pagination.
+//
+// The keyset is now (sent_at, notification_id), matching the other four
+// pages in this family. The casts are load-bearing (see wallet.sql).
+func (q *Queries) ListCharacterNotificationsPage(ctx context.Context, arg ListCharacterNotificationsPageParams) ([]AppCharacterNotification, error) {
+	rows, err := q.db.Query(ctx, listCharacterNotificationsPage,
+		arg.CharacterID,
+		arg.BeforeSentAt,
+		arg.BeforeNotificationID,
+		arg.PageSize,
+	)
 	if err != nil {
 		return nil, err
 	}

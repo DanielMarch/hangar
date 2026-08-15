@@ -60,6 +60,21 @@ const (
 	// after-sync enrichment (assets/names, see characterAfterOK) is keyed
 	// on it.
 	characterAssetsPath = "/characters/{character_id}/assets"
+
+	// ── DEFECT B47 (PHASE 20.6) ──────────────────────────────────────────
+	// The character half of the contract detail fan-outs. The CORPORATION
+	// half has been wired since Phase 9 (contractItemsPath/contractBidsPath
+	// in corporation.go) and handlers.SyncContractItems /
+	// handlers.SyncContractBids have taken an ownerKind since the same
+	// phase — so, exactly as with corporation assets, the only thing absent
+	// was the map entry and the case arm.
+	//
+	// Appendix A capability band 1–14 lists Character "Contracts (headers,
+	// items, bids)", so this is parity scope and not an extension. What
+	// shipped was headers only: app.contract_item and app.contract_bid
+	// could hold corporation rows and never a character's.
+	characterContractItemsPath = "/characters/{character_id}/contracts/{contract_id}/items"
+	characterContractBidsPath  = "/characters/{character_id}/contracts/{contract_id}/bids"
 )
 
 // characterHandler is the shape every character-domain sync function in
@@ -309,6 +324,10 @@ func (w *CharacterWorker) Work(ctx context.Context, job *river.Job[planner.SyncJ
 		rowsAffected, outcome, syncErr = w.doCalendarAttendeesFanout(ctx, s, sub, route, args.EntityID, tok.Value)
 	case planetColonyDetailPath:
 		rowsAffected, outcome, syncErr = w.doPlanetColonyDetailFanout(ctx, s, sub, route, args.EntityID, tok.Value)
+	case characterContractItemsPath:
+		rowsAffected, outcome, syncErr = w.doContractItemsFanout(ctx, s, sub, route, args.EntityID, tok.Value)
+	case characterContractBidsPath:
+		rowsAffected, outcome, syncErr = w.doContractBidsFanout(ctx, s, sub, route, args.EntityID, tok.Value)
 	default:
 		handler, ok := characterDispatch[route.UpstreamPath]
 		if !ok {
@@ -673,6 +692,81 @@ func (w *CharacterWorker) doPlanetColonyDetailFanout(ctx context.Context, s *sto
 			}
 			return res.RowsAffected, nil
 		})
+}
+
+// doContractItemsFanout fans out over every contract this character's list
+// sync already knows about (defect B47 — see characterContractItemsPath).
+//
+// Deliberately the same shape as CorporationWorker.doContractItemsFanout,
+// down to reading the contract set through ListContractsPage with the owner
+// kind switched. The two could be folded into one owner-generic function,
+// and are not, because the two workers keep separate fanoutDetail wrappers
+// carrying different election and 403 semantics (a corporation route picks
+// an acting character and records a per-(entity, route, character) breaker;
+// a character route has exactly one token and no election). Sharing the body
+// while those differ would mean a parameter that means "which worker am I",
+// which is the thing the two-worker split exists to avoid.
+//
+// A courier contract's item list comes back empty; empty is a legitimate
+// result, not a failure, exactly as on the corporation side.
+func (w *CharacterWorker) doContractItemsFanout(ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute, characterID int64, accessToken string) (int32, string, error) {
+	items, err := w.knownContractItems(ctx, s, characterID)
+	if err != nil {
+		return 0, "", err
+	}
+	return w.fanoutDetail(ctx, s, sub, route, characterID, accessToken, "contract_id", items,
+		func(ctx context.Context, s *store.Store, contractID int64, body []byte) (int32, error) {
+			dto, err := handlers.ParseContractItems(body)
+			if err != nil {
+				return 0, err
+			}
+			res, err := handlers.SyncContractItems(ctx, s, "character", characterID, contractID, dto)
+			if err != nil {
+				return 0, err
+			}
+			return res.RowsAffected, nil
+		})
+}
+
+// doContractBidsFanout mirrors doContractItemsFanout for auction-contract
+// bids. ESI returns an empty or 404 body for a non-auction contract, which
+// fanoutDetail already treats as a skip rather than a failure.
+func (w *CharacterWorker) doContractBidsFanout(ctx context.Context, s *store.Store, sub gen.AppSyncSubscription, route gen.AppEsiRoute, characterID int64, accessToken string) (int32, string, error) {
+	items, err := w.knownContractItems(ctx, s, characterID)
+	if err != nil {
+		return 0, "", err
+	}
+	return w.fanoutDetail(ctx, s, sub, route, characterID, accessToken, "contract_id", items,
+		func(ctx context.Context, s *store.Store, contractID int64, body []byte) (int32, error) {
+			dto, err := handlers.ParseContractBids(body)
+			if err != nil {
+				return 0, err
+			}
+			res, err := handlers.SyncContractBids(ctx, s, "character", characterID, contractID, dto)
+			if err != nil {
+				return 0, err
+			}
+			return res.RowsAffected, nil
+		})
+}
+
+// knownContractItems is the contract set both character contract fan-outs
+// enumerate: every contract the list sync has already landed for this
+// character. PageSize is the same "everything" value the corporation side
+// uses — this is an internal enumeration of rows already held locally, not a
+// paginated API response.
+func (w *CharacterWorker) knownContractItems(ctx context.Context, s *store.Store, characterID int64) ([]fanoutDetailItem, error) {
+	contracts, err := s.ListContractsPage(ctx, gen.ListContractsPageParams{
+		OwnerKind: "character", OwnerID: characterID, AfterContractID: 0, PageSize: 1_000_000,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("worker: listing known contracts for character %d: %w", characterID, err)
+	}
+	items := make([]fanoutDetailItem, len(contracts))
+	for i, c := range contracts {
+		items[i] = fanoutDetailItem{id: c.ContractID}
+	}
+	return items, nil
 }
 
 func statusOf(outcome string) *int16 {

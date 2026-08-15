@@ -368,9 +368,12 @@ func mailHandler(deps api.Deps) func(context.Context, *IDPageIn) (*CollectionOut
 		if err != nil {
 			return nil, api.PageError(err)
 		}
-		before := cursorTime(page, "sent_at")
+		before, beforeID, err := cursorTimeID(page, "sent_at", "mail_id")
+		if err != nil {
+			return nil, api.PageError(err)
+		}
 		rows, err := deps.Store.ListMailHeadersPage(ctx, gen.ListMailHeadersPageParams{
-			CharacterID: in.ID, BeforeSentAt: before, BeforeMailID: before, PageSize: page.Limit,
+			CharacterID: in.ID, BeforeSentAt: before, BeforeMailID: beforeID, PageSize: page.Limit,
 		})
 		if err != nil {
 			return nil, api.Internal("listing mail", err)
@@ -385,15 +388,21 @@ func notificationsHandler(deps api.Deps) func(context.Context, *NotificationsIn)
 		if err != nil {
 			return nil, api.PageError(err)
 		}
-		before := cursorTime(page, "sent_at")
-		rows, err := deps.Store.ListCharacterNotificationsPage(ctx, in.ID, before, page.Limit)
+		before, beforeID, err := cursorTimeID(page, "sent_at", "notification_id")
+		if err != nil {
+			return nil, api.PageError(err)
+		}
+		rows, err := deps.Store.ListCharacterNotificationsPage(ctx, gen.ListCharacterNotificationsPageParams{
+			CharacterID: in.ID, BeforeSentAt: before, BeforeNotificationID: beforeID, PageSize: page.Limit,
+		})
 		if err != nil {
 			return nil, api.Internal("listing notifications", err)
 		}
 		data := rowSliceOf(rows)
 		next := api.ZeroSentinel
 		if len(rows) == int(page.Limit) {
-			next = api.EncodeCursor(api.Keyset{"before": rows[len(rows)-1]})
+			last := rows[len(rows)-1]
+			next = api.EncodeCursor(timeIDKeyset("sent_at", last.SentAt, "notification_id", last.NotificationID))
 		}
 		return &CollectionOut{Body: api.Collection[map[string]any]{
 			Data: data, Page: api.PageInfo{NextCursor: next, PrevCursor: api.ZeroSentinel, Limit: page.Limit}, Sync: api.Sync{},

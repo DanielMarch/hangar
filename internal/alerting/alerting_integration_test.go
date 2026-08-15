@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -303,7 +304,10 @@ func TestUnrecognisedTypeUsesGenericRenderer(t *testing.T) {
 	}})
 	require.NoError(t, err, "an unrecognised type must not fail the sync either")
 
-	rows, err := s.ListCharacterNotificationsPage(ctx, characterID, time.Now().Add(time.Hour), 10)
+	rows, err := s.ListCharacterNotificationsPage(ctx, gen.ListCharacterNotificationsPageParams{
+		CharacterID: characterID, BeforeSentAt: time.Now().Add(time.Hour),
+		BeforeNotificationID: math.MaxInt64, PageSize: 10,
+	})
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	stored := rows[0]

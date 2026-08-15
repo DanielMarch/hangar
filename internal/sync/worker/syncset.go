@@ -40,6 +40,10 @@ func fanoutRoutes() map[string]sync.EntityKind {
 		calendarEventDetailPath: sync.EntityCharacter,
 		calendarAttendeesPath:   sync.EntityCharacter,
 		planetColonyDetailPath:  sync.EntityCharacter,
+		// PHASE 20.6 (B47): the character halves of the contract detail
+		// fan-outs, whose corporation twins have been here since B30.
+		characterContractItemsPath: sync.EntityCharacter,
+		characterContractBidsPath:  sync.EntityCharacter,
 
 		// Corporation-owned detail and per-division fan-outs.
 		walletJournalPath:         sync.EntityCorporation,

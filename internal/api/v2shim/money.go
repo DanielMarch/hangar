@@ -2,11 +2,28 @@ package v2shim
 
 import (
 	"fmt"
-	"math/big"
 	"strconv"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/shopspring/decimal"
 )
+
+// ── PHASE 20.6 (GATE 7): THESE TOOK THE WRONG TYPE ───────────────────────
+// Money, MoneyOrNull, MoneyOrZero and numericString were written against
+// pgtype.Numeric and sat on the reachability allowlist for five phases as
+// "a helper waiting for the routes that would use it". That was half the
+// story. sqlc.yaml overrides every `pg_catalog.numeric` column to
+// shopspring/decimal (Principle 9 is enforced there, not by convention), so
+// app.wallet_journal.amount arrives as decimal.NullDecimal and app.
+// wallet_balance.balance as decimal.Decimal. No store row has ever produced
+// a pgtype.Numeric.
+//
+// So these helpers were not merely uncalled — they were UNCALLABLE, and a
+// route that tried to use them would not have compiled. Writing the wallet
+// routes is what surfaced it, which is the argument for writing the routes
+// rather than carrying the helpers.
+//
+// The conversion they perform is unchanged and so is the reasoning below;
+// only the input type moved to the one the codebase actually has.
 
 // Money converts HANGAR's exact decimal money to the JSON **number**
 // legacy emitted.
@@ -32,14 +49,8 @@ import (
 //
 // This function is the ONE place the conversion happens, so there is
 // exactly one thing to audit and one thing to point at.
-func Money(n pgtype.Numeric) (Num, error) {
-	if !n.Valid {
-		return 0, errNullMoney
-	}
-	text, err := numericString(n)
-	if err != nil {
-		return 0, err
-	}
+func Money(d decimal.Decimal) (Num, error) {
+	text := numericString(d)
 	value, err := strconv.ParseFloat(text, 64)
 	if err != nil {
 		return 0, fmt.Errorf("v2shim: %q is not a number: %w", text, err)
@@ -49,11 +60,11 @@ func Money(n pgtype.Numeric) (Num, error) {
 
 // MoneyOrNull is Money for a nullable column: a SQL NULL becomes JSON
 // null, which is what legacy emitted for one.
-func MoneyOrNull(n pgtype.Numeric) (any, error) {
+func MoneyOrNull(n decimal.NullDecimal) (any, error) {
 	if !n.Valid {
 		return nil, nil
 	}
-	value, err := Money(n)
+	value, err := Money(n.Decimal)
 	if err != nil {
 		return nil, err
 	}
@@ -64,40 +75,21 @@ func MoneyOrNull(n pgtype.Numeric) (any, error) {
 // type. A NULL there means the row is not what the schema says it is, so
 // this reports it rather than quietly emitting 0 — a zero balance and a
 // missing balance are different facts and only one of them is an incident.
-func MoneyOrZero(n pgtype.Numeric) (Num, error) {
+func MoneyOrZero(n decimal.NullDecimal) (Num, error) {
 	if !n.Valid {
 		return 0, errNullMoney
 	}
-	return Money(n)
+	return Money(n.Decimal)
 }
 
 var errNullMoney = fmt.Errorf("v2shim: money value is NULL where the schema says NOT NULL")
 
-// numericString renders a pgtype.Numeric as its exact decimal text — the
-// same value /api/v1 puts on the wire as a string. Going through text
-// rather than pgtype's Float64Value() keeps the exact value visible at the
-// boundary, so the single float64 conversion above is the only place
-// precision is lost and it is obvious where.
-func numericString(n pgtype.Numeric) (string, error) {
-	if n.NaN {
-		return "", fmt.Errorf("v2shim: money value is NaN")
-	}
-	if n.InfinityModifier != pgtype.Finite {
-		return "", fmt.Errorf("v2shim: money value is infinite")
-	}
-	if n.Int == nil {
-		return "0", nil
-	}
-
-	unscaled := new(big.Int).Set(n.Int)
-	if n.Exp >= 0 {
-		unscaled.Mul(unscaled, new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(n.Exp)), nil))
-		return unscaled.String(), nil
-	}
-
-	rational := new(big.Rat).SetFrac(unscaled, new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(-n.Exp)), nil))
-	return rational.FloatString(int(-n.Exp)), nil
-}
+// numericString renders the decimal as its exact text — the same value
+// /api/v1 puts on the wire as a string. Going through text rather than
+// decimal's own Float64() keeps the exact value visible at the boundary, so
+// the single float64 conversion above is the only place precision is lost
+// and it is obvious where.
+func numericString(d decimal.Decimal) string { return d.String() }
 
 // Float is for a column that is genuinely a float in BOTH schemas — an
 // asset's x/y/z position, a contact's standing, a corporation's tax rate.

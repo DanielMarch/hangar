@@ -124,7 +124,7 @@ func (q *Queries) ListWalletBalances(ctx context.Context, ownerKind string, owne
 const listWalletJournalPage = `-- name: ListWalletJournalPage :many
 SELECT owner_kind, owner_id, division, journal_id, ref_type, amount, balance, tax, tax_receiver_id, first_party_id, second_party_id, context_id, context_id_type, reason, description, date FROM app.wallet_journal
  WHERE owner_kind = $1 AND owner_id = $2 AND division = $3
-   AND (date, journal_id) < ($4, $5)
+   AND (date, journal_id) < ($4::timestamptz, $5::bigint)
  ORDER BY date DESC, journal_id DESC
  LIMIT $6
 `
@@ -134,10 +134,29 @@ type ListWalletJournalPageParams struct {
 	OwnerID         int64
 	Division        int16
 	BeforeDate      time.Time
-	BeforeJournalID time.Time
+	BeforeJournalID int64
 	PageSize        int32
 }
 
+// ── DEFECT B46 (PHASE 20.6) ──────────────────────────────────────────────
+// The row comparison was written `(date, journal_id) < (sqlc.arg(before_date),
+// sqlc.arg(before_journal_id))` with NO casts. sqlc types a row-comparison's
+// right-hand side from the leftmost column it can resolve and applies that
+// one type to every argument in the tuple, so BOTH parameters generated as
+// time.Time — including the one bound to a bigint column. Every call site
+// then had to pass the same time.Time twice to compile, and Postgres
+// rejected it on arrival: `invalid input syntax for type bigint:
+// "9999-01-01 00:00:00 +0000 UTC" (SQLSTATE 22P02)`. This route has
+// returned 500 on every call, with or without a cursor, since Phase 15.
+//
+// The casts are the fix and they are load-bearing, not decoration: they are
+// what makes sqlc emit `BeforeDate time.Time, BeforeJournalID int64`. Do not
+// remove them to "tidy up" — the types silently collapse again.
+//
+// The row-comparison form (rather than an expanded OR) is kept deliberately:
+// it is the form that matches ORDER BY date DESC, journal_id DESC exactly,
+// so the index added in 00045 satisfies both the filter and the sort in one
+// backwards index scan.
 func (q *Queries) ListWalletJournalPage(ctx context.Context, arg ListWalletJournalPageParams) ([]AppWalletJournal, error) {
 	rows, err := q.db.Query(ctx, listWalletJournalPage,
 		arg.OwnerKind,
@@ -185,7 +204,7 @@ func (q *Queries) ListWalletJournalPage(ctx context.Context, arg ListWalletJourn
 const listWalletTransactionsPage = `-- name: ListWalletTransactionsPage :many
 SELECT owner_kind, owner_id, division, transaction_id, client_id, date, is_buy, is_personal, journal_ref_id, location_id, quantity, type_id, unit_price FROM app.wallet_transaction
  WHERE owner_kind = $1 AND owner_id = $2 AND division = $3
-   AND (date, transaction_id) < ($4, $5)
+   AND (date, transaction_id) < ($4::timestamptz, $5::bigint)
  ORDER BY date DESC, transaction_id DESC
  LIMIT $6
 `
@@ -195,10 +214,12 @@ type ListWalletTransactionsPageParams struct {
 	OwnerID             int64
 	Division            int16
 	BeforeDate          time.Time
-	BeforeTransactionID time.Time
+	BeforeTransactionID int64
 	PageSize            int32
 }
 
+// Same defect, same fix, same reasoning as ListWalletJournalPage above
+// (defect B46) — the casts are what keep BeforeTransactionID a bigint.
 func (q *Queries) ListWalletTransactionsPage(ctx context.Context, arg ListWalletTransactionsPageParams) ([]AppWalletTransaction, error) {
 	rows, err := q.db.Query(ctx, listWalletTransactionsPage,
 		arg.OwnerKind,

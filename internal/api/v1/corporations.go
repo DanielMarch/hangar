@@ -253,10 +253,13 @@ func corpWalletJournalHandler(deps api.Deps) func(context.Context, *CorpWalletPa
 		if err != nil {
 			return nil, api.PageError(err)
 		}
-		before := cursorTime(page, "date")
+		before, beforeID, err := cursorTimeID(page, "date", "journal_id")
+		if err != nil {
+			return nil, api.PageError(err)
+		}
 		rows, err := deps.Store.ListWalletJournalPage(ctx, gen.ListWalletJournalPageParams{
 			OwnerKind: string(domain.OwnerCorporation), OwnerID: in.ID, Division: in.Division,
-			BeforeDate: before, BeforeJournalID: before, PageSize: page.Limit,
+			BeforeDate: before, BeforeJournalID: beforeID, PageSize: page.Limit,
 		})
 		if err != nil {
 			return nil, api.Internal("listing wallet journal", err)
@@ -264,7 +267,8 @@ func corpWalletJournalHandler(deps api.Deps) func(context.Context, *CorpWalletPa
 		data := rowSliceOf(rows)
 		next := api.ZeroSentinel
 		if len(rows) == int(page.Limit) {
-			next = api.EncodeCursor(api.Keyset{"date": rows[len(rows)-1].Date.Format(timeLayout)})
+			last := rows[len(rows)-1]
+			next = api.EncodeCursor(timeIDKeyset("date", last.Date, "journal_id", last.JournalID))
 		}
 		return &CollectionOut{Body: api.Collection[map[string]any]{Data: data, Page: api.PageInfo{NextCursor: next, PrevCursor: api.ZeroSentinel, Limit: page.Limit}, Sync: api.Sync{}}}, nil
 	}
@@ -276,10 +280,13 @@ func corpWalletTransactionsHandler(deps api.Deps) func(context.Context, *CorpWal
 		if err != nil {
 			return nil, api.PageError(err)
 		}
-		before := cursorTime(page, "date")
+		before, beforeID, err := cursorTimeID(page, "date", "transaction_id")
+		if err != nil {
+			return nil, api.PageError(err)
+		}
 		rows, err := deps.Store.ListWalletTransactionsPage(ctx, gen.ListWalletTransactionsPageParams{
 			OwnerKind: string(domain.OwnerCorporation), OwnerID: in.ID, Division: in.Division,
-			BeforeDate: before, BeforeTransactionID: before, PageSize: page.Limit,
+			BeforeDate: before, BeforeTransactionID: beforeID, PageSize: page.Limit,
 		})
 		if err != nil {
 			return nil, api.Internal("listing wallet transactions", err)
@@ -287,13 +294,12 @@ func corpWalletTransactionsHandler(deps api.Deps) func(context.Context, *CorpWal
 		data := rowSliceOf(rows)
 		next := api.ZeroSentinel
 		if len(rows) == int(page.Limit) {
-			next = api.EncodeCursor(api.Keyset{"date": rows[len(rows)-1].Date.Format(timeLayout)})
+			last := rows[len(rows)-1]
+			next = api.EncodeCursor(timeIDKeyset("date", last.Date, "transaction_id", last.TransactionID))
 		}
 		return &CollectionOut{Body: api.Collection[map[string]any]{Data: data, Page: api.PageInfo{NextCursor: next, PrevCursor: api.ZeroSentinel, Limit: page.Limit}, Sync: api.Sync{}}}, nil
 	}
 }
-
-const timeLayout = "2006-01-02T15:04:05.999999999Z07:00"
 
 // ---- projects ----
 

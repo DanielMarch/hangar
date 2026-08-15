@@ -43,11 +43,36 @@ For a real deployment later, register a **second** application with the public H
 rather than editing this one — the localhost registration stays useful for development, and CCP
 allows only one callback URL per application.
 
-## 3. Scopes — 46, and why each
+## 3. Scopes — 47, and why each
 
-HANGAR's sync set is 80 routes. Forty-five of them declare a scope on their `GET` operation; the
-calendar routes add one more that the current code masks (see B38 below). That is the complete
-set, and it is a **read-only** set.
+HANGAR's sync set is 88 routes, and 47 distinct scopes are declared across their `GET`
+operations. That is the complete set, and it is a **read-only** set.
+
+> ### ⚠ This count moved from 46 to 47 in Phase 20.6 (defect B47)
+>
+> The scope set is **derived from the sync set** — `go run ./tools/scopedump` reads
+> `worker.SyncSet()` against the embedded spec snapshot and prints it. That derivation is only
+> as complete as the sync set is, and the sync set was missing an entry:
+> `GET /corporations/{corporation_id}/assets` had an owner-generic handler
+> (`handlers.SyncAssets`, bound for characters since Phase 6) and **no `corporationDispatch`
+> entry**, so it was in no dispatch table, so `SyncSet()` never named it, so its scope never
+> reached this document.
+>
+> The missing scope is `esi-assets.read_corporation_assets.v1`, and its absence is why no
+> corporation's assets have ever synced on any installation — the dispatch gap and the scope gap
+> are the same defect observed at two layers, not two defects.
+>
+> **An existing installation must re-authorize.** Adding the scope to the developer-portal
+> registration is necessary and not sufficient: tokens already stored carry the 46-scope grant,
+> and `ReconcileCorporationSubscriptions` deliberately refuses to create a subscription for a
+> route whose scopes the acting character's token does not hold. Until the character
+> re-authorizes, corporation assets stays correctly unsubscribed rather than failing at fetch
+> time with a 403.
+>
+> Verify the two sets agree at any time with:
+> ```bash
+> go run ./tools/scopedump
+> ```
 
 > **Do not tick the write scopes.** `esi-characters.write_contacts.v1`,
 > `esi-mail.send_mail.v1` and `esi-mail.organize_mail.v1` appear on the *same paths* HANGAR reads,
@@ -59,7 +84,7 @@ Grouped as the portal's tree presents them:
 
 | Group | Scopes |
 | :-- | :-- |
-| `esi-assets` | `read_assets.v1` |
+| `esi-assets` | `read_assets.v1`, `read_corporation_assets.v1` |
 | `esi-calendar` | `read_calendar_events.v1` |
 | `esi-characters` | `read_agents_research.v1`, `read_blueprints.v1`, `read_contacts.v1`, `read_corporation_roles.v1`, `read_fatigue.v1`, `read_loyalty.v1`, `read_medals.v1`, `read_notifications.v1`, `read_standings.v1`, `read_titles.v1` |
 | `esi-clones` | `read_clones.v1`, `read_implants.v1` |
@@ -162,7 +187,7 @@ character-reauthorize handler. An empty scope list is exactly the case the devel
 about — *"your application will only be able to authenticate users, and no refresh tokens will be
 issued"*. So no matter which scopes are ticked here, the authorization URL asks for none of them,
 no refresh token comes back, and every authenticated route in the sync layer has nothing to call
-with. Ticking the 46 scopes above is necessary and is **not sufficient**; the login flow has to
+with. Ticking the 47 scopes above is necessary and is **not sufficient**; the login flow has to
 request them too. Closed by Phase 20.2.
 
 **B38 — two sync-set paths do not exist in the spec.** `internal/sync/worker` registers

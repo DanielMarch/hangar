@@ -3,6 +3,8 @@
 package reachability
 
 import (
+	"go/scanner"
+	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -131,7 +133,7 @@ func readGoSources(t *testing.T, repoRoot string, wantTests bool) string {
 		if readErr != nil {
 			return nil
 		}
-		b.Write(src)
+		b.WriteString(stripCommentsAndStrings(src))
 		b.WriteByte('\n')
 		return nil
 	})
@@ -139,6 +141,47 @@ func readGoSources(t *testing.T, repoRoot string, wantTests bool) string {
 		t.Fatalf("walking the source tree: %v", err)
 	}
 	return b.String()
+}
+
+// stripCommentsAndStrings reduces a Go file to its CODE tokens.
+//
+// ── WHY (PHASE 20.6) ─────────────────────────────────────────────────────
+// This guard used to scan raw file bytes, so a query name written in a
+// COMMENT counted as a production caller. That is not a cosmetic
+// imprecision — it is a hole straight through the guard's purpose. Phase
+// 20.6 walked into it: internal/sync/worker/unmapped.go documents the
+// eighteen catalogued routes whose capability has a table, store queries and
+// an API endpoint but NO writer, and it names the writers it is reporting as
+// uncalled — UpsertKillmail, UpsertCharacterFitting, UpsertLocation and the
+// rest. The moment those names appeared in a comment, this test declared ten
+// allowlist entries "now have a production caller" and demanded their
+// removal. Had that been obeyed, the queries would have looked wired while
+// nothing called them, and the guard would have been actively misleading for
+// exactly the defect class it exists to catch.
+//
+// Documenting a defect must never be able to hide it. Comments and string
+// literals are dropped; identifiers, keywords and operators are kept.
+func stripCommentsAndStrings(src []byte) string {
+	var out strings.Builder
+	out.Grow(len(src))
+
+	file := token.NewFileSet().AddFile("", -1, len(src))
+	var scan scanner.Scanner
+	// nil error handler and no ScanComments: malformed files degrade to
+	// whatever tokenised, which is strictly safer here than falling back to
+	// the raw bytes a comment could hide in.
+	scan.Init(file, src, nil, 0)
+	for {
+		_, tok, lit := scan.Scan()
+		if tok == token.EOF {
+			break
+		}
+		if tok == token.IDENT {
+			out.WriteString(lit)
+			out.WriteByte('\n')
+		}
+	}
+	return out.String()
 }
 
 // containsIdentifier reports whether name appears in src as a whole
