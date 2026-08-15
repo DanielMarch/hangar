@@ -488,7 +488,21 @@ var capabilitySpecs = map[int]CapabilitySpec{
 	55: {Endpoints: []string{"/api/v1/squads/{id}/roles"}, Controllers: []string{"SquadController"}, Phase: "16", Test: "TestSquadRoles"},
 	56: {Endpoints: []string{"/api/v1/me/webhooks", "/api/v1/admin/platforms"}, Phase: "20.5", Test: "TestWebhookRotationOverlap"},
 	57: {
-		AlertTypes: []string{"54 seeded (42 esi_notification, 9 domain_event, 4 threshold), 8 domains"},
+		// ── DEFECT B54 (PHASE 20.8): THIS DID NOT ADD UP ─────────────────
+		// It read "54 seeded (42 esi_notification, 9 domain_event, 4
+		// threshold), 8 domains" — and 42 + 9 + 4 is 55. A hand-written
+		// breakdown of a hand-written total, in the third column of this
+		// matrix found wrong in one phase, and the arithmetic alone was
+		// enough to convict it.
+		//
+		// MEASURED two ways and they agree: catalogue.Catalogue holds 41
+		// CategoryESINotification, 9 CategoryDomainEvent and 4
+		// CategoryThreshold; and a FIRST BOOT of the release image against a
+		// fresh Postgres 18 seeds exactly those three counts into
+		// app.alert_type. TestAlertCatalogueComplete now asserts the
+		// per-category split partitions the catalogue, so the next edit that
+		// does not add up fails rather than being read past.
+		AlertTypes: []string{"54 seeded (41 esi_notification, 9 domain_event, 4 threshold), 8 domains"},
 		Endpoints:  []string{"/api/v1/admin/alerts"},
 		Phase:      "20.4", Test: "TestAlertCatalogueComplete",
 	},

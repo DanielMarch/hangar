@@ -55,5 +55,5 @@ capability_id,capability_name,upstream_esi_routes,legacy_controllers,alert_types
 54,Members & Moderators,,SquadController,,/api/v1/squads/{id}/members,16,TestSquadMembers,verified,
 55,Squad Roles & Applications,,SquadController,,/api/v1/squads/{id}/roles,16,TestSquadRoles,verified,
 56,"Access Provisioning Drivers (Discord, TeamSpeak, Mumble) + Webhook Channels (Discord, Slack, SMTP)",,,,/api/v1/me/webhooks /api/v1/admin/platforms,20.5,TestWebhookRotationOverlap,verified,
-57,"54-Type Alert Catalogue across 8 domains, including Wars (6) and Skyhooks (5)",,,"54 seeded (42 esi_notification, 9 domain_event, 4 threshold), 8 domains",/api/v1/admin/alerts,20.4,TestAlertCatalogueComplete,verified,
+57,"54-Type Alert Catalogue across 8 domains, including Wars (6) and Skyhooks (5)",,,"54 seeded (41 esi_notification, 9 domain_event, 4 threshold), 8 domains",/api/v1/admin/alerts,20.4,TestAlertCatalogueComplete,verified,
 58,9-Locale Internationalization with ESI language resolution,,,,,3,TestLocaleResolutionExhaustive,verified,

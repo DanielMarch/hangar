@@ -136,6 +136,32 @@ func TestAlertCatalogueComplete(t *testing.T) {
 	require.Equal(t, len(catalogue.Catalogue), total, "the per-domain counts must partition the catalogue exactly")
 	require.Equal(t, 54, total, "§4.4's catalogue is 54 seeded alert types across eight domains")
 
+	// ── DEFECT B54 ───────────────────────────────────────────────────────
+	// The traceability matrix's own breakdown of this catalogue read "42
+	// esi_notification, 9 domain_event, 4 threshold", which sums to 55. A
+	// hand-written breakdown of a hand-written total, wrong by arithmetic
+	// alone. The split is asserted here so the next one that does not add up
+	// fails instead of being read past — measured against a first boot of
+	// the release image, which seeds exactly these three counts.
+	byCategory := map[catalogue.Category]int{}
+	for _, entry := range catalogue.Catalogue {
+		byCategory[entry.Category]++
+	}
+	require.Equal(t, 41, byCategory[catalogue.CategoryESINotification])
+	require.Equal(t, 9, byCategory[catalogue.CategoryDomainEvent])
+	require.Equal(t, 4, byCategory[catalogue.CategoryThreshold])
+	categoryTotal := 0
+	for _, n := range byCategory {
+		categoryTotal += n
+	}
+	require.Equal(t, total, categoryTotal, "the per-category counts must partition the catalogue exactly too")
+
+	// Every threshold declares a source route, which is §4.4's own
+	// constraint and the database's (alert_type's threshold_declares_source
+	// CHECK). A threshold without one cannot be seeded at all.
+	require.Len(t, catalogue.ThresholdSourceRoutes(), byCategory[catalogue.CategoryThreshold],
+		"each threshold alert declares exactly one source route")
+
 	// Every name resolves back to its own entry, and no name repeats — a
 	// duplicate would silently shadow one of the two in ByName's map.
 	names := catalogue.Names()
