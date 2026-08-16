@@ -77,10 +77,14 @@ earlier commit than the tag now points at.
 That is checkable rather than asserted:
 
 ```bash
-git diff --name-only <earlier-commit> v1.0.0-rc1 | grep -vE '^tools/|^docs/|_test\.go$'
+git diff --name-only <earlier-commit> v1.0.0-rc1 | grep -vE '^tools/|^docs/|^deploy/|_test\.go$'
 ```
 
-returns nothing for each. The cheap gates (4, 6, 7) were re-run at the final tag; Gate 2's hour was
+returns nothing for each. `deploy/` is in that list for a reason worth stating rather than
+waving through: the two installers changed after Gate 2 ran (the base64 password defect Gate 5
+found). Neither is compiled into anything — no `go:embed` covers `deploy/`, and the image's final
+stage copies exactly one file, `/out/hangar`, into a base with no shell at all. The binary and the
+image are the same artefact before and after. The cheap gates (4, 6, 7) were re-run at the final tag; Gate 2's hour was
 not spent again to watch the same binary produce the same number. Saying so is better than implying
 everything ran at the final commit.
 
