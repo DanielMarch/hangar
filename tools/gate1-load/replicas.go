@@ -69,6 +69,9 @@ type fleet struct {
 	mu          sync.Mutex
 	replicas    []*replica
 	transitions []transitionEvent
+	// started records when each replica process was launched, including the
+	// initial fleet. See startTimes.
+	started []time.Time
 }
 
 func newFleet(binary, logDir string, basePort int, env []string) *fleet {
@@ -130,6 +133,10 @@ func (f *fleet) startOne(ctx context.Context, index int) error {
 	if !replaced {
 		f.replicas = append(f.replicas, r)
 	}
+	f.mu.Unlock()
+
+	f.mu.Lock()
+	f.started = append(f.started, time.Now())
 	f.mu.Unlock()
 
 	if err := waitForMetrics(ctx, "http://"+addr+"/metrics", 90*time.Second); err != nil {
@@ -295,4 +302,26 @@ func httpGet(ctx context.Context, url string) (io.Closer, error) {
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return resp.Body, nil
+}
+
+// startTimes returns when each replica process began serving — the initial
+// fleet start and every restart.
+//
+// §1.8's amended measurement excludes samples taken within a settling window
+// of these. The reason is the same at both moments and is not specific to
+// restarts: a replica that has not yet made an ESI request has not consulted
+// the registry, so Governor1 still reports the optimistic `solo` default it
+// was constructed with. At N=3 the initial start is the larger source — the
+// planner hands work to one replica first, and the other two report a mode
+// they have not selected until their own first job arrives.
+func (f *fleet) startTimes() []time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := append([]time.Time(nil), f.started...)
+	for _, e := range f.transitions {
+		if e.Event == "replica_restarted" {
+			out = append(out, e.At)
+		}
+	}
+	return out
 }

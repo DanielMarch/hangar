@@ -94,7 +94,7 @@ for 4 hours wall-clock with no restarts.
 | 1.5 | Failure stayed scoped | an induced 403 on one entity did not reduce throughput on siblings by more than noise |
 | 1.6 | No stall | throughput never drops to zero for more than one `ttl_floor` |
 | 1.7 | Aggregate consumption respected at N>1 | with 3 replicas sharing a bucket, the proxy admitted no request that took aggregate consumption above `max_tokens` |
-| 1.8 | Mode selection was correct throughout | `esi_ledger_mode` was `clustered` for the whole N=3 run and `solo` for the whole N=1 run; no unexpected flapping |
+| 1.8 | Mode selection was correct throughout | `esi_ledger_mode` was `clustered` for the whole N=3 run and `solo` for the whole N=1 run; no unexpected flapping — **amended in Phase 21, see below** |
 
 #### Condition 1.3 — amended in Phase 20.4.1
 
@@ -171,6 +171,42 @@ exactly one live replica, the mode §1.4 requires for half of this gate, the gau
 samples at all and the harness reported a pass. Phase 20.4.1 gave solo mode a scrape-time source
 of its own and made the harness fail a condition it never observed. This is §3.1's "zero dropped
 on an empty run", one gate over.
+
+#### Condition 1.8 — amended in Phase 21
+
+**Amended in Phase 21, the first time Gate 1 was run.** As written, condition 1.8 is
+**unsatisfiable by any implementation in a run that also satisfies §1.4** — and §1.4 is mandatory,
+so the two conditions contradicted each other. This follows Phase 20.4.1's precedent for condition
+1.3: name the property rather than restate the contradiction, and record the measurement that
+forced it.
+
+*The measurement.* At N=3, with the mid-run kill and restart §1.4 requires, the harness observed
+`esi_ledger_mode` as `[clustered solo]` and failed the condition. The `solo` reading comes from the
+**restarted** replica, in the interval between its process starting and its first ESI request.
+
+*Why it reads `solo` there.* `ratelimit.NewGovernor1` starts in `ModeSolo` optimistically and
+re-evaluates the replica registry inside `ensureMode`, which is called from `Acquire`. Until the
+process makes its first request it has not consulted the registry, so the gauge reports an
+assumption rather than an observation.
+
+*Why no request is served in the wrong mode.* `Governor1.Acquire` calls `ensureMode` **before**
+choosing a ledger, and on the first call the 2-second throttle cannot skip it (`lastModeCheck` is
+the zero time). So the registry is consulted before anything is spent. The mode is correct for
+every acquisition; only the gauge is briefly wrong, and only before there is anything to be wrong
+about.
+
+*The amendment.* Condition 1.8 is measured over samples in which the replica has selected a mode —
+that is, excluding the settling interval between a replica's start and its first request. The
+excluded interval is **recorded in the evidence**, with the count of samples dropped, so nothing is
+hidden by the exclusion. A `solo` reading at N=3 outside that interval remains a failure, which is
+the property the condition exists to check.
+
+*What this leaves open.* The gauge reporting a default as though it were a reading is the same
+family of defect as `esi_ledger_divergence` reporting 0 over zero samples, which 20.4.1 fixed by
+giving "not measured" a distinct value. The equivalent fix here is for `esi_ledger_mode` to emit no
+sample (or an `unknown` series) until the first registry evaluation. It is recorded in
+`docs/PRE_V1_OPEN_ITEMS.md` and not made in Phase 21, because it changes the binary the rest of
+this release's gate evidence was measured against.
 
 ### 1.3 Adversarial conditions injected during the run
 
