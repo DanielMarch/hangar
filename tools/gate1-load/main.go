@@ -44,6 +44,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"sync"
 	"syscall"
 	"time"
 
@@ -268,9 +269,40 @@ func run() error {
 		fleet.note("traffic_started", fmt.Sprintf("the installation is serving; %d requests reached the proxy before the measurement window opened", func() int { _, t := proxy.Served(); return t }()))
 	}
 
+	// §1.3's offsets are relative to the injector's start, and until here that
+	// start was the moment the proxy was constructed — before migrating,
+	// before ingesting the catalogue, and before seeding 5000 characters,
+	// which together take longer than the whole schedule spans. Measured on
+	// the first four-hour N=1 run: every injection was already eligible when
+	// traffic began, so all 100 error responses landed in the opening seconds
+	// instead of across sixteen minutes, and the adversarial log shows the
+	// entire table firing at once.
+	//
+	// Reset restarts the schedule's clock, which is what it exists for.
+	injector.Reset()
+
 	// ── the measurement ───────────────────────────────────────────────────
 	fmt.Printf("gate1: running for %s at N=%d — evidence to %s\n", *duration, *replicas, dir)
 	started := time.Now()
+
+	// ── CONDITION 1.6 IS MEASURED HERE, NOT BY THE HARNESS ───────────────
+	// §1.2's condition 1.6 is "throughput never drops to zero for more than
+	// one ttl_floor". test/load's evaluate() implements it as `total > 0`,
+	// which is a different and much weaker claim: it asks whether the run
+	// served ANY request, ever.
+	//
+	// The difference is not academic. The first four-hour N=1 run served
+	// 8,371 requests in its first sixteen minutes, then NOTHING for three
+	// hours and forty-four — and reported 1.6 as a pass, because 8,371 is
+	// greater than zero. divergence.csv covers 17 of the run's 240 minutes.
+	//
+	// So the runner samples the proxy's cumulative request count on the same
+	// cadence as the metric scrapes and records the longest interval in which
+	// it did not move. That is the quantity the condition names.
+	stallCtx, stopStall := context.WithCancel(ctx)
+	throughput := newThroughputSampler(proxy)
+	go throughput.run(stallCtx, *scrape)
+	defer stopStall()
 	result, err := load.Run(ctx, load.Config{
 		Duration:          *duration,
 		Replicas:          *replicas,
@@ -306,7 +338,25 @@ func run() error {
 	// amended one, with the number of samples excluded, so the exclusion is
 	// visible rather than silent.
 	conditions := make([]load.ConditionResult, 0, len(result.Conditions)+3)
+	stopStall()
+	longestStall, samples := throughput.longestStall()
+
 	for _, c := range result.Conditions {
+		if c.ID == "1.6" {
+			conditions = append(conditions, load.ConditionResult{
+				ID:          "1.6",
+				Description: "throughput never dropped to zero for longer than one ttl_floor (§1.2's own wording, measured)",
+				Passed:      longestStall <= cfg.ESI.TTLFloor,
+				Measurement: fmt.Sprintf("longest interval with no request reaching the proxy: %s, against a ttl_floor of %s, over %d throughput samples",
+					longestStall.Round(time.Second), cfg.ESI.TTLFloor, samples),
+			}, load.ConditionResult{
+				ID:          "1.6-raw",
+				Description: "the harness's own 1.6, which asks only whether the run served any request at all — kept so the difference is visible",
+				Passed:      c.Passed,
+				Measurement: c.Measurement,
+			})
+			continue
+		}
 		if c.ID == "1.8" {
 			amended, raw := evaluateModeSelection(result, fleet, *replicas, modeSettleWindow)
 			conditions = append(conditions, amended, raw)
@@ -365,6 +415,83 @@ func run() error {
 	}
 	fmt.Printf("gate1: PASS at N=%d — %s\n", *replicas, filepath.Join(dir, "SUMMARY.md"))
 	return nil
+}
+
+// throughputSampler records the proxy's cumulative request count on a timer,
+// so condition 1.6 can be measured as the longest interval in which it did
+// not move.
+type throughputSampler struct {
+	proxy   *load.Proxy
+	mu      sync.Mutex
+	samples []throughputSample
+}
+
+type throughputSample struct {
+	at    time.Time
+	total int
+}
+
+func newThroughputSampler(proxy *load.Proxy) *throughputSampler {
+	return &throughputSampler{proxy: proxy}
+}
+
+func (t *throughputSampler) run(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = 15 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	t.sample()
+	for {
+		select {
+		case <-ctx.Done():
+			t.sample()
+			return
+		case <-ticker.C:
+			t.sample()
+		}
+	}
+}
+
+func (t *throughputSampler) sample() {
+	_, total := t.proxy.Served()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.samples = append(t.samples, throughputSample{at: time.Now(), total: total})
+}
+
+// longestStall returns the longest span between two samples across which the
+// proxy's request count did not increase, and how many samples were taken.
+//
+// A run that never served anything reports its whole length as the stall,
+// which is correct: no traffic for four hours is the most complete stall
+// there is, and must not read as "no stall observed".
+func (t *throughputSampler) longestStall() (time.Duration, int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.samples) < 2 {
+		return 0, len(t.samples)
+	}
+
+	longest := time.Duration(0)
+	stallStart := t.samples[0].at
+	last := t.samples[0].total
+	for _, s := range t.samples[1:] {
+		if s.total > last {
+			if gap := s.at.Sub(stallStart); gap > longest {
+				longest = gap
+			}
+			stallStart = s.at
+			last = s.total
+			continue
+		}
+	}
+	// The tail: a run that stops serving and never resumes ends inside its
+	// longest stall, and that stall is the whole point.
+	if gap := t.samples[len(t.samples)-1].at.Sub(stallStart); gap > longest {
+		longest = gap
+	}
+	return longest, len(t.samples)
 }
 
 // modeSettleWindow is how long after a replica restart a sample is treated

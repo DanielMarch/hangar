@@ -282,6 +282,86 @@ whose job was to measure. Release-gate rule 6 (instrumentation, and by the same 
 subject of the measurement, lands in a phase earlier than the run) points the same way. It needs
 its own phase, its own exit criteria and its own tests.
 
+## 9. Found by running Gate 1 — the proactive pause never resumes *(blocking, not fixed)*
+
+**This is the most serious defect in this document, and it is the one Gate 1 exists to find.**
+
+Once Governor 2's proactive pause trips, the installation stops making ESI requests **and never
+starts again**. Not until the error budget recovers — never, for the life of the process.
+
+The deadlock, in three lines of call graph:
+
+1. `Governor2.applyHysteresis` holds the only resume path
+   (`currentlyPaused && remaining >= resumeAt → setPaused(false)`).
+2. `applyHysteresis` is called from exactly one place: `Governor2.RecordError`.
+3. `RecordError` is called from exactly one place: `esi.Client`'s response path
+   (`internal/esi/client.go:502`) — which requires a request to have been **made**.
+
+While paused, no request is made. With no request, no error is recorded. With no error recorded,
+the resume condition is never evaluated. The 60-second window never rolls over either, because
+`RecordErrorAgainstBudget` is what advances it.
+
+Measured on the four-hour N=1 run at `v1.0.0-rc1`:
+
+| | |
+| :-- | :-- |
+| Requests served | 8,371 — **all of them in the first 16 minutes** |
+| `divergence.csv` coverage | 17 minutes of a 240-minute run |
+| `app.esi_error_budget` at end of run | `paused = t`, `error_count = 85`, `window_start` **4h 0m 3s old** |
+| `esi_error_limit_remaining` at end of run | 15, unchanged since minute 16 |
+
+So a single burst of errors — 85 of them, against a budget of 100 per minute — permanently halted
+an installation with 225,000 subscriptions. In production this is a corporation's ESI sync going
+silent after one bad afternoon from CCP, with no alert and no recovery short of a restart.
+
+**Why no test caught it.** `internal/esi/ratelimit`'s own suite drives the state machine by calling
+`RecordError` directly, so the resume branch is exercised in every unit test. What no unit test can
+see is that in production nothing calls it while paused. This is the B20 defect class — a code path
+with no reachable caller in the state that needs it — and it is invisible to the reachability guard
+too, because `RecordError` *does* have a production caller; it just cannot be reached from the state
+that requires it.
+
+**The fix** is to evaluate the hysteresis on a clock rather than only on the error path: either
+re-read the budget row in `IsPaused` when the cached window has expired, or run a small ticker that
+calls `applyHysteresis` while paused. Not made in Phase 21 — it changes the binary every gate in
+`docs/gate-evidence/v1.0.0-rc1/` was measured against, and it must be measured by a Gate 1 run of
+its own.
+
+**Condition 1.6 should have caught this and did not.** §1.2 states it as "throughput never drops to
+zero for more than one `ttl_floor`"; `test/load`'s `evaluate()` implements it as `total > 0` — a
+different and far weaker claim. The first N=1 run reported 1.6 as a **pass** while serving nothing
+for three hours and forty-four minutes. The runner now measures the interval the condition actually
+names, and reports the harness's weaker reading beside it as `1.6-raw`.
+
+---
+
+## 8. Found by running Gate 1 — `esi_ledger_mode` reports a default as an observation *(not fixed)*
+
+`ratelimit.NewGovernor1` starts in `ModeSolo` optimistically and only consults the replica
+registry inside `ensureMode`, which `Acquire` calls. Between a process starting and its first ESI
+request, `esi_ledger_mode` therefore reports an **assumption**, and reports it in exactly the same
+shape as a genuine reading.
+
+**No request is served in the wrong mode**, and that is worth stating precisely because it bounds
+the defect: `Governor1.Acquire` calls `ensureMode` *before* choosing a ledger, and on the first
+call the 2-second throttle cannot skip it (`lastModeCheck` is the zero time). Measured in the
+replica logs of an N=3 run: all three replicas logged `mode transition from=solo to=clustered
+live_replicas=3` exactly once, and none ever transitioned back.
+
+What it broke is the **gate that reads the gauge**. Condition 1.8 requires `clustered` for the
+whole N=3 run; §1.4 requires a mid-run replica restart; a restarted replica reports `solo` until
+its first request. The two conditions contradict, and no implementation can satisfy both — the
+same shape as the units contradiction Phase 20.4.1 found in condition 1.3. §1.8 is amended in
+`04_RELEASE_GATES.md`; the amendment records what was excluded from the measurement and why.
+
+This is `esi_ledger_divergence` reading 0 over zero samples, one metric over. 20.4.1 fixed that one
+by giving "not measured" a value distinct from "measured zero". The equivalent fix here is for
+`esi_ledger_mode` to emit **no sample** — or an explicit `unknown` series — until the first registry
+evaluation. Not made in Phase 21, because it changes the binary the whole of
+`docs/gate-evidence/v1.0.0-rc1/` was measured against.
+
+---
+
 ## 7. Found by running Gate 3 for the first time — the early warning arrives late *(not fixed)*
 
 `corporation.structure.fuel_low` and `corporation.contract.expiring` are delivered **at the
