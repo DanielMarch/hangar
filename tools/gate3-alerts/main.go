@@ -239,11 +239,18 @@ func run() error {
 	// The finding the first smoke run surfaced, kept as a measurement rather
 	// than a comment: a delivery whose next_attempt_at lies beyond the end of
 	// the run has not been dropped, but nothing in this run could have
-	// delivered it either. It comes from the structure-fuel and
+	// delivered it either. It came from the structure-fuel and
 	// contract-expiry thresholds stamping OccurredAt as the EXPIRY, which
-	// then becomes the coalescing bucket and therefore the delivery's due
-	// time — so the warning is scheduled for the moment the thing it warns
-	// about happens.
+	// then became the coalescing bucket and therefore the delivery's due
+	// time — so the warning was scheduled for the moment the thing it warns
+	// about happens. That was defect B-9.
+	//
+	// PHASE 22: B-9 is fixed and world.go's workaround is gone, so this
+	// condition has become a real test rather than a report. The fuel and
+	// contract subjects are seeded with deadlines 2-46h and 6-66h out —
+	// far beyond the end of any run this gate performs — and every one of
+	// their deliveries must still come due inside one coalescing window. A
+	// non-zero count here now means the fix is not working.
 	beyond, furthest, err := scheduledBeyond(ctx, pool, since, time.Now())
 	if err != nil {
 		return err

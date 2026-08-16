@@ -114,3 +114,44 @@ func TestInvalidBudgetResumesOnWindowRollover(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, paused, "the window rollover must have un-paused the budget")
 }
+
+// TestInvalidBudgetResumesWithoutARequest is defect B-5's regression test
+// for the Discord driver, and it is the test the one above only looked
+// like.
+//
+// The difference is the single RecordInvalid call: that one resumes by
+// making a request, and in production a paused driver cannot make one —
+// Client.Do returns ErrInvalidBudgetPaused before it sends. So the branch
+// that test exercised was the branch production could never reach, and the
+// driver stayed paused for the life of the process. Nothing here calls
+// RecordInvalid after the pause.
+func TestInvalidBudgetResumesWithoutARequest(t *testing.T) {
+	pool := newMigratedPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+
+	const max = 10
+	shortWindow := 200 * time.Millisecond
+	budget := discord.NewInvalidBudget(s, shortWindow, max, 50, 80, discord.SystemClock, slog.Default())
+	require.NoError(t, budget.Init(ctx))
+
+	for i := 0; i < 9; i++ {
+		require.NoError(t, budget.RecordInvalid(ctx))
+	}
+	paused, err := budget.IsPaused(ctx)
+	require.NoError(t, err)
+	require.True(t, paused)
+
+	// Past the window AND past IsPaused's own one-second read-through
+	// cache, so the next call is a real database read.
+	time.Sleep(shortWindow + 1100*time.Millisecond)
+
+	paused, err = budget.IsPaused(ctx)
+	require.NoError(t, err)
+	require.False(t, paused, "a paused driver must resume on the clock, with no request and no restart")
+
+	row, err := s.GetDiscordInvalidBudget(ctx)
+	require.NoError(t, err)
+	require.False(t, row.Paused, "the resume must be durable, not merely a cached read")
+	require.Zero(t, row.InvalidCount, "the elapsed window's count must not survive it")
+}

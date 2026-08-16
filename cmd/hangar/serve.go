@@ -16,6 +16,7 @@ import (
 	v1 "github.com/hangar-project/hangar/internal/api/v1"
 	"github.com/hangar-project/hangar/internal/api/v2shim"
 	"github.com/hangar-project/hangar/internal/crypto"
+	"github.com/hangar-project/hangar/internal/provisioning"
 	"github.com/hangar-project/hangar/internal/store"
 	"github.com/hangar-project/hangar/internal/sync/planner"
 	"github.com/hangar-project/hangar/internal/telemetry"
@@ -96,6 +97,9 @@ func runServe(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// One Store per process, for the same reason as the keyring. It used to
+	// be constructed three separate times in this function.
+	s := store.New(pool)
 	go runWebhookDispatcher(hbCtx, buildWebhookDispatcher(pool, keyring, logger), cfg.Alerting.DispatchInterval, logger)
 
 	// PHASE 21 (B-2), and here for the reason immediately above rather than
@@ -108,7 +112,7 @@ func runServe(ctx context.Context) error {
 	// Built before the listener starts so an unsafe HANGAR_REPLICA_RETENTION
 	// fails the boot with a named error instead of being discovered an hour
 	// later by a sweep that deletes live replicas.
-	housekeeper, err := buildHousekeeper(cfg, store.New(pool))
+	housekeeper, err := buildHousekeeper(cfg, s)
 	if err != nil {
 		return err
 	}
@@ -151,12 +155,45 @@ func runServe(ctx context.Context) error {
 			"whatever is already in the database; run 'hangar admin ingest-catalogue' to refresh them")
 	}
 
+	// ── PHASE 22, DEFECT B-6: THE IN-PROCESS WORKER POOL ─────────────────
+	//
+	// §2's "[DECISION] Single-process default. `serve` does everything" and
+	// this command's own cobra Short have promised an in-process worker
+	// pool since Phase 0. There was none. `river.AddWorker` appeared only in
+	// cmd/hangar/work.go, and the stock docker-compose runs only `serve` —
+	// so a default installation claimed due subscriptions every five
+	// seconds, enqueued `sync_route` jobs, and accumulated them in state
+	// `available` forever. Nothing synced. cmd/hangar/workers.go has the
+	// full account and the assembly both roles now share.
+	//
+	// Built here, before the listener, so a misconfigured provisioning
+	// driver fails the boot with a named error rather than being discovered
+	// by the first revocation.
+	gateway, governor1, counters, err := buildGateway(cfg, pool, s, logger)
+	if err != nil {
+		return err
+	}
+	refresher := buildRefresher(cfg, pool, keyring)
+	// Gate 2's metric is observed where the revocation completes. `serve`
+	// now runs the urgent worker, so it is now a process in which
+	// provisioning_revocation_seconds means something.
+	revocationLatency := telemetry.NewRevocationLatency(provisioning.KnownOutcomes()...)
+
+	riverClient, err := buildWorkerPool(ctx, cfg, pool, s, gateway, refresher, revocationLatency, logger)
+	if err != nil {
+		return err
+	}
+
 	// Phase 20.1 (B36). On its OWN listener, not on the mux below: the mux
 	// is bound to the published port, and /metrics is unauthenticated.
-	// `serve` builds no ESI gateway (only `work` does), so it contributes
-	// the replica and divergence gauges and no ledger mode.
+	//
+	// PHASE 22: `serve` builds an ESI gateway now, so it contributes the
+	// ledger mode, the gateway counters and the revocation histogram as
+	// well as the replica and divergence gauges. Gate 3's alert-delivery
+	// metrics remain `work`-only, because the outbox pump does — see
+	// docs/PRE_V1_OPEN_ITEMS.md N-9.
 	stopMetrics := startMetricsListener(hbCtx, cfg.MetricsAddr,
-		buildMetricsRegistry(store.New(pool), nil, nil, nil, nil, nil, cfg.ESI.ErrorLimitMax, logger), logger)
+		buildMetricsRegistry(s, governor1, counters, revocationLatency, nil, nil, cfg.ESI.ErrorLimitMax, logger), logger)
 	defer stopMetrics()
 
 	mux := http.NewServeMux()
@@ -183,7 +220,6 @@ func runServe(ctx context.Context) error {
 	// (cmd/hangar/sso.go) rather than passed as a nil *sso.Flow — Phase 15
 	// left /auth/login and /auth/callback answering 501, which Phase 16's
 	// SPA login screen cannot build against.
-	s := store.New(pool)
 
 	// PHASE 20.5 (B22). Whether reference data exists is stated once, at
 	// boot, rather than left to be inferred from a fitting export full of
@@ -198,15 +234,24 @@ func runServe(ctx context.Context) error {
 	// still nil — see cmd/hangar/revocation.go for the full account of what
 	// that meant for Gate 2's trigger matrix.
 	//
-	// A River client this process never Start()s: insert-only, no worker
-	// pool, no producers. cmd/hangar/work.go remains the only process that
-	// consumes provision-urgent.
-	insertOnlyRiver, err := newInsertOnlyRiverClient(pool)
-	if err != nil {
+	// PHASE 22 (B-6): this used to take a deliberately insert-only River
+	// client that `serve` never started, because the workers lived only in
+	// `work`. It now takes the real pool built above — ONE River client per
+	// process, which is the point: two clients in one process would have
+	// been two producers racing the same queues. The insert-only
+	// constructor is gone with it, since the topology it existed for (the
+	// API process can enqueue but must never consume) is no longer the one
+	// §2 describes.
+	urgent := wireRevocationTriggers(riverClient, pool)
+	lifecycle := buildTokenLifecycle(s, urgent, pool, logger)
+
+	// Started after the triggers are wired, so nothing can be consumed by a
+	// process that is not yet able to produce correctly, and stopped before
+	// the pool closes.
+	if err := riverClient.Start(ctx); err != nil {
 		return err
 	}
-	urgent := wireRevocationTriggers(insertOnlyRiver, pool)
-	lifecycle := buildTokenLifecycle(s, urgent, pool, logger)
+	defer func() { _ = riverClient.Stop(context.Background()) }()
 
 	flow, err := buildSSOFlow(ctx, cfg, pool, s, keyring, lifecycle, urgent, logger)
 	if err != nil {

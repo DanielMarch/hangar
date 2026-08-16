@@ -357,6 +357,7 @@ func TestHarnessRunProducesEveryEvidenceArtefact(t *testing.T) {
 		ScrapeInterval:    50 * time.Millisecond,
 		OutputDir:         dir,
 		ErrorLimitPauseAt: 20,
+		TTLFloor:          time.Second, // longer than this 200ms run, so 1.6 is measurable and satisfiable
 		Notes:             map[string]string{"context": "harness self-test, not a Gate 1 run"},
 	}, proxy)
 	require.NoError(t, err)
@@ -381,6 +382,82 @@ func TestHarnessRunProducesEveryEvidenceArtefact(t *testing.T) {
 	require.True(t, byID["1.3a"].Passed, "the prediction error must be RECORDED even though it is not bounded: %s", byID["1.3a"].Measurement)
 	require.True(t, byID["1.4"].Passed, "the stub reports 12 remaining against a threshold of 20: %s", byID["1.4"].Measurement)
 	require.True(t, byID["1.8"].Passed, "one replica must select solo mode: %s", byID["1.8"].Measurement)
+	require.True(t, byID["1.6"].Passed, "traffic throughout a 200ms run against a 1s floor is not a stall: %s", byID["1.6"].Measurement)
+}
+
+// TestConditionSixCatchesAStallAfterHeavyTraffic is defect B-11's
+// regression test, and it is the shape of the first four-hour N=1 run at
+// v1.0.0-rc1 in miniature: a burst of traffic, then silence.
+//
+// §1.2 words condition 1.6 as "throughput never drops to zero for more than
+// one ttl_floor". evaluate() implemented it as `total > 0`, so that run
+// served 8,371 requests in its opening sixteen minutes, served NOTHING for
+// the following 3h44m, and reported 1.6 as a PASS — the condition written
+// to catch that exact stall passing straight through it. divergence.csv
+// covered 17 of the run's 240 minutes.
+//
+// The two verdicts below are the whole defect: 1.6 must fail, 1.6-raw must
+// pass, and the difference between them is what the harness was reporting
+// as the answer.
+func TestConditionSixCatchesAStallAfterHeavyTraffic(t *testing.T) {
+	t.Parallel()
+
+	proxy := load.NewProxy(fixedResolver(1000), load.NewInjector(nil, nil), nil)
+	srv := proxy.Server()
+	defer srv.Close()
+
+	client, _ := newClient(t, srv.URL, nil)
+	for i := 0; i < 30; i++ {
+		_, _ = client.Do(context.Background(), request(testPath, testToken, 7, 1000))
+	}
+
+	// Then nothing at all for the whole measured run.
+	res, err := load.Run(context.Background(), load.Config{
+		Duration:          400 * time.Millisecond,
+		Replicas:          1,
+		ScrapeInterval:    50 * time.Millisecond,
+		ErrorLimitPauseAt: 20,
+		TTLFloor:          100 * time.Millisecond,
+	}, proxy)
+	require.NoError(t, err)
+
+	byID := map[string]load.ConditionResult{}
+	for _, c := range res.Conditions {
+		byID[c.ID] = c
+	}
+	require.False(t, byID["1.6"].Passed,
+		"a run that served nothing for four times its ttl_floor has stalled: %s", byID["1.6"].Measurement)
+	require.True(t, byID["1.6-raw"].Passed,
+		"and the weaker reading it replaced still passes, which is exactly why it could not be the only one: %s",
+		byID["1.6-raw"].Measurement)
+}
+
+// TestConditionSixIsNotMeasurableWithoutATTLFloor: a condition with no
+// bound must report that it was not measured, never a pass. "We ran it and
+// it looked fine is a fail" (§0 rule 1) applies to the harness's own
+// output.
+func TestConditionSixIsNotMeasurableWithoutATTLFloor(t *testing.T) {
+	t.Parallel()
+
+	proxy := load.NewProxy(fixedResolver(1000), load.NewInjector(nil, nil), nil)
+	srv := proxy.Server()
+	defer srv.Close()
+
+	res, err := load.Run(context.Background(), load.Config{
+		Duration:       150 * time.Millisecond,
+		Replicas:       1,
+		ScrapeInterval: 50 * time.Millisecond,
+	}, proxy)
+	require.NoError(t, err)
+
+	for _, c := range res.Conditions {
+		if c.ID == "1.6" {
+			require.False(t, c.Passed)
+			require.Contains(t, c.Measurement, "NOT MEASURED")
+			return
+		}
+	}
+	t.Fatal("condition 1.6 was not reported at all")
 }
 
 // TestSpecRouteResolverReadsRealRateLimits proves the resolver Phase 20.8
@@ -449,6 +526,7 @@ func TestGate13FailsWhenTheGaugeWasNeverScraped(t *testing.T) {
 		MetricsURLs:       []string{metrics.URL},
 		ScrapeInterval:    50 * time.Millisecond,
 		ErrorLimitPauseAt: 20,
+		TTLFloor:          time.Second,
 	}, proxy)
 	require.NoError(t, err)
 

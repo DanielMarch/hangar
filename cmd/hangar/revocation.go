@@ -25,36 +25,40 @@ package main
 //     `serve` too, and had no revocation wiring at all.
 //   - B32's entitlement-rule writes are API-side by definition.
 //
-// ── WHY AN INSERT-ONLY RIVER CLIENT IS NOT AN ARCHITECTURAL CHANGE ───────
+// ── WHY `serve` WAS GIVEN A RIVER CLIENT, AND THEN A REAL ONE ────────────
 // internal/api/v1/admin_provisioning.go recorded, in Phase 18, that
 // "enqueueing an urgent recompute needs a *provisioning.Urgent, which needs
 // a River client, which exists only in the WORKER process ... Wiring the
 // API process to River would be an architectural change well beyond this
-// phase". That was an overstatement, and it is worth correcting explicitly
-// rather than quietly: River supports insert-only clients as a first-class
-// mode — a client built with no Queues and no Workers, on which Start is
-// never called, inserts jobs and consumes nothing. It runs no pool, claims
-// no work, and cannot starve anything. Producing in one process and
-// consuming in another is the standard River topology, not a departure
-// from it.
+// phase". That was an overstatement, and Phase 20.3 corrected it with an
+// INSERT-ONLY client: no Queues, no Workers, Start never called, so it
+// could enqueue and could not consume.
 //
-// What WOULD have been an architectural change is running provisioning
-// WORKERS in `serve`, and that is still not done: cmd/hangar/work.go
-// remains the only process with a provision-urgent pool, and §9.2's
-// "provision-urgent never shares a worker pool with provision-bulk" is
-// untouched.
+// That note then said: "What WOULD have been an architectural change is
+// running provisioning WORKERS in `serve`, and that is still not done."
+//
+// PHASE 22 DOES IT, and the sentence above was wrong about which way the
+// architecture pointed. 01_ARCHITECTURE.md §2 had said since the beginning
+// that `serve` does everything and that `work` exists for administrators
+// who have outgrown one box — so `serve` running no workers was not a
+// conservative reading of the architecture, it was defect B-6, and it meant
+// the stock single-service compose stack synchronised nothing at all. The
+// insert-only constructor is deleted with the topology it served; `serve`
+// now passes the same real client `work` does, and it is the only River
+// client in either process.
+//
+// §9.2's "provision-urgent never shares a worker pool with provision-bulk"
+// is untouched: the separation is QueueConfig's, in cmd/hangar/workers.go,
+// and both roles get it from the same place.
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
 	"github.com/hangar-project/hangar/internal/provisioning"
 	"github.com/hangar-project/hangar/internal/rbac"
@@ -62,23 +66,6 @@ import (
 	"github.com/hangar-project/hangar/internal/store"
 	"github.com/hangar-project/hangar/internal/sync/handlers"
 )
-
-// newInsertOnlyRiverClient builds a River client that can enqueue and can
-// never consume. `serve` uses it; `work` passes its real client to
-// wireRevocationTriggers instead.
-//
-// Start() is deliberately never called on the returned client. A River
-// client that has not been started does not claim jobs, does not run a
-// producer per queue, and does not listen — insertion is the only thing it
-// can do, which is exactly the authority the API process should hold over
-// a queue whose workers live somewhere else.
-func newInsertOnlyRiverClient(pool *pgxpool.Pool) (*river.Client[pgx.Tx], error) {
-	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
-	if err != nil {
-		return nil, fmt.Errorf("hangar: building insert-only river client: %w", err)
-	}
-	return client, nil
-}
 
 // wireRevocationTriggers installs every §9.2 trigger this process can
 // observe, and returns the Urgent the caller may need for its own routes

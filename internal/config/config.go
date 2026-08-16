@@ -420,7 +420,30 @@ func New() *viper.Viper {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 	v.SetConfigName("hangar")
-	v.SetConfigType("yaml")
+	// ── PHASE 22, DEFECT B-7: NO SetConfigType, DELIBERATELY ─────────────
+	//
+	// viper's searchInPath tries `hangar.<ext>` for every supported
+	// extension and THEN, only if a config type has been declared, falls
+	// back to a file named exactly `hangar` with no extension at all.
+	// SetConfigType("yaml") turned that fallback on — and in the layout
+	// 01_ARCHITECTURE.md §9.2 documents for a manual deployment,
+	// /opt/hangar/hangar with WorkingDirectory=/opt/hangar, the file with
+	// that name in that directory is THE BINARY. Which a systemd unit
+	// produces by construction, so this was the documented deployment
+	// rather than a corner case. Measured in Gate 5:
+	//
+	//	Error: config: reading config file: While parsing config:
+	//	       yaml: control characters are not allowed
+	//
+	// naming neither the file nor the reason. The same bytes mounted at
+	// /opt/hangar-bin migrated an external PostgreSQL 18 cleanly.
+	//
+	// Dropping the declaration costs nothing an operator wanted: ./hangar.yaml
+	// and /etc/hangar/hangar.yaml are still found by the extension loop, and
+	// the format is now taken from the extension the file actually carries
+	// instead of being asserted over it. What is no longer possible is
+	// HANGAR parsing an extensionless file as YAML because it happened to
+	// share the binary's name.
 	v.AddConfigPath(".")
 	v.AddConfigPath("/etc/hangar")
 	applyDefaults(v)

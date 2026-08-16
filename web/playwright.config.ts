@@ -59,6 +59,15 @@ export default defineConfig({
     env: {
       HANGAR_HTTP_ADDR: `127.0.0.1:${PORT}`,
       HANGAR_PUBLIC_URL: baseURL,
+      // PHASE 22, DEFECT B-8. HANGAR_SSO_CALLBACK_URL must be exactly
+      // ${HANGAR_PUBLIC_URL}/auth/callback, and internal/config now fails
+      // the boot when it is not (04_RELEASE_GATES.md §5.3). This file set
+      // the public URL to port 8099 and left the callback on its default
+      // of :8080 — the very mismatch that condition exists to catch,
+      // sitting unnoticed in the e2e harness because nothing compared the
+      // two. It is derived from baseURL rather than written out so the
+      // port can never be changed in one place only.
+      HANGAR_SSO_CALLBACK_URL: `${baseURL}/auth/callback`,
       // DEFECT B41. global-setup seeds `esi.d_max` and a five-route
       // catalogue so the pin-advance preview has a deterministic diff.
       // `serve` runs catalogue.Boot in the background at startup, and that

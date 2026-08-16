@@ -179,7 +179,10 @@ func startMetricsListener(ctx context.Context, addr string, reg *prometheus.Regi
 // a dependency from it into the ESI stack would be an inversion.
 type governorMode struct{ g *ratelimit.Governor1 }
 
-func (m governorMode) Mode() string { return string(m.g.Mode()) }
+func (m governorMode) Mode() (string, bool) {
+	mode, observed := m.g.Mode()
+	return string(mode), observed
+}
 
 // ledgerDivergence adapts the store's generated ListLedgerDivergence rows
 // to telemetry.DivergenceRow, converting the two nullable readings from

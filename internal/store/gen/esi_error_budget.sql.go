@@ -75,6 +75,75 @@ func (q *Queries) RecordErrorAgainstBudget(ctx context.Context, errorWindow time
 	return i, err
 }
 
+const resumeErrorBudgetIfRecovered = `-- name: ResumeErrorBudgetIfRecovered :one
+UPDATE app.esi_error_budget
+   SET window_start = CASE WHEN now() - window_start >= $1::interval
+                             THEN now() ELSE window_start END,
+       error_count   = CASE WHEN now() - window_start >= $1::interval
+                             THEN 0 ELSE error_count END,
+       paused        = CASE WHEN paused
+                             AND (now() - window_start >= $1::interval
+                                  OR $2::integer - error_count >= $3::integer)
+                             THEN false ELSE paused END,
+       updated_at    = now()
+ WHERE id = 1
+RETURNING id, window_start, error_count, paused, updated_at
+`
+
+// ── PHASE 22 (defect B-5): THE ONLY RESUME PATH THAT DOES NOT NEED A
+//
+//	REQUEST ────────────────────────────────────────────────────────────
+//
+// Until this query existed, the sole way out of Governor 2's proactive
+// pause was Governor2.applyHysteresis, reached only from RecordError,
+// reached only from internal/esi.Client's RESPONSE path. A paused
+// installation makes no request, so it records no error, so it never
+// re-evaluates the resume condition — and the fixed window never rolled
+// over either, because RecordErrorAgainstBudget above is what advances it.
+// Measured at v1.0.0-rc1: no ESI request reached the proxy for 3h58m of a
+// four-hour Gate 1 run, with paused = t, error_count = 85 and a
+// window_start four hours old.
+//
+// Governor2.IsPaused issues this when a fresh read says paused. Both halves
+// of the decision are evaluated HERE rather than in Go, for the same two
+// reasons RecordErrorAgainstBudget is a single atomic UPDATE:
+//
+//   - window_start is a DATABASE timestamp. Comparing it against a
+//     replica's own wall clock would make the resume sensitive to skew
+//     between that process and Postgres — and a resume that fires early
+//     re-opens a window that is still spending its budget.
+//   - two replicas can evaluate this in the same instant, and one of them
+//     can have rolled the window over in between. The OR is what makes
+//     that harmless: a just-rolled window has a FRESH window_start (so the
+//     elapsed test fails) and a small error_count (so the remaining test
+//     succeeds), and the resume still happens.
+//
+// §5.7's HYSTERESIS SURVIVES. The threshold is resume_at, never pause_at.
+// An elapsed window resumes because a fixed window that has elapsed
+// carries no errors at all: remaining is max, which is >= resume_at by
+// construction. What the gap between pause_at and resume_at prevents is
+// resuming after a single error expires, and nothing here does that.
+//
+// The window is rolled over in the same statement so error_count cannot be
+// left describing a window that no longer applies — otherwise
+// esi_error_limit_remaining would report 15 on an installation that has
+// just been given its whole budget back.
+//
+// Every CASE reads the PRE-UPDATE tuple, which is what lets the three
+// assignments agree about whether the window elapsed.
+func (q *Queries) ResumeErrorBudgetIfRecovered(ctx context.Context, errorWindow time.Duration, maxErrors int32, resumeAt int32) (AppEsiErrorBudget, error) {
+	row := q.db.QueryRow(ctx, resumeErrorBudgetIfRecovered, errorWindow, maxErrors, resumeAt)
+	var i AppEsiErrorBudget
+	err := row.Scan(
+		&i.ID,
+		&i.WindowStart,
+		&i.ErrorCount,
+		&i.Paused,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const setErrorBudgetPaused = `-- name: SetErrorBudgetPaused :exec
 UPDATE app.esi_error_budget SET paused = $1, updated_at = now() WHERE id = 1
 `

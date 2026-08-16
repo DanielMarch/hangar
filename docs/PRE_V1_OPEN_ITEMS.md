@@ -225,9 +225,18 @@ scoping decision before v1.0, not a surprise after it.
 
 ### N-8 — Gate 7 §7.5's sunset policy cannot be verified: there are no release notes *(found in Phase 21)*
 
+> **Closed in Phase 22.** `docs/RELEASE_NOTES.md` now exists and announces `/api/v2`'s deprecation
+> in the release that introduces it, with the removal date, the replacement and the migration
+> guide. §7.5's fourth row — "the `Sunset` header matches the announced date, automated check
+> against the release notes" — is `TestReleaseNotesMatchTheSunsetHeader`, which reads
+> `v2shim.SunsetDate` and requires the notes to carry it. The direction is deliberate: the header
+> is authoritative and the notes are checked against it, because a release note that disagrees with
+> the header the server actually sends is worse than none — it is an announcement an integrator
+> would act on.
+
 §7.5 checks the sunset policy against `docs/RELEASE_NOTES.md` — "removed no earlier than two minor
 versions later", "removal announced at least one minor version in advance", and "the `Sunset`
-header matches the announced date, automated check against the release notes". **That file does not
+header matches the announced date, automated check against the release notes". **That file did not
 exist.** Three of the four rows in that table therefore have nothing to check against, and the
 fourth (the shim ships in v1.0) is the only one this release can evidence.
 
@@ -258,6 +267,55 @@ partition would still pass. Named for what it checks; extending it is a larger p
 
 `hangar admin import-sde` resolves it. Not a defect — EFT exports render `[<type_id>]`
 placeholders and the skyhook/sovereignty-hub backfills leave columns NULL until it runs.
+
+### N-9 — §4.4's alert pipeline runs only under `work`, so the stock deployment delivers no alerts *(found in Phase 22)*
+
+Found while fixing B-6, by asking the same question B-6 asks — *which process actually does this?*
+— of the rest of `work.go` rather than only of its River workers. Re-derived three ways at this
+commit:
+
+| Claim | Evidence |
+| :-- | :-- |
+| The producers are wired only in `work` | `wireAlertGeneration` (the CCP-notification hook) and `runThresholdEvaluator` (the four threshold alerts) are called from `cmd/hangar/work.go` and nowhere else |
+| The pump is wired only in `work` | `runAlertDispatcher` and `ensureDefaultAlertChannels`, likewise |
+| The stock stack runs one process, `serve` | `docker-compose.yml`'s only `hangar` service is `command: ["serve"]` |
+
+So after B-6 a default installation synchronises, provisions, serves and sweeps — and produces no
+alert events and delivers no messages. §4.4 is entirely absent from it. **This is the same defect
+class as B-6 and it is not fixed in Phase 22**, for a reason that is worth stating rather than
+leaving as a scope note: it cannot be fixed by starting the pump in `serve`, because of N-10 below.
+
+`serve` therefore registers no alert-delivery metrics either, which is why
+`buildMetricsRegistry` still receives `nil` for them there.
+
+### N-10 — the alert dispatcher claims without a lease, so two pumps double-send *(found in Phase 22)*
+
+`ClaimPendingAlertDeliveries` (`db/queries/alert.sql`) is a bare
+
+```sql
+SELECT * FROM app.alert_delivery
+ WHERE state = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= now())
+ ORDER BY created_at LIMIT $1;
+```
+
+with no `FOR UPDATE SKIP LOCKED`, no lease, and no state transition at claim time —
+`alerting.Dispatcher.Tick` makes an HTTP call between claiming and settling. Two dispatcher
+processes ticking together therefore claim the **same** rows and send the same message twice.
+
+This is **not** a consequence of B-6 and is not new: nothing has ever stopped an operator running
+two `hangar work` replicas, which is River's normal scale-out and what `docker-compose.yml`'s own
+comments describe. Gate 3 has never seen it because Gate 3 runs one pump.
+
+`LeasePendingWebhookDeliveries`, twelve lines away in `db/queries/outbox.sql`, is the correct
+shape and says why in its own comment: claim-by-lease, not claim-by-read, because the dispatcher
+must not hold a transaction open across an HTTP call. The fix is to give the alert claim the same
+treatment, and it is the prerequisite for N-9 — starting a second pump before then would turn
+"alerts are never delivered on a default installation" into "alerts are delivered twice on a
+scaled-out one", which is worse.
+
+Deliberately not done in Phase 22: it is a change to the claim protocol Gate 3 measures, made in
+the phase that must then re-run Gate 3, and it was not one of the six defects this phase exists to
+close. It belongs with N-9 in a phase of its own.
 
 ---
 
@@ -293,6 +351,34 @@ exists to produce, and doing it before would land a significant untested change 
 whose job was to measure. Release-gate rule 6 (instrumentation, and by the same argument the
 subject of the measurement, lands in a phase earlier than the run) points the same way. It needs
 its own phase, its own exit criteria and its own tests.
+
+#### Closed in Phase 22 (B-6)
+
+`cmd/hangar/workers.go` now owns `buildWorkerPool`, and **both** `serve` and `work` call it. The
+fix is in `serve`, not in compose, because Gate 5.5 requires the default profile to be exactly
+postgres + hangar + the one-shot migrate — adding a `work` service would have failed a passing
+gate to work around a process that was supposed to do this all along.
+
+Three things were worth getting right rather than merely making it compile:
+
+* **One River client per process.** `serve` previously built a deliberately insert-only client
+  (`newInsertOnlyRiverClient`) for the revocation triggers. Keeping both would have put two
+  producers in one process against the same queues. The insert-only constructor is **deleted**, and
+  `wireRevocationTriggers` takes the real client; `Start` is called after the triggers are wired,
+  so nothing is consumed by a process not yet able to produce correctly.
+* **A co-running `work` stays valid.** Competing consumers on one queue is River's normal mode
+  (`FOR UPDATE SKIP LOCKED`), and it is what "administrators who have outgrown one box" run.
+* **The ledger mode selector still lands where it should.** `CountLiveReplicas` counts rows in
+  `app.esi_replica` regardless of role, and `serve` has always heartbeated. What changes is that
+  its heartbeat now corresponds to a process that really does call ESI, where before `serve`
+  counted toward the replica total while building no gateway at all. One `serve` still selects
+  solo; `serve` + `work` still selects clustered. Gate 1's topology is untouched —
+  `tools/gate1-load` runs `hangar work` replicas and hosts the planner in-process without a
+  heartbeat, by design.
+
+The regression guard is `cmd/hangar/workers_test.go`, and it guards the SHAPE rather than the
+instance: `river.AddWorker` may appear only in `workers.go`, and both role files must call
+`buildWorkerPool` and start the client. A copy is how this happened, so a copy is what it forbids.
 
 ## 9. Found by running Gate 1 — the proactive pause never resumes *(blocking, not fixed)*
 
@@ -339,6 +425,51 @@ calls `applyHysteresis` while paused. Not made in Phase 21 — it changes the bi
 `docs/gate-evidence/v1.0.0-rc1/` was measured against, and it must be measured by a Gate 1 run of
 its own.
 
+#### Closed in Phase 22 (B-5)
+
+`Governor2.IsPaused` evaluates the resume, because it is the **only** Governor 2 code that runs
+while paused — `esi.Client.Do` calls it before the ledger, before the breakers' verdict is acted
+on, before anything is sent. A ticker was the alternative and was rejected: it would need starting,
+stopping and owning by every process that builds a gateway, to do on a schedule what the existing
+one-second cache refresh already does on demand.
+
+**Reading the row is not enough**, which is why this is a second query rather than a comparison in
+Go. `remaining` is derived from `error_count`, and `error_count` belongs to a window that may no
+longer apply. `ResumeErrorBudgetIfRecovered` (`db/queries/esi_error_budget.sql`) makes the whole
+decision in one atomic UPDATE against the database's own clock:
+
+```
+paused AND (window elapsed OR max - error_count >= resume_at)
+```
+
+for the two reasons `RecordErrorAgainstBudget` above it already had. `window_start` is a
+**database** timestamp, so comparing it against a replica's wall clock would make the resume
+sensitive to skew; and two replicas can evaluate this in the same instant with one of them having
+rolled the window over in between — a just-rolled window has a fresh `window_start` (the elapsed
+test fails) and a small `error_count` (the remaining test succeeds), so the `OR` is what makes that
+race harmless.
+
+**§5.7's hysteresis survives.** The threshold is `resume_at`, never `pause_at`. An elapsed window
+resumes because a fixed window that has elapsed carries no errors at all — remaining is `max`,
+which is `>= resume_at` by construction. The gap between the two thresholds exists to stop a resume
+after a single error expires, and nothing here does that.
+`TestErrorLimitResumeKeepsHysteresis` pins both sides: remaining 30 (inside the gap) stays paused,
+remaining 60 (exactly `resume_at`) resumes.
+
+**The regression test never calls `RecordError` after the pause, and asserts that it didn't.** That
+is the whole point — every existing test in the package un-paused by calling `RecordError`, which
+is the one branch production can never reach. `TestErrorLimitResumesWithoutARequest` fails against
+the rc1 code and passes against this one.
+
+**The same defect existed one driver over, and is fixed with it.**
+`internal/provisioning/drivers/discord.InvalidBudget` was written to mirror §5.7's mechanism and
+mirrored the deadlock too: `RecordInvalid` held the only un-pause branch, it runs only on a counted
+response, and `Client.Do` returns `ErrInvalidBudgetPaused` before it sends — so Discord
+provisioning went silent permanently after any burst of 401/403/429. Found by call graph rather
+than by measurement (no gate drives a real Discord guild) and closed the same way, with
+`ResumeDiscordInvalidBudgetIfWindowElapsed`. There is no hysteresis gap to preserve there: the
+window rollover **is** the resume condition, as that type's doc comment has always said.
+
 **Condition 1.6 should have caught this and did not.** §1.2 states it as "throughput never drops to
 zero for more than one `ttl_floor`"; `test/load`'s `evaluate()` implements it as `total > 0` — a
 different and far weaker claim. The first N=1 run reported 1.6 as a **pass** while serving nothing
@@ -371,6 +502,27 @@ by giving "not measured" a value distinct from "measured zero". The equivalent f
 `esi_ledger_mode` to emit **no sample** — or an explicit `unknown` series — until the first registry
 evaluation. Not made in Phase 21, because it changes the binary the whole of
 `docs/gate-evidence/v1.0.0-rc1/` was measured against.
+
+#### Closed in Phase 22 (B-10), **and the §1.2 amendment is withdrawn**
+
+`Governor1.Mode()` returns `(Mode, observed bool)`; `observed` becomes true only when `ensureMode`
+has actually read the replica registry, and stays false when the registry is unreachable — holding
+the starting assumption because you cannot read is still holding an assumption.
+`telemetry.GatewayCollector` emits **no `esi_ledger_mode` sample at all** while `observed` is
+false. Silence, not zero and not a guess, following the house rule this repository already applies
+to `esi_ledger_divergence` (no sample for a group the server has not reported on) and
+`esi_error_limit_remaining` (no sample until the budget row exists).
+
+With that fixed there is no settling interval left to exclude, because there are **no samples** in
+it. `04_RELEASE_GATES.md` §1.2's Phase 21 amendment to condition 1.8 is therefore **withdrawn** —
+the note is kept, because a condition that was amended and then un-amended should be able to show
+both — and `tools/gate1-load`'s `evaluateModeSelection`, `modeSettleWindow` and the `1.8-raw`
+companion reading are deleted with it.
+
+**The general lesson, since this is the second time.** Conditions 1.3 and 1.8 both looked like
+contradictory gate wording and both turned out to be instrumentation that could not distinguish
+"no reading" from "a reading of the default". Before amending a gate condition, check whether the
+metric can say "I don't know".
 
 ---
 
@@ -407,6 +559,26 @@ Gate 3's run seeds its threshold subjects with deadlines inside the run so the p
 exercised end to end, and reports this behaviour through its own condition
 (`3.1-scheduled-beyond-run`) rather than letting it be scored as a drop. A delivery that has not
 come due has not been lost, and §3 is about loss.
+
+#### Closed in Phase 22 (B-9)
+
+The two uses of the timestamp are separated. `CoalesceKey.Due(window)` is unchanged and still
+answers "when does this key's window close"; the new `CoalesceKey.DueBy(now, window)` caps that at
+`now + window`, and `Emitter.Emit` writes **that** to `app.alert_delivery.next_attempt_at`.
+
+**The coalescing is untouched** — the bucket is still the expiry, so structures that run dry
+together still roll up into one message, which is what `structureFuel`'s comment argued for and was
+right about. A bucket in the past is also untouched: `corporation.member.inactive` passes `now`
+explicitly, and every notification-driven event is the same shape, so `bucket + window` is already
+at or before `now + window` and the cap never binds.
+
+**Gate 3's workaround is removed rather than kept.** `tools/gate3-alerts/world.go` seeded every
+threshold deadline minutes away so the pipeline could be exercised at all; the subjects now expire
+2-46h (structures) and 6-66h (contracts) out, which is the realistic world — an operator's
+structures run dry tomorrow afternoon, not in nine minutes. That turns `3.1-scheduled-beyond-run`
+from a condition the seeding was arranged to satisfy into one that **measures the fix**: these
+deadlines are far outside any run this gate performs, so a single delivery still scheduled past the
+end of it means B-9 is not fixed.
 
 ---
 
@@ -451,6 +623,20 @@ Not fixed here for the same reason as §5 above: it is a change to `internal/con
 to the binary every gate in this directory measured. It is small (compare the two at validation
 time, print the expected callback) and belongs in the phase that can re-run the gates after it.
 
+**Closed in Phase 22 (B-8).** `internal/config.Validate` compares them at boot and the error names
+the **expected** value, `${HANGAR_PUBLIC_URL}/auth/callback` — because an operator who set one of
+them wrong needs the other, and "these two disagree" does not tell them which. A trailing slash on
+the public URL is tolerated and scheme/host are compared case-insensitively (neither difference is
+a misconfiguration, and failing a boot over one would be the fail-fast contract used as a trap);
+everything else is compared exactly, because EVE SSO matches `redirect_uri` against the
+registration byte for byte, so a difference forgiven here would simply become the opaque failure
+one layer down. `HANGAR_PUBLIC_URL` is now also required to be an absolute URL, which it never was.
+
+The check immediately found a real instance of the misconfiguration it exists to catch:
+`web/playwright.config.ts` set `HANGAR_PUBLIC_URL` to port 8099 and left the callback on its
+default of 8080. The e2e harness had been running the exact configuration §5.3 forbids, unnoticed,
+because nothing compared the two.
+
 ### 6.3 — the binary parses a same-named file in its working directory as its config *(not fixed)*
 
 `internal/config.New` sets viper's `SetConfigName("hangar")`, `SetConfigType("yaml")` and
@@ -470,6 +656,14 @@ PostgreSQL 18 successfully. So the static binary is fine — what fails is the o
 The fix is small (drop `SetConfigType`, or require the config file to carry its extension) but it
 is a change to `internal/config` and therefore to the binary this directory's evidence measures.
 
+**Closed in Phase 22 (B-7).** `SetConfigType("yaml")` is dropped. viper's `searchInPath` tries
+`hangar.<ext>` for every supported extension and only then, **if a config type has been declared**,
+falls back to a file named exactly `hangar` — so the declaration was the entire cause.
+`./hangar.yaml` and `/etc/hangar/hangar.yaml` are still found by the extension loop, and the format
+is now taken from the extension the file actually carries instead of being asserted over it.
+`internal/config/configfile_test.go` pins all three: the binary is invisible to the search, `Load`
+succeeds in §9.2's layout, and `hangar.yaml` beside the binary is still read.
+
 ### 6.4 — the three §5.1 inputs are unpublished
 
 `raw.githubusercontent.com/hangar-project/hangar/main/docker-compose.yml` → **404**.
@@ -480,6 +674,29 @@ B-3 corrected the *path* inside the second URL; it could not make the repository
 therefore run against a substituted local origin, and condition 5.2's "the image is pulled from the
 public registry" is recorded as **not met**. Publishing is a release action, not a code change —
 but until it happens the documented three-command deployment cannot be performed by anybody.
+
+#### Decided in Phase 22 (B-12) — recorded as permanently substituted, and what that costs
+
+Re-measured at v1.0.0-rc2:
+`raw.githubusercontent.com/hangar-project/hangar/main/docker-compose.yml` **404**,
+`.../deploy/install.sh` **404**, `ghcr.io/hangar-project/hangar` **403** with no anonymous pull,
+`git remote -v` **empty**.
+
+**The decision, made explicitly rather than deferred a third time: condition 5.2 is recorded as
+permanently substituted for this release candidate.** Publishing requires a git remote, a GitHub
+organisation and registry credentials, and is an outward-facing push — an operator action, not
+something a development phase can perform or should perform on the operator's behalf.
+
+What that costs, stated precisely so it is not left to inference: **the documented three-command
+deployment cannot be performed by anybody who is not this repository.** Everything else about it is
+verified against the real artefacts — 5.1, 5.3, 5.4, 5.5, 5.6, 5.7 and 5.8 all measured — so the
+moment the three URLs resolve, 5.2 becomes a pass with no further work of any kind. Until then Gate
+5 is not fully met and §8's "release blocks on all seven" applies. **This is the single item
+standing between Gate 5 and a real pass**, and it is not a code defect.
+
+Closing it is four steps, none of which touch the codebase: create `hangar-project/hangar`, push
+`main` and the tag, push the image to `ghcr.io/hangar-project/hangar` with public read, and re-run
+`bash tools/gate5-deploy/run.sh` without the local-origin substitution.
 
 ---
 

@@ -124,27 +124,33 @@ func newWorld(ctx context.Context, pool *pgxpool.Pool) (*world, error) {
 // thresholds are given real subjects, because a threshold with no subject
 // emits nothing and would silently reduce §3.2's three categories to two.
 //
-// ── WHY THE DEADLINES ARE MINUTES AWAY AND NOT HOURS ─────────────────────
-// Measured on the first full smoke run: 336 deliveries sat `pending` with
-// attempts = 0 and next_attempt_at as far out as the following evening, and
-// §3.1's drop condition failed on them.
+// ── WHY THE DEADLINES ARE HOURS AWAY AGAIN ───────────────────────────────
+// Measured on the first full smoke run at v1.0.0-rc1: 336 deliveries sat
+// `pending` with attempts = 0 and next_attempt_at as far out as the
+// following evening, and §3.1's drop condition failed on them.
 //
-// They were not dropped. They were not yet DUE. A coalesced delivery becomes
+// They were not dropped. They were not yet DUE. A coalesced delivery became
 // claimable at the close of its coalescing window (CoalesceKey.Due), the
-// bucket comes from the event's OccurredAt, and the structure-fuel and
+// bucket came from the event's OccurredAt, and the structure-fuel and
 // contract-expiry thresholds deliberately stamp OccurredAt as the EXPIRY
-// rather than the evaluation time — so a structure whose fuel runs out in 17
-// hours produces a delivery claimable in 17 hours.
+// rather than the evaluation time — so a structure whose fuel ran out in 17
+// hours produced a delivery claimable in 17 hours. An early-warning alert
+// scheduled for the moment the thing it warns about happens is not an early
+// warning. That was defect B-9.
 //
-// That is a real finding about the product, recorded in
-// docs/PRE_V1_OPEN_ITEMS.md: an early-warning alert scheduled for the moment
-// the thing it warns about happens is not an early warning. It is not
-// something this gate should measure as a DROP, though — §3 is about whether
-// the delivery pipeline loses alerts, and a delivery that has not come due
-// has not been lost. So the subjects are seeded with deadlines inside the
-// run, the pipeline is exercised end to end, and the scheduling behaviour is
-// reported separately by its own condition rather than swallowing this
-// gate's verdict.
+// Phase 21 worked around it here, seeding every deadline minutes away so the
+// pipeline could be exercised end to end at all, and reported the scheduling
+// behaviour through its own condition (3.1-scheduled-beyond-run) rather than
+// letting it be scored as a drop.
+//
+// PHASE 22: B-9 is fixed — the expiry is still the coalescing bucket, but
+// the delivery is now due at min(bucket + window, now + window) — so the
+// workaround is REMOVED and the deadlines are hours out again. That is the
+// realistic world: an operator's structures run dry tomorrow afternoon, not
+// in nine minutes. It also turns 3.1-scheduled-beyond-run from a condition
+// the seeding was arranged to satisfy into one that measures the fix: these
+// subjects now have deadlines FAR outside the run, and if a single delivery
+// is still scheduled past the end of it, B-9 is not fixed.
 func (w *world) seedEntities(ctx context.Context) error {
 	if _, err := w.pool.Exec(ctx, `
 		INSERT INTO app.corporation (corporation_id, name, ticker)
@@ -158,17 +164,16 @@ func (w *world) seedEntities(ctx context.Context) error {
 		return fmt.Errorf("gate3: seeding character: %w", err)
 	}
 
-	// corporation.structure.fuel_low — inside the 48h margin, and with
-	// expiries MINUTES away rather than hours. That is not cosmetic; see
-	// the note below on why a threshold's deadline has to fall inside the
-	// run for its deliveries to be measurable at all.
+	// corporation.structure.fuel_low — inside the 48h margin, spread from
+	// 2h to 46h out. Deliberately far beyond the end of the run: see the
+	// note above on B-9.
 	for i := 0; i < 12; i++ {
 		if _, err := w.pool.Exec(ctx, `
 			INSERT INTO app.corporation_structure
 			    (corporation_id, structure_id, type_id, system_id, fuel_expires, state)
-			VALUES ($1, $2, 35832, 30000142, now() + make_interval(mins => $3), 'shield_vulnerable')
+			VALUES ($1, $2, 35832, 30000142, now() + make_interval(hours => $3), 'shield_vulnerable')
 			ON CONFLICT (corporation_id, structure_id) DO NOTHING`,
-			gate3CorporationID, int64(1_000_000_000_000+i), int32(i*3)); err != nil {
+			gate3CorporationID, int64(1_000_000_000_000+i), int32(2+i*4)); err != nil {
 			return fmt.Errorf("gate3: seeding structure: %w", err)
 		}
 	}
@@ -197,16 +202,17 @@ func (w *world) seedEntities(ctx context.Context) error {
 		}
 	}
 
-	// corporation.contract.expiring — outstanding, expiring inside 72h.
+	// corporation.contract.expiring — outstanding, expiring inside 72h,
+	// spread from 6h to 66h out. Same reasoning as the structures above.
 	for i := 0; i < 6; i++ {
 		if _, err := w.pool.Exec(ctx, `
 			INSERT INTO app.contract
 			    (contract_id, owner_kind, owner_id, issuer_id, issuer_corporation_id,
 			     type, status, availability, date_issued, date_expired, title)
 			VALUES ($1, 'corporation', $2, $3, $2, 'item_exchange', 'outstanding', 'corporation',
-			        now() - interval '1 day', now() + make_interval(mins => $4), $5)
+			        now() - interval '1 day', now() + make_interval(hours => $4), $5)
 			ON CONFLICT (owner_kind, owner_id, contract_id) DO NOTHING`,
-			int64(4_000_000+i), gate3CorporationID, gate3CharacterID, int32(5+i*12),
+			int64(4_000_000+i), gate3CorporationID, gate3CharacterID, int32(6+i*12),
 			fmt.Sprintf("Gate3 Contract %d", i)); err != nil {
 			return fmt.Errorf("gate3: seeding contract: %w", err)
 		}

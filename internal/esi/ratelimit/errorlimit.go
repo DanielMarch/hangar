@@ -16,6 +16,9 @@ type ErrorBudgetStore interface {
 	GetErrorBudget(ctx context.Context) (gen.AppEsiErrorBudget, error)
 	RecordErrorAgainstBudget(ctx context.Context, errorWindow time.Duration) (gen.AppEsiErrorBudget, error)
 	SetErrorBudgetPaused(ctx context.Context, paused bool) error
+	// PHASE 22 (defect B-5). The resume path that does not require a
+	// request to have been made. See db/queries/esi_error_budget.sql.
+	ResumeErrorBudgetIfRecovered(ctx context.Context, errorWindow time.Duration, maxErrors int32, resumeAt int32) (gen.AppEsiErrorBudget, error)
 }
 
 // AlertFunc fires a critical alert. Phase 4 has no alerting catalogue to
@@ -136,7 +139,36 @@ func (g *Governor2) setPaused(ctx context.Context, paused bool) error {
 
 // IsPaused reports the current pause state through a 1-second in-process
 // cache (§5.7), refreshing from the database when the cache is stale or
-// empty.
+// empty — and, when that refresh finds the installation paused, evaluating
+// whether it should still be.
+//
+// ── PHASE 22, DEFECT B-5: WHY THE RESUME LIVES HERE ──────────────────────
+//
+// applyHysteresis below is reachable only from RecordError, RecordError
+// only from internal/esi.Client's response path, and a response requires a
+// request. So the resume condition was evaluated only in the one state
+// where it can never be true, and never in the state that needs it:
+//
+//	paused ⇒ no request ⇒ no error recorded ⇒ resume never evaluated
+//
+// and the fixed window did not advance either, because
+// RecordErrorAgainstBudget is what advances it. The pause was permanent
+// for the life of the process. Gate 1 measured it at v1.0.0-rc1: 3h58m of
+// a four-hour run with no request at N=1, 3h43m45s at N=3.
+//
+// IsPaused is the ONLY Governor 2 code that runs while paused —
+// esi.Client.Do calls it before the ledger, before the breakers' verdict
+// is acted on, before anything is sent — which makes it the one place a
+// resume can be evaluated without inventing a second lifecycle. A ticker
+// was the alternative and was rejected: it would need starting, stopping
+// and owning by every process that builds a gateway, to do on a schedule
+// what the existing 1-second cache refresh already does on demand.
+//
+// READING THE ROW IS NOT ENOUGH, which is why this is a second query and
+// not a comparison in Go. `remaining` is derived from error_count, and
+// error_count belongs to a window that may no longer apply; the resume
+// decision therefore has to be made against the database's own clock, in
+// one atomic statement, for the reasons that query's comment gives.
 func (g *Governor2) IsPaused(ctx context.Context) (bool, error) {
 	if row, ok := g.getCache(); ok {
 		return row.Paused, nil
@@ -145,8 +177,32 @@ func (g *Governor2) IsPaused(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("ratelimit: governor2: get budget: %w", err)
 	}
+	if row.Paused {
+		row, err = g.resumeIfRecovered(ctx, row)
+		if err != nil {
+			return false, err
+		}
+	}
 	g.setCache(row)
 	return row.Paused, nil
+}
+
+// resumeIfRecovered asks the database whether the pause still holds,
+// returning the row as it stands afterwards. The caller has already
+// established that the last read said paused; a row that comes back
+// unpaused was un-paused by this statement or by a concurrent replica's,
+// and either is the same answer.
+func (g *Governor2) resumeIfRecovered(ctx context.Context, paused gen.AppEsiErrorBudget) (gen.AppEsiErrorBudget, error) {
+	row, err := g.store.ResumeErrorBudgetIfRecovered(ctx, g.window, int32(g.max), int32(g.resumeAt))
+	if err != nil {
+		return paused, fmt.Errorf("ratelimit: governor2: evaluating resume: %w", err)
+	}
+	if !row.Paused {
+		g.log.InfoContext(ctx, "governor2: resume",
+			"remaining", g.max-int(row.ErrorCount), "threshold", g.resumeAt,
+			"note", "the error budget window elapsed or recovered while paused; no request was needed to notice")
+	}
+	return row, nil
 }
 
 func (g *Governor2) getCache() (gen.AppEsiErrorBudget, bool) {

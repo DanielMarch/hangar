@@ -10,13 +10,8 @@ import (
 	"github.com/hangar-project/hangar/internal/crypto"
 	"github.com/hangar-project/hangar/internal/provisioning"
 	"github.com/hangar-project/hangar/internal/store"
-	"github.com/hangar-project/hangar/internal/sync"
-	"github.com/hangar-project/hangar/internal/sync/planner"
-	"github.com/hangar-project/hangar/internal/sync/worker"
 	"github.com/hangar-project/hangar/internal/telemetry"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/spf13/cobra"
 )
 
@@ -91,62 +86,12 @@ func runWork(ctx context.Context) error {
 			cfg.ESI.ErrorLimitMax, logger), logger)
 	defer stopMetrics()
 
-	syncPolicy := sync.PolicyConfig{TTLFloor: cfg.ESI.TTLFloor, BackoffCap: cfg.Sync.BackoffCap}
-
-	workers := river.NewWorkers()
-	// River allows exactly one Worker per job Kind — Phase 7's
-	// CharacterWorker, Phase 8's CorporationWorker and GlobalWorker are all
-	// registered together behind worker.DispatchWorker, which routes each
-	// "sync_route" job to the matching entity_kind's worker. Each of the
-	// three still has its own directly-callable Work method for tests.
-	river.AddWorker(workers, &worker.DispatchWorker{
-		Character: &worker.CharacterWorker{
-			Pool: pool, Gateway: gateway, Tokens: refresher, Policy: syncPolicy,
-		},
-		Corporation: &worker.CorporationWorker{
-			Pool: pool, Gateway: gateway, Tokens: refresher, Policy: syncPolicy,
-			Elector: sync.DBElector{Store: s},
-		},
-		// PHASE 20.8 (capability #37): the fourth worker. Same elector — §6.3's
-		// candidate ordering is about the character, not about what it acts
-		// for; only the candidate POOL differs, and DBElector branches on the
-		// entity kind for that.
-		Alliance: &worker.AllianceWorker{
-			Pool: pool, Gateway: gateway, Tokens: refresher, Policy: syncPolicy,
-			Elector: sync.DBElector{Store: s},
-		},
-		Global: &worker.GlobalWorker{
-			Pool: pool, Gateway: gateway, Policy: syncPolicy,
-		},
-	})
-
-	// Phase 11: access provisioning's own queues. provision-urgent gets a
-	// dedicated 32-worker pool per 01_ARCHITECTURE.md §9.2's budget table
-	// so a nightly provision-bulk reconcile can never starve a revocation
-	// — the two queues sharing a river.Client is fine (River schedules
-	// per-queue independently); it is sharing a WORKER POOL that's
-	// prohibited, and QueueConfig below gives each its own.
-	drivers := provisioning.NewDrivers()
-	if err := registerDiscordDriver(ctx, cfg, pool, drivers); err != nil {
-		return err
-	}
-	if err := registerTeamSpeakDriver(ctx, cfg, pool, drivers); err != nil {
-		return err
-	}
-	if err := registerMumbleDriver(ctx, cfg, pool, drivers, logger); err != nil {
-		return err
-	}
-	river.AddWorker(workers, &provisioning.UrgentWorker{Pool: pool, Drivers: drivers, Latency: revocationLatency})
-	river.AddWorker(workers, &provisioning.BulkWorker{Pool: pool, Drivers: drivers})
-
-	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
-		Queues: map[string]river.QueueConfig{
-			planner.QueueSync:        {MaxWorkers: 20},
-			provisioning.QueueUrgent: {MaxWorkers: 32},
-			provisioning.QueueBulk:   {MaxWorkers: 8}, // matches .env.example's HANGAR_WORKER_QUEUES documented provision-bulk:8
-		},
-		Workers: workers,
-	})
+	// PHASE 22 (B-6): the pool is assembled in cmd/hangar/workers.go, which
+	// `serve` also calls. It used to be built here and only here, which is
+	// exactly why a default installation — one `serve`, no `work` — enqueued
+	// sync and provisioning jobs that nothing ever consumed. That file has
+	// the full account.
+	riverClient, err := buildWorkerPool(ctx, cfg, pool, s, gateway, refresher, revocationLatency, logger)
 	if err != nil {
 		return err
 	}

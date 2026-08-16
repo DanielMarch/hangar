@@ -2,6 +2,7 @@ package ratelimit
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -154,6 +155,9 @@ var _ Store = (*fakeStore)(nil)
 type fakeReplicaCounter struct {
 	mu    sync.Mutex
 	count int64
+	// err, when set, makes every read fail — the "registry unreachable"
+	// branch of ensureMode.
+	err error
 }
 
 func (f *fakeReplicaCounter) set(n int64) {
@@ -165,6 +169,9 @@ func (f *fakeReplicaCounter) set(n int64) {
 func (f *fakeReplicaCounter) CountLiveReplicas(ctx context.Context, liveThreshold time.Duration) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.err != nil {
+		return 0, f.err
+	}
 	return f.count, nil
 }
 
@@ -188,18 +195,18 @@ func TestModeSelectedFromReplicaRegistry(t *testing.T) {
 	res, err := g1.Acquire(ctx, req) // solo path; one live replica
 	require.NoError(t, err)
 	require.NoError(t, g1.Settle(ctx, res, Cost2XX, clock.Now()))
-	require.Equal(t, ModeSolo, g1.Mode())
+	require.Equal(t, ModeSolo, modeOf(g1))
 
 	// A second heartbeat selects clustered.
 	replicas.set(2)
 	require.NoError(t, g1.forceModeCheck(ctx))
-	require.Equal(t, ModeClustered, g1.Mode())
+	require.Equal(t, ModeClustered, modeOf(g1))
 
 	// The registry dropping back to one replica (the other's heartbeat
 	// having expired) selects solo again.
 	replicas.set(1)
 	require.NoError(t, g1.forceModeCheck(ctx))
-	require.Equal(t, ModeSolo, g1.Mode())
+	require.Equal(t, ModeSolo, modeOf(g1))
 }
 
 // TestModeTransitionLosesNoEntries (roadmap exit criterion): both
@@ -229,7 +236,7 @@ func TestModeTransitionLosesNoEntries(t *testing.T) {
 	// solo -> clustered: force the transition.
 	replicas.set(2)
 	require.NoError(t, g1.forceModeCheck(ctx))
-	require.Equal(t, ModeClustered, g1.Mode())
+	require.Equal(t, ModeClustered, modeOf(g1))
 
 	total := fake.sumCosts(req.Group, req.UserKey, true)
 	require.EqualValues(t, sum, total, "solo->clustered flush must preserve the exact live-cost sum, including the in-flight reservation")
@@ -248,7 +255,7 @@ func TestModeTransitionLosesNoEntries(t *testing.T) {
 	// clustered -> solo: force the transition back.
 	replicas.set(1)
 	require.NoError(t, g1.forceModeCheck(ctx))
-	require.Equal(t, ModeSolo, g1.Mode())
+	require.Equal(t, ModeSolo, modeOf(g1))
 
 	entries, reservations, _, _ := g1.solo.snapshot(req.Group, req.UserKey)
 	back := 0
@@ -268,4 +275,63 @@ func newGovernor1ForTest(store Store, replicas ReplicaCounter, clock Clock) *Gov
 	g1.SetModeCheckInterval(0) // check on every call, for deterministic tests
 	g1.testFlushStore = store
 	return g1
+}
+
+// modeOf is Mode() narrowed to its first return value, for the assertions
+// that are about WHICH mode is active and not about whether it has been
+// observed yet. TestModeIsUnobservedUntilTheRegistryIsRead below is the one
+// that cares about the second value, and it calls Mode() directly.
+func modeOf(g *Governor1) Mode {
+	m, _ := g.Mode()
+	return m
+}
+
+// TestModeIsUnobservedUntilTheRegistryIsRead is defect B-10's regression
+// test.
+//
+// NewGovernor1 has to start somewhere and starts in solo. Until ensureMode
+// has actually read the replica registry that is an ASSUMPTION, and
+// esi_ledger_mode used to publish it in exactly the same shape as a
+// reading — which made condition 1.8 ("clustered throughout an N=3 run")
+// unsatisfiable in any run that also honours §1.4's required mid-run
+// replica restart, because the restarted replica reported solo until its
+// first request.
+func TestModeIsUnobservedUntilTheRegistryIsRead(t *testing.T) {
+	ctx := context.Background()
+	clock := newFakeClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	replicas := &fakeReplicaCounter{count: 3}
+	g1 := newGovernor1ForTest(newFakeStore(), replicas, clock)
+
+	mode, observed := g1.Mode()
+	require.Equal(t, ModeSolo, mode, "the ledger has to start somewhere")
+	require.False(t, observed, "…but nothing has been read yet, and the gauge must be able to tell")
+
+	// One Acquire is all it takes: ensureMode runs BEFORE the ledger is
+	// chosen, and on the first call the throttle cannot skip it.
+	_, err := g1.Acquire(ctx, AcquireRequest{
+		Group: "g", UserKey: "u", MaxTokens: 10, Window: time.Minute, RequestTimeout: 30 * time.Second,
+	})
+	require.NoError(t, err)
+
+	mode, observed = g1.Mode()
+	require.Equal(t, ModeClustered, mode, "three live replicas select clustered")
+	require.True(t, observed)
+}
+
+// TestModeStaysUnobservedWhenTheRegistryIsUnreachable: holding the starting
+// assumption because the registry cannot be read is still holding an
+// assumption. Reporting it would be the same lie one layer down.
+func TestModeStaysUnobservedWhenTheRegistryIsUnreachable(t *testing.T) {
+	ctx := context.Background()
+	clock := newFakeClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	replicas := &fakeReplicaCounter{err: errors.New("registry unreachable")}
+	g1 := newGovernor1ForTest(newFakeStore(), replicas, clock)
+
+	_, err := g1.Acquire(ctx, AcquireRequest{
+		Group: "g", UserKey: "u", MaxTokens: 10, Window: time.Minute, RequestTimeout: 30 * time.Second,
+	})
+	require.NoError(t, err, "an unreachable registry must not fail the acquire")
+
+	_, observed := g1.Mode()
+	require.False(t, observed)
 }

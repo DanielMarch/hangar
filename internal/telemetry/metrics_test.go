@@ -26,9 +26,12 @@ func (s *stubReplicas) CountLiveReplicas(_ context.Context, threshold time.Durat
 	return s.n, s.err
 }
 
-type stubMode struct{ mode string }
+type stubMode struct {
+	mode     string
+	observed bool
+}
 
-func (s stubMode) Mode() string { return s.mode }
+func (s stubMode) Mode() (string, bool) { return s.mode, s.observed }
 
 type stubDivergence struct {
 	rows []DivergenceRow
@@ -247,16 +250,36 @@ func TestBucketWithNoLocalReadingEmitsNoSample(t *testing.T) {
 // numeric series — not something answerable by watching a string label
 // appear and disappear.
 func TestModeIsAnEnumGauge(t *testing.T) {
-	collector := NewGatewayCollector(nil, stubMode{mode: "clustered"}, nil, nil, LiveThreshold, quietLogger())
+	collector := NewGatewayCollector(nil, stubMode{mode: "clustered", observed: true}, nil, nil, LiveThreshold, quietLogger())
 
 	expected := `
-# HELP esi_ledger_mode Governor 1 ledger mode as an enum gauge: 1 for the active mode, 0 for the others.
+# HELP esi_ledger_mode Governor 1 ledger mode as an enum gauge: 1 for the active mode, 0 for the others. No sample is emitted until the process has read the replica registry at least once — before that the ledger holds a starting assumption of solo, and a gauge must not report an assumption in the same shape as a reading.
 # TYPE esi_ledger_mode gauge
 esi_ledger_mode{mode="clustered"} 1
 esi_ledger_mode{mode="solo"} 0
 `
 	if err := testutil.CollectAndCompare(collector, strings.NewReader(expected), "esi_ledger_mode"); err != nil {
 		t.Error(err)
+	}
+}
+
+// TestModeEmitsNoSampleBeforeItIsObserved is defect B-10's regression test,
+// and it is the esi_ledger_divergence-over-zero-samples correction of Phase
+// 20.4.1 one metric over.
+//
+// Governor 1 starts in solo optimistically and only reads the replica
+// registry on its first Acquire, so a process between boot and its first
+// ESI request holds an ASSUMPTION. Publishing it as a gauge made condition
+// 1.8 ("clustered throughout an N=3 run") contradict §1.4's required
+// mid-run replica restart: the restarted replica reported solo until it
+// made a request, and no implementation could satisfy both. A gauge with
+// no reading must be silent — not zero, and not a guess.
+func TestModeEmitsNoSampleBeforeItIsObserved(t *testing.T) {
+	collector := NewGatewayCollector(nil, stubMode{mode: "solo", observed: false}, nil, nil, LiveThreshold, quietLogger())
+
+	if n := testutil.CollectAndCount(collector, "esi_ledger_mode"); n != 0 {
+		t.Errorf("a process that has never read the replica registry produced %d esi_ledger_mode samples, want 0 — "+
+			"the starting mode is an assumption, and an assumption must not be reported in the shape of a reading", n)
 	}
 }
 

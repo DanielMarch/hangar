@@ -101,6 +101,42 @@ func (k CoalesceKey) Due(window time.Duration) time.Time {
 	return k.Bucket.Add(window)
 }
 
+// ── PHASE 22, DEFECT B-9: THE WARNING ARRIVED AT THE DEADLINE ────────────
+//
+// Two of §4.4's four thresholds stamp OccurredAt as the DEADLINE they are
+// warning about: Evaluator.structureFuel uses the fuel expiry and
+// expiringContracts uses date_expired. That choice is right, and its
+// comment says why — a burst of structures expiring together rolls up into
+// one message even though the pass that found them ran at an arbitrary
+// moment. What was wrong is that the same timestamp then became the
+// DELIVERY's due time, because Emit wrote Due(window) straight into
+// app.alert_delivery.next_attempt_at.
+//
+// So a structure whose fuel runs out in seventeen hours produced a
+// delivery the dispatcher could not claim for seventeen hours: an alert
+// whose entire purpose is advance warning, scheduled to arrive at the
+// moment it stops being actionable. Measured on a Gate 3 run at
+// v1.0.0-rc1: 336 deliveries pending with attempts = 0 and
+// next_attempt_at as far out as the following evening.
+//
+// DueBy separates the two uses. The bucket stays exactly as it was — the
+// grouping is unchanged, and events that share a deadline still share a
+// message — but the delivery becomes claimable at most one window from
+// now. A bucket in the past (corporation.member.inactive, which passes
+// `now` explicitly, and every notification-driven event) is unaffected:
+// its bucket+window is already at or before now+window, so the cap never
+// binds and the coalescing wait is exactly what it always was.
+func (k CoalesceKey) DueBy(now time.Time, window time.Duration) time.Time {
+	due := k.Due(window)
+	if due.IsZero() {
+		return time.Time{}
+	}
+	if latest := now.Add(window); due.After(latest) {
+		return latest
+	}
+	return due
+}
+
 // ParseCoalesceKey reads back what String wrote. ok is false for anything
 // that is not a well-formed four-component key — including the empty
 // string, and including a key written by some future version with more

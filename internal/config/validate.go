@@ -141,6 +141,22 @@ func Validate(cfg *Config) error {
 		errs = append(errs, fmt.Errorf("HANGAR_ALERT_CLAIM_SIZE must be at least 1, got %d", cfg.Alerting.ClaimSize))
 	}
 
+	// PHASE 22, DEFECT B-8. 04_RELEASE_GATES.md §5.3: "Wrong
+	// HANGAR_PUBLIC_URL → the SSO callback mismatch is reported as a
+	// configuration error with the expected value shown, not as an opaque
+	// OAuth failure." Nothing anywhere compared the two, so an operator who
+	// set one and not the other learned about it when a user clicked "log
+	// in" and EVE SSO rejected the redirect_uri — which is precisely the
+	// opaque failure the condition forbids, arriving at the worst possible
+	// moment and naming neither variable.
+	//
+	// The contract is not inferred here; .env.example and both installers
+	// already state it in those words: the callback MUST be exactly
+	// ${HANGAR_PUBLIC_URL}/auth/callback. HANGAR serves that route itself,
+	// on the public URL, so there is no deployment in which the two can
+	// legitimately disagree.
+	errs = append(errs, validateCallbackMatchesPublicURL(cfg.PublicURL, cfg.SSO.CallbackURL)...)
+
 	// PHASE 21. Empty is the default and means the real ESI; anything else
 	// must be a URL the gateway can prefix a path with. A value like
 	// "esi.evetech.net" (no scheme) would otherwise produce a request URL
@@ -157,6 +173,59 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("config: invalid configuration: %w", errors.Join(errs...))
 	}
 	return nil
+}
+
+// callbackPath is the route internal/api/v1 mounts the SSO callback on. It
+// is a constant here and a literal there for the same reason
+// ExpectedCallbackURL exists at all: the error an operator reads has to
+// name the value HANGAR will actually redirect to.
+const callbackPath = "/auth/callback"
+
+// ExpectedCallbackURL is the only value HANGAR_SSO_CALLBACK_URL may hold
+// for a given HANGAR_PUBLIC_URL. Exported so the boot error, the tests and
+// anything that generates configuration all quote one construction rather
+// than three.
+func ExpectedCallbackURL(publicURL string) string {
+	return strings.TrimRight(publicURL, "/") + callbackPath
+}
+
+// validateCallbackMatchesPublicURL implements §5.3.
+//
+// A trailing slash on HANGAR_PUBLIC_URL is tolerated, and scheme and host
+// are compared case-insensitively, because neither difference is a
+// misconfiguration — https://Hangar.Example.com/ and
+// https://hangar.example.com are the same origin, and failing a boot over
+// one would be the fail-fast contract used as a trap. Everything else is
+// compared exactly: EVE SSO matches redirect_uri against the registration
+// byte for byte, so a difference HANGAR forgave here would simply become
+// the opaque OAuth failure one layer down.
+func validateCallbackMatchesPublicURL(publicURL, callbackURL string) []error {
+	public, err := url.Parse(publicURL)
+	if err != nil || public.Scheme == "" || public.Host == "" {
+		return []error{fmt.Errorf(
+			"HANGAR_PUBLIC_URL: %q is not an absolute URL — it needs a scheme and host, e.g. https://hangar.example.com. "+
+				"It is the origin every SSO redirect, alert link and callback is built from", publicURL)}
+	}
+
+	expected := ExpectedCallbackURL(publicURL)
+	callback, err := url.Parse(callbackURL)
+	if err == nil &&
+		strings.EqualFold(callback.Scheme, public.Scheme) &&
+		strings.EqualFold(callback.Host, public.Host) &&
+		callback.Path == strings.TrimRight(public.Path, "/")+callbackPath &&
+		callback.RawQuery == "" && callback.Fragment == "" {
+		return nil
+	}
+
+	return []error{fmt.Errorf(
+		"HANGAR_SSO_CALLBACK_URL does not match HANGAR_PUBLIC_URL — the callback must be exactly ${HANGAR_PUBLIC_URL}%s:\n"+
+			"      HANGAR_PUBLIC_URL       = %s\n"+
+			"      HANGAR_SSO_CALLBACK_URL = %s\n"+
+			"      expected                = %s\n"+
+			"    Correct whichever of the two is wrong, and make sure the value you keep is the one registered at "+
+			"https://developers.eveonline.com/applications — EVE SSO rejects a redirect_uri that does not match its "+
+			"registration exactly, and does so at login rather than at boot",
+		callbackPath, publicURL, callbackURL, expected)}
 }
 
 func containsInt(haystack []int, needle int) bool {

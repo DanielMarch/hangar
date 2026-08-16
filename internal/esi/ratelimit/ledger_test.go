@@ -426,14 +426,14 @@ func TestSoloReadingsAreOnlyOfferedInSoloMode(t *testing.T) {
 	replicas := &fakeReplicaCounter{count: 1}
 	g := newGovernor1ForTest(newFakeStore(), replicas, newFakeClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)))
 	require.NoError(t, g.forceModeCheck(ctx))
-	require.Equal(t, ModeSolo, g.Mode())
+	require.Equal(t, ModeSolo, modeOf(g))
 
 	_, ok := g.SoloReadings()
 	require.True(t, ok, "in solo mode the in-process ledger is the only source there is")
 
 	replicas.set(3)
 	require.NoError(t, g.forceModeCheck(ctx))
-	require.Equal(t, ModeClustered, g.Mode())
+	require.Equal(t, ModeClustered, modeOf(g))
 
 	_, ok = g.SoloReadings()
 	require.False(t, ok, "in clustered mode the governor must defer to app.esi_ledger_bucket")

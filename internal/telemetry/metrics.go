@@ -79,11 +79,18 @@ type LedgerDivergenceSource interface {
 	CountLiveReplicas(ctx context.Context, liveThreshold time.Duration) (int64, error)
 }
 
-// ModeSource reports Governor 1's currently active ledger mode. Satisfied
-// by *ratelimit.Governor1; an interface so telemetry does not depend on
-// internal/esi/ratelimit.
+// ModeSource reports Governor 1's currently active ledger mode, and
+// whether that mode has ever been OBSERVED rather than assumed. Satisfied
+// by *ratelimit.Governor1 through an adapter in cmd/hangar; an interface so
+// telemetry does not depend on internal/esi/ratelimit.
+//
+// PHASE 22, DEFECT B-10: the second return value is the whole point.
+// Governor 1 starts in solo optimistically and only reads the replica
+// registry on its first Acquire, so between process start and first ESI
+// request the mode is an assumption — and a bare string cannot say so. See
+// ratelimit.Governor1.Mode.
 type ModeSource interface {
-	Mode() string
+	Mode() (mode string, observed bool)
 }
 
 // DivergenceRow is one Governor 1 bucket's local-versus-server reading.
@@ -294,7 +301,10 @@ func NewGatewayCollector(
 			nil, nil),
 		ledgerMode: prometheus.NewDesc(
 			"esi_ledger_mode",
-			"Governor 1 ledger mode as an enum gauge: 1 for the active mode, 0 for the others.",
+			"Governor 1 ledger mode as an enum gauge: 1 for the active mode, 0 for the others. "+
+				"No sample is emitted until the process has read the replica registry at least once — before that "+
+				"the ledger holds a starting assumption of solo, and a gauge must not report an assumption in the "+
+				"same shape as a reading.",
 			[]string{"mode"}, nil),
 		ledgerDiv: prometheus.NewDesc(
 			"esi_ledger_divergence",
@@ -359,13 +369,23 @@ func (c *GatewayCollector) Collect(ch chan<- prometheus.Metric) {
 		// Gate 1.8's "mode was clustered for the whole N=3 run and solo for
 		// the whole N=1 run, with no unexpected flapping" is answerable
 		// with a range query instead of by eyeballing label churn.
-		active := c.mode.Mode()
-		for _, m := range []string{"solo", "clustered"} {
-			value := 0.0
-			if m == active {
-				value = 1.0
+		//
+		// PHASE 22 (B-10): and NO SERIES AT ALL until the replica registry
+		// has actually been read. A process that has not yet made an ESI
+		// request holds a starting assumption, not a reading, and emitting
+		// it as a gauge made condition 1.8 unsatisfiable in any run that
+		// also satisfies §1.4's required mid-run restart. This is the same
+		// correction as 20.4.1's for esi_ledger_divergence: "not measured"
+		// gets a representation distinct from "measured", and here that
+		// representation is silence.
+		if active, observed := c.mode.Mode(); observed {
+			for _, m := range []string{"solo", "clustered"} {
+				value := 0.0
+				if m == active {
+					value = 1.0
+				}
+				ch <- prometheus.MustNewConstMetric(c.ledgerMode, prometheus.GaugeValue, value, m)
 			}
-			ch <- prometheus.MustNewConstMetric(c.ledgerMode, prometheus.GaugeValue, value, m)
 		}
 	}
 

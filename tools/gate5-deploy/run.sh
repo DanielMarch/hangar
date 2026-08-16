@@ -158,8 +158,18 @@ MISMATCH_OUT="$(MSYS_NO_PATHCONV=1 timeout 25 docker run --rm \
   -e HANGAR_SSO_CALLBACK_URL="https://SOMETHING-ELSE.example.com/auth/callback" \
   ghcr.io/hangar-project/hangar:latest serve 2>&1 | head -20)"
 echo "$MISMATCH_OUT" >> "$TRANSCRIPT"
-if echo "$MISMATCH_OUT" | grep -qi "callback"; then
-  record "5.3-callback-mismatch" "pass" "reported as a configuration error naming the callback"
+# §5.3 requires "the expected value shown", not merely "the two disagree" —
+# an operator who set ONE of them wrong needs the other one to fix it. So the
+# check is for the derived callback, ${HANGAR_PUBLIC_URL}/auth/callback, and
+# not just for the word.
+#
+# PHASE 22: this condition FAILED at v1.0.0-rc1 — `serve` started normally
+# with the two disagreeing, because internal/config compared them nowhere.
+# That was defect B-8.
+if echo "$MISMATCH_OUT" | grep -q "https://hangar.example.com/auth/callback"; then
+  record "5.3-callback-mismatch" "pass" "reported at boot as a configuration error naming the EXPECTED callback (https://hangar.example.com/auth/callback), not an opaque OAuth failure"
+elif echo "$MISMATCH_OUT" | grep -qi "callback"; then
+  record "5.3-callback-mismatch" "FAIL" "the mismatch is reported but the expected value is not shown, which is what §5.3 asks for: $(echo "$MISMATCH_OUT" | head -3 | tr '\n' ' ')"
 else
   record "5.3-callback-mismatch" "FAIL" "a public-url/callback mismatch is NOT reported at boot: $(echo "$MISMATCH_OUT" | head -2 | tr '\n' ' ')"
 fi
@@ -197,7 +207,7 @@ fi
 if grep -qE "^\s+build:" docker-compose.yml; then
   record "5.2" "FAIL" "the compose file has a build: key — the operator would compile from source"
 else
-  record "5.2" "SUBSTITUTED" "no build: key and no compilation, but the image is NOT pulled from a public registry: ghcr.io/hangar-project/hangar returns 403 and the repository is unpublished. Verified against a locally built image of the same commit"
+  record "5.2" "SUBSTITUTED" "no build: key and no compilation, but the image is NOT pulled from a public registry: ghcr.io/hangar-project/hangar returns 403, raw.githubusercontent.com/hangar-project/hangar 404s, and 'git remote -v' is empty. DECIDED IN PHASE 22 (defect B-12): recorded as PERMANENTLY SUBSTITUTED for this release candidate, because publishing is an operator action with credentials this session does not hold, not a code change. Verified against a locally built image of the same commit; see docs/PRE_V1_OPEN_ITEMS.md B-12 for exactly what remains"
 fi
 
 # 5.4 — migrations run automatically and the stack is healthy within 5 minutes.
@@ -322,19 +332,26 @@ if [ -f "${REPO_ROOT}/bin/hangar-linux-amd64" ]; then
 else
   record "5.8" "FAIL" "bin/hangar-linux-amd64 is absent — run 'make build-all' first"
 fi
-# ── THE DEFECT 5.8 UNCOVERED ────────────────────────────────────────────────
-# internal/config sets viper SetConfigName("hangar") + SetConfigType("yaml")
-# + AddConfigPath("."), so a file named exactly `hangar` in the working
-# directory is READ AS A YAML CONFIG FILE. In a manual deployment the file
-# with that name in that directory is the binary itself, and §9.2's layout
-# (/opt/hangar/hangar with WorkingDirectory=/opt/hangar) therefore boots into
+# ── THE DEFECT 5.8 UNCOVERED, AND ITS FIX ───────────────────────────────────
+# internal/config set viper SetConfigName("hangar") + SetConfigType("yaml")
+# + AddConfigPath("."), and the config TYPE is what turns on viper's "a file
+# named exactly `hangar`, no extension, is a config file" fallback. In a
+# manual deployment the file with that name in that directory is THE BINARY,
+# and §9.2's layout (/opt/hangar/hangar with WorkingDirectory=/opt/hangar) —
+# which is what a systemd unit produces — therefore booted into
 #
 #   Error: config: reading config file: While parsing config:
 #          yaml: control characters are not allowed
 #
-# which names neither the file nor the reason. Verified both ways: mounted as
-# /hangar with cwd / it fails; the same bytes mounted as /opt/hangar-bin
-# migrate successfully.
+# naming neither the file nor the reason. Verified both ways at v1.0.0-rc1:
+# mounted as /hangar with cwd / it failed; the same bytes mounted as
+# /opt/hangar-bin migrated successfully. That was defect B-7, fixed in Phase
+# 22 by dropping the config-type declaration — ./hangar.yaml and
+# /etc/hangar/hangar.yaml are still found by extension.
+#
+# The check is the EXIT CODE and not only a grep, because the property is
+# "the documented layout deploys", not "one error message is absent". Note
+# that no pipe follows the docker run: `cmd | tail` reports tail's status.
 log ""
 log "\$ /hangar migrate up   # the binary named 'hangar' in its own working directory"
 COLLIDE_OUT="$(MSYS_NO_PATHCONV=1 timeout 60 docker run --rm --network gate5-manual \
@@ -343,12 +360,15 @@ COLLIDE_OUT="$(MSYS_NO_PATHCONV=1 timeout 60 docker run --rm --network gate5-man
   -e HANGAR_MASTER_KEY="$(head -c 32 /dev/urandom | base64)" \
   -e HANGAR_SESSION_SECRET="$(head -c 32 /dev/urandom | base64)" \
   -e HANGAR_SSO_CLIENT_ID=gate5 -e HANGAR_SSO_CLIENT_SECRET=gate5 \
-  debian:12-slim //hangar migrate up 2>&1 | tail -3)"
+  debian:12-slim //hangar migrate up 2>&1)"
+COLLIDE_CODE=$?
 echo "$COLLIDE_OUT" >> "$TRANSCRIPT"
 if echo "$COLLIDE_OUT" | grep -qi "parsing config\|control characters"; then
   record "5.8-config-name-collision" "FAIL" "a binary named 'hangar' in its own working directory is parsed as a YAML config file, so §9.2's manual layout boots into an opaque parse error naming neither the file nor the reason"
+elif [ "$COLLIDE_CODE" = 0 ]; then
+  record "5.8-config-name-collision" "pass" "the binary named 'hangar' in its own working directory (§9.2's documented layout) is not mistaken for a config file, and migrated the external PostgreSQL 18 from there"
 else
-  record "5.8-config-name-collision" "pass" "a binary named 'hangar' in its working directory is not mistaken for a config file"
+  record "5.8-config-name-collision" "FAIL" "the binary is no longer parsed as its own config, but the run still failed (exit $COLLIDE_CODE): $(echo "$COLLIDE_OUT" | tail -3 | tr '\n' ' ')"
 fi
 
 docker rm -f gate5-pg >/dev/null 2>&1

@@ -36,6 +36,11 @@ type Governor1 struct {
 	clustered *LedgerClustered
 	mode      Mode
 
+	// modeObserved records whether the replica registry has ever been read
+	// successfully. Until it has, `mode` below holds an ASSUMPTION — see
+	// Mode's doc for defect B-10.
+	modeObserved bool
+
 	replicas      ReplicaCounter
 	liveThreshold time.Duration
 	// modeCheckInterval throttles how often the replica registry is
@@ -86,11 +91,43 @@ func NewGovernor1(clustered *LedgerClustered, replicas ReplicaCounter, clock Clo
 // Exposed for tests that need deterministic, immediate mode transitions.
 func (g *Governor1) SetModeCheckInterval(d time.Duration) { g.modeCheckInterval = d }
 
-// Mode returns the currently active mode (for metrics: esi_ledger_mode).
-func (g *Governor1) Mode() Mode {
+// Mode returns the currently active mode and whether it has ever been
+// OBSERVED — that is, whether the replica registry has been read at least
+// once. Until it has, the returned mode is solo because the ledger has to
+// start somewhere, and that is an assumption rather than a reading.
+//
+// ── PHASE 22, DEFECT B-10: WHY THE SECOND RETURN VALUE EXISTS ────────────
+//
+// NewGovernor1 starts in ModeSolo optimistically and only consults the
+// registry inside ensureMode, which Acquire calls. Between a process
+// starting and its first ESI request, esi_ledger_mode therefore reported
+// an assumption in exactly the same shape as a genuine reading — and there
+// is no value of the gauge that could tell the two apart.
+//
+// NO REQUEST IS EVER SERVED IN THE WRONG MODE, and that bounds the defect
+// precisely: Acquire calls ensureMode BEFORE choosing a ledger, and on the
+// first call the throttle cannot skip it (lastModeCheck is the zero time).
+// The N=3 replica logs corroborate it — three replicas, three `mode
+// transition from=solo to=clustered live_replicas=3`, none ever back. The
+// defect was in the GAUGE, not in the ledger.
+//
+// What it broke was the gate that reads the gauge. Condition 1.8 requires
+// `clustered` throughout an N=3 run; §1.4 requires a mid-run replica
+// restart; a restarted replica reported `solo` until its first request. No
+// implementation could satisfy both, which is why 04_RELEASE_GATES.md
+// §1.2 carried a Phase 21 amendment excluding samples taken in the window
+// after a restart. The amendment is REVERTED in Phase 22, because its
+// entire justification was this defect.
+//
+// The fix follows 20.4.1's, one metric over: give "not measured" a value
+// distinct from "measured". esi_ledger_divergence emits no sample for a
+// group the server has not reported on; esi_error_limit_remaining emits no
+// sample until the budget row exists; esi_ledger_mode now emits no sample
+// until the registry has been read. A gauge with no reading is silent.
+func (g *Governor1) Mode() (Mode, bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.mode
+	return g.mode, g.modeObserved
 }
 
 // ensureMode re-evaluates the replica registry (subject to the throttle)
@@ -110,9 +147,14 @@ func (g *Governor1) ensureMode(ctx context.Context) error {
 		// replica that dies without deregistering" note applies the
 		// same logic to "can't tell how many are live" too); staying
 		// solo when already solo is simply correct.
+		// And the mode stays UNOBSERVED if it never was: holding an
+		// assumption because the registry is unreachable is still holding
+		// an assumption, and the gauge must not start claiming otherwise
+		// (defect B-10).
 		g.log.WarnContext(ctx, "governor1: replica count unavailable; holding current mode", "error", err, "mode", g.mode)
 		return nil
 	}
+	g.modeObserved = true
 
 	want := ModeSolo
 	if count >= 2 {

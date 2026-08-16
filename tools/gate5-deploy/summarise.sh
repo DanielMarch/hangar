@@ -59,32 +59,37 @@ finished="$(grep -m1 '^finished:' "${EVIDENCE}/transcript.txt" | sed 's/^finishe
   }' "$RESULTS"
   echo
   cat <<'NOTES'
-## What this gate found
+## What this gate found the first time it was run, and where those defects are now
 
-Gate 5 had never been run. Running it turned up three defects that no test in the suite could
-have caught, because every test builds its own connection string and its own configuration.
+Gate 5 had never been run before v1.0.0-rc1. Running it turned up three defects that no test in
+the suite could have caught, because every test builds its own connection string and its own
+configuration. All three are closed as of v1.0.0-rc2.
 
 **The installer generated a password that broke the deployment.** `install.sh` produced
 `POSTGRES_PASSWORD` with `openssl rand -base64 32`, and `docker-compose.yml` interpolates that
 value into `HANGAR_DB_URL`. base64's alphabet contains `/`, which terminates a URL's authority, so
 `migrate` exited 1 with a parse error and the whole stack failed at the third command — for
-roughly one installation in two, non-deterministically. **Fixed in this phase**: both installers
+roughly one installation in two, non-deterministically. **Fixed in Phase 21**: both installers
 now generate the database password as hex, which is URL-safe by construction. The two 32-byte
 base64 secrets are unchanged; neither is ever placed in a URL.
 
-**A `HANGAR_PUBLIC_URL` / callback mismatch is not reported.** §5.3 requires it to surface as a
-configuration error naming the expected value. Nothing anywhere compares the two, so the operator
-learns about it when a user clicks "log in" and EVE SSO rejects the `redirect_uri` — precisely the
-opaque OAuth failure the condition forbids. Not fixed here: it is a change to `internal/config`
-and therefore to the binary every gate in this directory measured.
+**A `HANGAR_PUBLIC_URL` / callback mismatch was not reported** (defect B-8). §5.3 requires it to
+surface as a configuration error naming the expected value. Nothing anywhere compared the two, so
+the operator learned about it when a user clicked "log in" and EVE SSO rejected the
+`redirect_uri` — precisely the opaque OAuth failure the condition forbids. **Fixed in Phase 22**:
+`internal/config.Validate` compares them at boot and the error names
+`${HANGAR_PUBLIC_URL}/auth/callback`, because an operator who set one of them wrong needs the
+other. Condition `5.3-callback-mismatch` now checks for that expected value specifically, not
+merely for the word "callback".
 
-**The binary parses a same-named file in its working directory as its config.** viper is
-configured with `SetConfigName("hangar")` + `SetConfigType("yaml")` + `AddConfigPath(".")`, so a
-file named exactly `hangar` is read as YAML — and in a manual deployment that file is the binary.
-`/opt/hangar/hangar` with `WorkingDirectory=/opt/hangar`, which is what a systemd unit does, boots
-into "yaml: control characters are not allowed", naming neither the file nor the reason. The same
-bytes under any other name migrate an external PostgreSQL 18 without complaint, so §9.2's static
-binary itself is sound.
+**The binary parsed a same-named file in its working directory as its config** (defect B-7). viper
+was configured with `SetConfigName("hangar")` + `SetConfigType("yaml")` + `AddConfigPath(".")`, and
+the config TYPE is what enables viper's extensionless fallback — so a file named exactly `hangar`
+was read as YAML, and in a manual deployment that file is the binary. `/opt/hangar/hangar` with
+`WorkingDirectory=/opt/hangar`, which is what a systemd unit produces, booted into "yaml: control
+characters are not allowed", naming neither the file nor the reason. **Fixed in Phase 22** by
+dropping the config-type declaration; `./hangar.yaml` and `/etc/hangar/hangar.yaml` are still found
+by extension.
 
 ## What "SUBSTITUTED" means here, and why it is not a pass
 
@@ -99,6 +104,16 @@ installer, the compose file, the migrations, the healthchecks, the version bump 
 an operator would get. What this **cannot** show is that the procedure works from a blank host,
 because the artefacts a blank host would fetch do not exist. Condition 5.2 is recorded as
 substituted for that reason and not as met.
+
+**Phase 22 made that an explicit decision rather than an open item** (defect B-12). Publishing the
+repository, the compose file, the installer and the image is a release action requiring credentials
+and an outward-facing push; it is not a code change, and nothing in the codebase can close it.
+Condition 5.2 is therefore recorded as **permanently substituted for this release candidate**. What
+that costs is precise and worth stating rather than leaving to inference: **the documented
+three-command deployment cannot be performed by anybody who is not this repository.** Every other
+part of it is verified — 5.1, 5.3, 5.4, 5.5, 5.6, 5.7 and 5.8 all measured against the real
+artefacts — so the moment the three URLs resolve, 5.2 becomes a pass with no further work. Until
+then Gate 5 is not fully met, and §8's "release blocks on all seven" applies.
 
 ## §5.8, and the one part of it that was not exercised
 

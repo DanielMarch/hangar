@@ -28,3 +28,32 @@ UPDATE app.discord_invalid_budget
        updated_at    = now()
  WHERE id = 1
 RETURNING *;
+
+-- name: ResumeDiscordInvalidBudgetIfWindowElapsed :one
+-- PHASE 22, defect B-5 ONE DRIVER OVER. This budget mirrors §5.7's
+-- mechanism, and it mirrored the deadlock with it: the un-pause branch
+-- lives in RecordInvalid, RecordInvalid runs only on a counted RESPONSE,
+-- and a paused driver sends nothing — so Discord provisioning stopped
+-- permanently after any burst of 401/403/429, exactly as ESI sync did.
+-- Found while fixing Governor 2, by call-graph rather than by measurement:
+-- unlike the ESI budget this one has never been observed to trip in a gate
+-- run, because no gate drives a real Discord guild.
+--
+-- The pause here has NO separate resume threshold — the fixed window's own
+-- rollover is what un-pauses (see internal/provisioning/drivers/discord's
+-- InvalidBudget doc), so the elapsed test is the whole condition and there
+-- is no hysteresis gap to preserve. invalid_count is zeroed alongside for
+-- the same reason the ESI query zeroes error_count: a counter describing a
+-- window that no longer applies is a lie the next reader has no way to
+-- detect.
+UPDATE app.discord_invalid_budget
+   SET window_start  = CASE WHEN now() - window_start >= sqlc.arg(invalid_window)::interval
+                            THEN now() ELSE window_start END,
+       invalid_count = CASE WHEN now() - window_start >= sqlc.arg(invalid_window)::interval
+                            THEN 0 ELSE invalid_count END,
+       paused        = CASE WHEN paused
+                             AND now() - window_start >= sqlc.arg(invalid_window)::interval
+                            THEN false ELSE paused END,
+       updated_at    = now()
+ WHERE id = 1
+RETURNING *;

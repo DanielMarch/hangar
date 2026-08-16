@@ -43,8 +43,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"sort"
-	"sync"
 	"syscall"
 	"time"
 
@@ -231,26 +229,28 @@ func run() error {
 	// ── wait for the installation to actually be running ──────────────────
 	//
 	// The measurement window opens when the system is in operation, not when
-	// its processes were launched, and at N=3 that distinction decides
-	// condition 1.8.
+	// its processes were launched.
 	//
-	// ratelimit.Governor1 starts in SOLO optimistically and re-evaluates the
-	// replica registry on its first Acquire — so between "the process is up"
-	// and "the process has made an ESI request", esi_ledger_mode reports
-	// `solo` on every replica regardless of how many are live. The harness
-	// scrapes immediately, so a three-replica run would record modes
-	// [clustered solo] and fail 1.8's "clustered for the WHOLE run" for a
-	// system that never selected the wrong mode — it had not selected one at
-	// all yet.
+	// PHASE 21 ADDED THIS FOR CONDITION 1.8, AND THAT REASON IS NOW GONE.
+	// ratelimit.Governor1 starts in SOLO optimistically and only consults
+	// the replica registry on its first Acquire, so between "the process is
+	// up" and "the process has made an ESI request", esi_ledger_mode
+	// reported `solo` on every replica regardless of how many were live —
+	// and a three-replica run recorded modes [clustered solo] and failed
+	// 1.8 for a system that had not selected the wrong mode, but had not
+	// selected one at all. That was defect B-10, and Phase 22 fixed it in
+	// the gauge: no sample is emitted until the registry has been read.
 	//
-	// This is worth recording as a finding rather than only working around:
-	// the gauge reports its optimistic DEFAULT as though it were an
-	// observation, which is the same family as the divergence gauge that
-	// read 0 over zero samples before Phase 20.4.1 gave "not measured" a
-	// distinct meaning from "measured zero".
+	// THE WAIT STAYS, because its OTHER reason is load-bearing and was
+	// always the better one — see injector.Reset() immediately below. §1.3's
+	// offsets run from the injector's construction, and seeding 5,000
+	// characters takes longer than the whole adversarial schedule spans, so
+	// without an explicit start the entire table fires in the opening
+	// seconds. The wait is what makes "the schedule starts when traffic
+	// does" true.
 	//
-	// The wait is bounded and its outcome is recorded either way — a run
-	// that never saw a request is not quietly measured for four hours.
+	// It is bounded and its outcome is recorded either way — a run that
+	// never saw a request is not quietly measured for four hours.
 	fmt.Printf("gate1: waiting for the first ESI request to reach the proxy\n")
 	trafficDeadline := time.Now().Add(5 * time.Minute)
 	for time.Now().Before(trafficDeadline) {
@@ -285,24 +285,16 @@ func run() error {
 	fmt.Printf("gate1: running for %s at N=%d — evidence to %s\n", *duration, *replicas, dir)
 	started := time.Now()
 
-	// ── CONDITION 1.6 IS MEASURED HERE, NOT BY THE HARNESS ───────────────
-	// §1.2's condition 1.6 is "throughput never drops to zero for more than
-	// one ttl_floor". test/load's evaluate() implements it as `total > 0`,
-	// which is a different and much weaker claim: it asks whether the run
-	// served ANY request, ever.
-	//
-	// The difference is not academic. The first four-hour N=1 run served
-	// 8,371 requests in its first sixteen minutes, then NOTHING for three
-	// hours and forty-four — and reported 1.6 as a pass, because 8,371 is
-	// greater than zero. divergence.csv covers 17 of the run's 240 minutes.
-	//
-	// So the runner samples the proxy's cumulative request count on the same
-	// cadence as the metric scrapes and records the longest interval in which
-	// it did not move. That is the quantity the condition names.
-	stallCtx, stopStall := context.WithCancel(ctx)
-	throughput := newThroughputSampler(proxy)
-	go throughput.run(stallCtx, *scrape)
-	defer stopStall()
+	// PHASE 22 (B-11): TTLFloor is passed because condition 1.6 is measured
+	// by the harness now. §1.2 words 1.6 as "throughput never drops to zero
+	// for more than one ttl_floor"; test/load's evaluate() used to
+	// implement it as `total > 0`, which asks only whether the run served
+	// ANY request, ever. The first four-hour N=1 run served 8,371 requests
+	// in its opening sixteen minutes, then nothing for three hours and
+	// forty-four, and reported 1.6 as a PASS — because 8,371 is greater
+	// than zero. Phase 21 measured the real quantity here in the runner;
+	// this phase moved it into the harness, so every caller gets the
+	// condition as written.
 	result, err := load.Run(ctx, load.Config{
 		Duration:          *duration,
 		Replicas:          *replicas,
@@ -310,6 +302,7 @@ func run() error {
 		ScrapeInterval:    *scrape,
 		OutputDir:         dir,
 		ErrorLimitPauseAt: cfg.ESI.ErrorLimitPauseAt,
+		TTLFloor:          cfg.ESI.TTLFloor,
 		Notes:             environmentNotes(cfg, world, *characters, *notes),
 	}, proxy)
 	if err != nil {
@@ -326,44 +319,29 @@ func run() error {
 	// mode selection follows the registry, and must not report that it has.
 	killed, restarted := fleet.transitionCount()
 
-	// §1.8 AS AMENDED IN PHASE 21. The harness's own verdict is computed over
-	// every sample, including those taken from the restarted replica before it
-	// had made a request — during which Governor1 reports its optimistic
-	// `solo` default rather than a selection. §1.4 REQUIRES that restart, so
-	// the unamended condition cannot be satisfied by any implementation in a
-	// conforming run. 04_RELEASE_GATES.md §1.2's amendment note has the
-	// derivation and the proof that no request is served under the default.
+	// ── PHASE 22: TWO REWRITES OF THE HARNESS'S CONDITIONS ARE GONE ──────
 	//
-	// The harness's raw reading is not discarded: it is reported beside the
-	// amended one, with the number of samples excluded, so the exclusion is
-	// visible rather than silent.
-	conditions := make([]load.ConditionResult, 0, len(result.Conditions)+3)
-	stopStall()
-	longestStall, samples := throughput.longestStall()
-
-	for _, c := range result.Conditions {
-		if c.ID == "1.6" {
-			conditions = append(conditions, load.ConditionResult{
-				ID:          "1.6",
-				Description: "throughput never dropped to zero for longer than one ttl_floor (§1.2's own wording, measured)",
-				Passed:      longestStall <= cfg.ESI.TTLFloor,
-				Measurement: fmt.Sprintf("longest interval with no request reaching the proxy: %s, against a ttl_floor of %s, over %d throughput samples",
-					longestStall.Round(time.Second), cfg.ESI.TTLFloor, samples),
-			}, load.ConditionResult{
-				ID:          "1.6-raw",
-				Description: "the harness's own 1.6, which asks only whether the run served any request at all — kept so the difference is visible",
-				Passed:      c.Passed,
-				Measurement: c.Measurement,
-			})
-			continue
-		}
-		if c.ID == "1.8" {
-			amended, raw := evaluateModeSelection(result, fleet, *replicas, modeSettleWindow)
-			conditions = append(conditions, amended, raw)
-			continue
-		}
-		conditions = append(conditions, c)
-	}
+	// Phase 21 overrode two of the harness's verdicts here.
+	//
+	// 1.6, because test/load's evaluate() implemented "throughput never
+	// drops to zero for more than one ttl_floor" as `total > 0`. That was
+	// defect B-11 and the measurement now lives in the harness, where every
+	// caller of the package gets it — this runner was the only caller that
+	// had the real reading, and the harness is what the next phase will
+	// trust.
+	//
+	// 1.8, because esi_ledger_mode published Governor 1's optimistic
+	// starting mode as though it were an observation, which made the
+	// condition unsatisfiable in any run that also honours §1.4's required
+	// replica restart. That was defect B-10, fixed in the GAUGE: no sample
+	// is emitted until the replica registry has been read, so there are no
+	// pre-selection samples left to exclude. §1.2's Phase 21 amendment is
+	// withdrawn along with the exclusion logic and its 1.8-raw companion.
+	//
+	// What is left here is what genuinely belongs to the runner: process
+	// control, and whether §1.4's transition actually happened.
+	conditions := make([]load.ConditionResult, 0, len(result.Conditions)+1)
+	conditions = append(conditions, result.Conditions...)
 	conditions = append(conditions, load.ConditionResult{
 		ID:          "1.4-transition",
 		Description: "the mid-run replica kill and restart happened (§1.4)",
@@ -415,158 +393,6 @@ func run() error {
 	}
 	fmt.Printf("gate1: PASS at N=%d — %s\n", *replicas, filepath.Join(dir, "SUMMARY.md"))
 	return nil
-}
-
-// throughputSampler records the proxy's cumulative request count on a timer,
-// so condition 1.6 can be measured as the longest interval in which it did
-// not move.
-type throughputSampler struct {
-	proxy   *load.Proxy
-	mu      sync.Mutex
-	samples []throughputSample
-}
-
-type throughputSample struct {
-	at    time.Time
-	total int
-}
-
-func newThroughputSampler(proxy *load.Proxy) *throughputSampler {
-	return &throughputSampler{proxy: proxy}
-}
-
-func (t *throughputSampler) run(ctx context.Context, interval time.Duration) {
-	if interval <= 0 {
-		interval = 15 * time.Second
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	t.sample()
-	for {
-		select {
-		case <-ctx.Done():
-			t.sample()
-			return
-		case <-ticker.C:
-			t.sample()
-		}
-	}
-}
-
-func (t *throughputSampler) sample() {
-	_, total := t.proxy.Served()
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.samples = append(t.samples, throughputSample{at: time.Now(), total: total})
-}
-
-// longestStall returns the longest span between two samples across which the
-// proxy's request count did not increase, and how many samples were taken.
-//
-// A run that never served anything reports its whole length as the stall,
-// which is correct: no traffic for four hours is the most complete stall
-// there is, and must not read as "no stall observed".
-func (t *throughputSampler) longestStall() (time.Duration, int) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if len(t.samples) < 2 {
-		return 0, len(t.samples)
-	}
-
-	longest := time.Duration(0)
-	stallStart := t.samples[0].at
-	last := t.samples[0].total
-	for _, s := range t.samples[1:] {
-		if s.total > last {
-			if gap := s.at.Sub(stallStart); gap > longest {
-				longest = gap
-			}
-			stallStart = s.at
-			last = s.total
-			continue
-		}
-	}
-	// The tail: a run that stops serving and never resumes ends inside its
-	// longest stall, and that stall is the whole point.
-	if gap := t.samples[len(t.samples)-1].at.Sub(stallStart); gap > longest {
-		longest = gap
-	}
-	return longest, len(t.samples)
-}
-
-// modeSettleWindow is how long after a replica restart a sample is treated
-// as taken before that replica selected a mode. Generous: the replica has to
-// boot, connect, and have the planner hand it work.
-const modeSettleWindow = 90 * time.Second
-
-// evaluateModeSelection re-evaluates §1.8 over samples in which a mode had
-// actually been selected, and returns the amended verdict together with the
-// harness's raw one.
-func evaluateModeSelection(result *load.Result, fleet *fleet, replicas int, settle time.Duration) (amended, raw load.ConditionResult) {
-	want := "solo"
-	if replicas > 1 {
-		want = "clustered"
-	}
-
-	starts := fleet.startTimes()
-	excluded := 0
-	observed := map[string]int{}
-	for _, sample := range result.Samples {
-		if sample.Mode == "" {
-			continue
-		}
-		inSettling := false
-		for _, at := range starts {
-			if !sample.At.Before(at) && sample.At.Before(at.Add(settle)) {
-				inSettling = true
-				break
-			}
-		}
-		if inSettling {
-			excluded++
-			continue
-		}
-		observed[sample.Mode]++
-	}
-
-	modes := make([]string, 0, len(observed))
-	for mode := range observed {
-		modes = append(modes, mode)
-	}
-	sort.Strings(modes)
-
-	amended = load.ConditionResult{
-		ID:          "1.8",
-		Description: "mode selection correct throughout, over samples in which a mode had been selected (§1.2's Phase 21 amendment)",
-		Passed:      len(modes) == 1 && modes[0] == want,
-		Measurement: fmt.Sprintf("esi_ledger_mode observed as %v, expected %q; %d sample(s) excluded as taken within %s of a replica restart, before that replica's first request",
-			modes, want, excluded, settle),
-	}
-	raw = load.ConditionResult{
-		ID:          "1.8-raw",
-		Description: "the same reading over EVERY sample, including a restarted replica's pre-first-request default — recorded so the amendment hides nothing",
-		Passed:      true,
-		Measurement: fmt.Sprintf("harness verdict: passed=%v, %s", passedOf(result, "1.8"), measurementOf(result, "1.8")),
-	}
-	return amended, raw
-}
-
-func passedOf(result *load.Result, id string) bool {
-	for _, c := range result.Conditions {
-		if c.ID == id {
-			return c.Passed
-		}
-	}
-	return false
-}
-
-func measurementOf(result *load.Result, id string) string {
-	for _, c := range result.Conditions {
-		if c.ID == id {
-			return c.Measurement
-		}
-	}
-	return ""
 }
 
 // adversarialSchedule is §1.3's table, scaled for a real run.

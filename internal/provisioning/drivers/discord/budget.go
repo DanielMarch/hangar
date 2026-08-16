@@ -18,6 +18,9 @@ type InvalidBudgetStore interface {
 	GetDiscordInvalidBudget(ctx context.Context) (gen.AppDiscordInvalidBudget, error)
 	RecordInvalidAgainstDiscordBudget(ctx context.Context, invalidWindow time.Duration) (gen.AppDiscordInvalidBudget, error)
 	SetDiscordInvalidBudgetPaused(ctx context.Context, paused bool) error
+	// PHASE 22 (defect B-5, one driver over). The resume path that does
+	// not require a request to have been made.
+	ResumeDiscordInvalidBudgetIfWindowElapsed(ctx context.Context, invalidWindow time.Duration) (gen.AppDiscordInvalidBudget, error)
 }
 
 // InvalidBudget is the installation-wide Discord invalid-request-response
@@ -137,7 +140,22 @@ func (b *InvalidBudget) setPaused(ctx context.Context, paused bool) error {
 }
 
 // IsPaused reports the current pause state through a 1-second in-process
-// cache, refreshing from the database when stale or empty.
+// cache, refreshing from the database when stale or empty — and, when that
+// refresh finds the driver paused, asking the database whether the window
+// that paused it has elapsed.
+//
+// ── PHASE 22: THE SAME DEADLOCK AS internal/esi/ratelimit's ──────────────
+// This type was written to mirror Governor 2's mechanism, and it mirrored
+// its defect too. RecordInvalid holds the only un-pause branch, it runs
+// only on a counted RESPONSE, and Client.Do returns ErrInvalidBudgetPaused
+// before it sends — so a paused driver made no request, counted no
+// invalid, never rolled the window over, and never resumed. Discord
+// provisioning went silent permanently after one burst of 401/403/429.
+//
+// The resume is evaluated in the database for the reasons
+// db/queries/discord_invalid_budget.sql gives; unlike §5.7 there is no
+// resume threshold to honour, because the window rollover IS the resume
+// condition here.
 func (b *InvalidBudget) IsPaused(ctx context.Context) (bool, error) {
 	if row, ok := b.getCache(); ok {
 		return row.Paused, nil
@@ -145,6 +163,17 @@ func (b *InvalidBudget) IsPaused(ctx context.Context) (bool, error) {
 	row, err := b.store.GetDiscordInvalidBudget(ctx)
 	if err != nil {
 		return false, fmt.Errorf("discord: budget: get budget: %w", err)
+	}
+	if row.Paused {
+		row, err = b.store.ResumeDiscordInvalidBudgetIfWindowElapsed(ctx, b.window)
+		if err != nil {
+			return false, fmt.Errorf("discord: budget: evaluating resume: %w", err)
+		}
+		if !row.Paused {
+			b.log.InfoContext(ctx, "discord: invalid-request budget window elapsed while paused, resuming",
+				"count", row.InvalidCount, "max", b.max,
+				"note", "no request was needed to notice")
+		}
 	}
 	b.setCache(row)
 	return row.Paused, nil

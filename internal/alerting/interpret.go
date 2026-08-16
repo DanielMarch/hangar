@@ -201,9 +201,10 @@ func (e *Emitter) Emit(ctx context.Context, req EmitRequest) (EmitResult, error)
 	if req.Fingerprint == nil {
 		return result, errors.New("alerting: emit requires a Fingerprint function")
 	}
+	now := e.now()
 	occurredAt := req.OccurredAt
 	if occurredAt.IsZero() {
-		occurredAt = e.now()
+		occurredAt = now
 	}
 
 	err := store.WithTx(ctx, e.Pool, func(ctx context.Context, s *store.Store) error {
@@ -260,9 +261,12 @@ func (e *Emitter) Emit(ctx context.Context, req EmitRequest) (EmitResult, error)
 			result.EventsRecorded++
 
 			// The delivery is not claimable until the coalescing window
-			// closes, so a burst arrives at the pump as one group.
+			// closes, so a burst arrives at the pump as one group — but
+			// never later than one window from now, however far in the
+			// future the occurrence being warned about is. See
+			// CoalesceKey.DueBy for defect B-9.
 			var dueAt *time.Time
-			if due := key.Due(window); !due.IsZero() {
+			if due := key.DueBy(now, window); !due.IsZero() {
 				d := due
 				dueAt = &d
 			}

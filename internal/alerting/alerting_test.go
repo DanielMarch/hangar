@@ -175,6 +175,56 @@ func TestCoalesceWindowBucketsAreShared(t *testing.T) {
 	require.NotEqual(t, first.String(), next.String())
 }
 
+// TestCoalesceDueIsCappedAtOneWindowFromNow is defect B-9's regression
+// test: the grouping may look forward as far as it likes, the DELIVERY may
+// not.
+//
+// corporation.structure.fuel_low and corporation.contract.expiring stamp
+// OccurredAt as the deadline they warn about, deliberately, so structures
+// expiring together roll up into one message. Before this, that same
+// timestamp became app.alert_delivery.next_attempt_at — so a seventeen-hour
+// fuel warning became a delivery the dispatcher could not claim for
+// seventeen hours. Gate 3 measured 336 such deliveries at v1.0.0-rc1.
+func TestCoalesceDueIsCappedAtOneWindowFromNow(t *testing.T) {
+	target := alerting.Target{Kind: "corporation", Ref: "98000001"}
+	window := 5 * time.Minute
+	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+
+	t.Run("a deadline far in the future still groups by the deadline", func(t *testing.T) {
+		expiry := now.Add(17 * time.Hour)
+		a := alerting.NewCoalesceKey(target, "corporation.structure.fuel_low", expiry, window)
+		b := alerting.NewCoalesceKey(target, "corporation.structure.fuel_low", expiry.Add(90*time.Second), window)
+		require.Equal(t, a.String(), b.String(), "coalescing is unchanged: the bucket is still the expiry")
+
+		require.Equal(t, expiry.Truncate(window).Add(window), a.Due(window),
+			"the window still closes at the deadline it is about")
+		require.Equal(t, now.Add(window), a.DueBy(now, window),
+			"but the delivery becomes claimable one window from now, not seventeen hours out")
+	})
+
+	t.Run("a deadline inside one window is unaffected", func(t *testing.T) {
+		soon := now.Add(90 * time.Second)
+		k := alerting.NewCoalesceKey(target, "corporation.structure.fuel_low", soon, window)
+		require.Equal(t, k.Due(window), k.DueBy(now, window),
+			"the cap must not pull a delivery FORWARD; a window that closes sooner still governs")
+	})
+
+	t.Run("a bucket in the past is unaffected", func(t *testing.T) {
+		// corporation.member.inactive passes `now` explicitly, because the
+		// moment somebody became inactive is months in the past. Every
+		// notification-driven event is the same shape.
+		past := now.Add(-3 * time.Hour)
+		k := alerting.NewCoalesceKey(target, "corporation.member.inactive", past, window)
+		require.Equal(t, k.Due(window), k.DueBy(now, window))
+		require.True(t, k.DueBy(now, window).Before(now), "an already-closed window stays immediately claimable")
+	})
+
+	t.Run("coalescing disabled stays immediate", func(t *testing.T) {
+		k := alerting.NewCoalesceKey(target, "corporation.structure.fuel_low", now.Add(17*time.Hour), 0)
+		require.True(t, k.DueBy(now, 0).IsZero(), "a zero window means no next_attempt_at at all")
+	})
+}
+
 // TestRollupTruncatesWithRemainderCount covers §4.4's "truncated with an
 // explicit remainder count, never dropped", at both channels' real limits.
 func TestRollupTruncatesWithRemainderCount(t *testing.T) {

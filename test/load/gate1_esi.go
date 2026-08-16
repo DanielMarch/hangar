@@ -57,6 +57,12 @@ type Config struct {
 	// condition 1.4 can tell "a pause fired at the configured threshold"
 	// from "the budget happened to dip".
 	ErrorLimitPauseAt int
+	// TTLFloor mirrors HANGAR_ESI_TTL_FLOOR. §1.2 states condition 1.6 as
+	// "throughput never drops to zero for more than one ttl_floor", so the
+	// harness cannot evaluate the condition it was given without knowing
+	// what that floor is. A zero makes 1.6 FAIL with a measurement saying
+	// so, rather than pass vacuously — see evaluate, and defect B-11.
+	TTLFloor time.Duration
 	// Notes is free text recorded in environment.json — CPU, RAM, Postgres
 	// settings, network latency to ESI (§0 rule 3).
 	Notes map[string]string
@@ -71,6 +77,60 @@ type Result struct {
 	Conditions []ConditionResult `json:"conditions"`
 	Breaches   []Breach          `json:"breaches"`
 	Samples    []Sample          `json:"-"`
+	// Throughput is the proxy's cumulative request count sampled on the
+	// same tick as /metrics. Condition 1.6 is the longest interval across
+	// which it did not move — see ThroughputSample and defect B-11.
+	Throughput []ThroughputSample `json:"-"`
+}
+
+// ── PHASE 22, DEFECT B-11: 1.6 IS MEASURED HERE NOW ──────────────────────
+//
+// §1.2 states condition 1.6 as "throughput never drops to zero for more
+// than one ttl_floor". evaluate() used to implement it as `total > 0` — a
+// different and far weaker claim, and the first four-hour N=1 run at
+// v1.0.0-rc1 duly reported 1.6 as a PASS while serving nothing for 3h44m.
+// The condition written to catch exactly that stall passed straight
+// through it.
+//
+// Phase 21 measured the real quantity in tools/gate1-load and reported the
+// harness's reading beside it. That left the weak version as the one thing
+// any other caller of this package would get, and the harness is what the
+// next phase will trust. So the measurement lives here, and the runner
+// keeps only what is genuinely its own (process control, and §1.4's
+// transition).
+type ThroughputSample struct {
+	At    time.Time
+	Total int
+}
+
+// longestStall returns the longest span between two throughput samples
+// across which the proxy's cumulative request count did not increase, and
+// how many samples were taken.
+//
+// A run that never served anything reports its WHOLE LENGTH as the stall,
+// which is the point: no traffic for four hours is the most complete stall
+// there is, and it must not read as "no stall observed". The tail is
+// included for the same reason — a run that stops serving and never
+// resumes ends inside its longest stall.
+func (r *Result) longestStall() (time.Duration, int) {
+	if len(r.Throughput) < 2 {
+		return 0, len(r.Throughput)
+	}
+	longest := time.Duration(0)
+	stallStart := r.Throughput[0].At
+	last := r.Throughput[0].Total
+	for _, s := range r.Throughput[1:] {
+		if s.Total > last {
+			if gap := s.At.Sub(stallStart); gap > longest {
+				longest = gap
+			}
+			stallStart, last = s.At, s.Total
+		}
+	}
+	if gap := r.Throughput[len(r.Throughput)-1].At.Sub(stallStart); gap > longest {
+		longest = gap
+	}
+	return longest, len(r.Throughput)
 }
 
 // ConditionResult is one row of §1.2's table.
@@ -133,6 +193,7 @@ func Run(ctx context.Context, cfg Config, proxy *Proxy) (*Result, error) {
 	// Scrape once immediately, so a run shorter than one interval still
 	// produces a reading rather than an empty artefact.
 	res.Samples = append(res.Samples, scrapeAll(ctx, cfg.MetricsURLs)...)
+	res.sampleThroughput(proxy)
 
 	for time.Now().Before(deadline) {
 		select {
@@ -140,13 +201,25 @@ func Run(ctx context.Context, cfg Config, proxy *Proxy) (*Result, error) {
 			return finish(cfg, proxy, res)
 		case <-ticker.C:
 			res.Samples = append(res.Samples, scrapeAll(ctx, cfg.MetricsURLs)...)
+			// Sampled on the SAME tick as /metrics, and from the proxy
+			// rather than from the installation: condition 1.6 asks whether
+			// requests reached the server, and only the server can answer
+			// that. An installation that believes it is working while
+			// nothing arrives is precisely the state B-5 produced.
+			res.sampleThroughput(proxy)
 		}
 	}
 	return finish(cfg, proxy, res)
 }
 
+func (r *Result) sampleThroughput(proxy *Proxy) {
+	_, total := proxy.Served()
+	r.Throughput = append(r.Throughput, ThroughputSample{At: time.Now(), Total: total})
+}
+
 func finish(cfg Config, proxy *Proxy, res *Result) (*Result, error) {
 	res.FinishedAt = time.Now()
+	res.sampleThroughput(proxy)
 	res.Breaches = proxy.Breaches()
 	res.Conditions = evaluate(cfg, proxy, res)
 	if cfg.OutputDir == "" {
@@ -227,8 +300,39 @@ func evaluate(cfg Config, proxy *Proxy, res *Result) []ConditionResult {
 		Measurement: fmt.Sprintf("%d requests served, %d of them 200 while adversarial conditions were active", total, byStatus[http.StatusOK]),
 	})
 
+	// ── 1.6, AS §1.2 ACTUALLY WORDS IT (defect B-11) ─────────────────────
+	// "throughput never drops to zero for more than one ttl_floor" — the
+	// longest interval across which no request reached the proxy, against
+	// the configured floor. Not `total > 0`, which is what this used to be
+	// and which reported a PASS over a four-hour run that served nothing
+	// for 3h44m of it.
+	stall, stallSamples := res.longestStall()
+	switch {
+	case cfg.TTLFloor <= 0:
+		out = append(out, ConditionResult{
+			ID: "1.6", Description: "No stall — throughput never drops to zero for more than one ttl_floor",
+			Passed: false,
+			Measurement: fmt.Sprintf("NOT MEASURED: no ttl_floor was supplied to the harness, so the condition has no bound to test against "+
+				"(longest interval with no request reaching the proxy: %s over %d throughput samples)",
+				stall.Round(time.Second), stallSamples),
+		})
+	case stallSamples < 2:
+		out = append(out, ConditionResult{
+			ID: "1.6", Description: "No stall — throughput never drops to zero for more than one ttl_floor",
+			Passed: false,
+			Measurement: fmt.Sprintf("NOT MEASURED: %d throughput sample(s) — a stall cannot be measured between fewer than two readings",
+				stallSamples),
+		})
+	default:
+		out = append(out, ConditionResult{
+			ID: "1.6", Description: "No stall — throughput never drops to zero for more than one ttl_floor",
+			Passed: stall <= cfg.TTLFloor,
+			Measurement: fmt.Sprintf("longest interval with no request reaching the proxy: %s, against a ttl_floor of %s, over %d throughput samples",
+				stall.Round(time.Second), cfg.TTLFloor, stallSamples),
+		})
+	}
 	out = append(out, ConditionResult{
-		ID: "1.6", Description: "No stall",
+		ID: "1.6-raw", Description: "the weaker reading 1.6 used to be — whether the run served any request AT ALL. Kept so the difference stays visible",
 		Passed:      total > 0,
 		Measurement: fmt.Sprintf("%d requests reached the proxy over %s", total, res.FinishedAt.Sub(res.StartedAt).Round(time.Second)),
 	})
