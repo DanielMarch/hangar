@@ -7,9 +7,9 @@
 | | |
 | :-- | :-- |
 | Release | `v1.0.0-rc1` |
-| Started | 2026-08-15T23:41:36Z |
-| Finished | 2026-08-15T23:41:59Z |
-| Duration | 23s |
+| Started | 2026-08-16T01:17:07Z |
+| Finished | 2026-08-16T01:17:40Z |
+| Duration | 33s |
 | Comparison | response BYTES through the real handler chain, not parsed objects |
 | Corpus | testdata/legacy-api-v2 — responses recorded from a running legacy SeAT instance |
 | Verification | TestShimByteCompatibleForAllNineControllers and the four §7.3 condition tests |
