@@ -130,7 +130,9 @@ log "── §5.3 failure modes ────────────────
 
 # 1. Blank .env -> a named, actionable error, not a stack trace.
 log "\$ docker run --rm ghcr.io/hangar-project/hangar:latest serve   # with no configuration at all"
-BLANK_OUT="$(MSYS_NO_PATHCONV=1 docker run --rm ghcr.io/hangar-project/hangar:latest serve 2>&1 | head -20)"
+docker rm -f gate5-blank >/dev/null 2>&1 || true
+BLANK_OUT="$(MSYS_NO_PATHCONV=1 docker run --rm --name gate5-blank ghcr.io/hangar-project/hangar:latest serve 2>&1 | head -20)"
+docker rm -f gate5-blank >/dev/null 2>&1 || true
 echo "$BLANK_OUT" >> "$TRANSCRIPT"
 if echo "$BLANK_OUT" | grep -qiE "HANGAR_(MASTER_KEY|DB_URL|SESSION_SECRET)"; then
   if echo "$BLANK_OUT" | grep -qiE "goroutine|panic:"; then
@@ -149,7 +151,19 @@ log "\$ hangar serve   # HANGAR_PUBLIC_URL and HANGAR_SSO_CALLBACK_URL disagreei
 # `serve` does NOT exit on an unreachable database — it starts its listener
 # and reports unready — so this must be bounded or the gate hangs here for
 # ever. 25 seconds is far longer than a configuration check needs.
-MISMATCH_OUT="$(MSYS_NO_PATHCONV=1 timeout 25 docker run --rm \
+# -- WHY THIS RUN IS NAMED AND FORCE-REMOVED --------------------------------
+# `serve` does not exit on an unreachable database, so this is bounded with
+# `timeout`. But `timeout` kills the docker CLI, NOT the container, and
+# `--rm` only removes a container that has EXITED -- so every Phase 21 run
+# of this gate leaked a `hangar serve` container that was still retrying its
+# database connection twenty-one hours later. Three of them were found
+# running at the start of Phase 22, holding the image the release is
+# supposed to be able to delete, on a host Gate 1 needs quiet.
+#
+# Naming it makes it removable; the `docker rm -f` below is what actually
+# stops it.
+docker rm -f gate5-mismatch >/dev/null 2>&1 || true
+MISMATCH_OUT="$(MSYS_NO_PATHCONV=1 timeout 25 docker run --rm --name gate5-mismatch \
   -e HANGAR_DB_URL="postgres://x:y@127.0.0.1:5432/z?sslmode=disable" \
   -e HANGAR_MASTER_KEY="$(head -c 32 /dev/urandom | base64)" \
   -e HANGAR_SESSION_SECRET="$(head -c 32 /dev/urandom | base64)" \
@@ -157,6 +171,7 @@ MISMATCH_OUT="$(MSYS_NO_PATHCONV=1 timeout 25 docker run --rm \
   -e HANGAR_PUBLIC_URL="https://hangar.example.com" \
   -e HANGAR_SSO_CALLBACK_URL="https://SOMETHING-ELSE.example.com/auth/callback" \
   ghcr.io/hangar-project/hangar:latest serve 2>&1 | head -20)"
+docker rm -f gate5-mismatch >/dev/null 2>&1 || true
 echo "$MISMATCH_OUT" >> "$TRANSCRIPT"
 # §5.3 requires "the expected value shown", not merely "the two disagree" —
 # an operator who set ONE of them wrong needs the other one to fix it. So the

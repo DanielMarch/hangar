@@ -127,8 +127,24 @@ migrate-down: ## Roll back one Goose migration (River migrations are never rolle
 web: ## Build the SPA into web/dist for embed.FS
 	cd web && pnpm install --frozen-lockfile && pnpm run build
 
+# ── PHASE 22: THE HOST BINARY CARRIES ITS PLATFORM'S EXTENSION ───────────────
+# `go build -o bin/hangar` writes a file called exactly `bin/hangar` on every
+# platform, INCLUDING Windows — Go only appends .exe when it is choosing the
+# name itself. Meanwhile tools/gaterun.DefaultBinary(), which every gate runner
+# uses, resolves to `bin/hangar.exe` there.
+#
+# So on Windows `make build` produced a binary no gate would run, and the gates
+# silently measured whatever `bin/hangar.exe` happened to be left over from a
+# previous phase. Found in Phase 22 with a five-week-old .exe sitting beside a
+# freshly built `bin/hangar` — "every gate must measure one build" would have
+# been false, and nothing would have said so.
+#
+# HOST_EXE is empty everywhere except Windows, where $(OS) is Windows_NT.
+HOST_EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
+
 build: web ## Build the single binary for the host platform
-	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/hangar ./cmd/hangar
+	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/hangar$(HOST_EXE) ./cmd/hangar
+	@echo "built bin/hangar$(HOST_EXE) — the path tools/gaterun.DefaultBinary() resolves to on this host"
 
 build-all: web ## Release matrix (SRS §9.2) — CGO_ENABLED=0 is contractual
 	@for t in linux/amd64 linux/arm64 windows/amd64; do \
