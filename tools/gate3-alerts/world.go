@@ -187,8 +187,19 @@ func (w *world) createChannel(ctx context.Context, name, behaviour string, stub 
 	return ch, nil
 }
 
+// route sends alertType to a stub channel, addressed to the INSTALLATION
+// audience.
+//
+// The ref is empty deliberately. `installation` means "everyone who operates
+// this installation" — an audience, not an entity — so it has no id to
+// carry, and internal/alerting's threshold TargetFilter never narrows it for
+// exactly that reason: a target kind with no ownership claim has nothing to
+// contradict. Giving it a corporation id would still deliver, because
+// routing resolves by alert TYPE, but it would encode a target no operator
+// would ever configure and make the evidence describe a routing table that
+// does not occur in practice.
 func (w *world) route(ctx context.Context, alertType string, target *stubChannel) error {
-	ref := fmt.Sprint(gate3CorporationID)
+	ref := ""
 	_, err := w.store.CreateAlertRoutingRule(ctx, gen.CreateAlertRoutingRuleParams{
 		AlertType: alertType, TargetKind: "installation", TargetRef: &ref, ChannelID: target.id,
 	})

@@ -7,10 +7,10 @@ The committed synthetic spec was ingested through `hangar admin ingest-catalogue
 | | |
 | :-- | :-- |
 | Release | `v1.0.0-rc1` |
-| Started | 2026-08-15T23:41:26Z |
-| Finished | 2026-08-15T23:41:28Z |
+| Started | 2026-08-15T23:46:08Z |
+| Finished | 2026-08-15T23:46:10Z |
 | Duration | 2s |
-| HEAD | c8604d23cc3d4b1b813225765a52c7f4a1eb380b |
+| HEAD | 3ac0014a4eeb8068cdae20368896426c615337a2 |
 | Ingest path | hangar admin ingest-catalogue (production path), against the spec served over HTTP |
 | Synthetic spec | test\drift\gate6_synthetic_spec.json |
 | Tag | v1.0.0-rc1 |
@@ -25,7 +25,7 @@ The committed synthetic spec was ingested through `hangar admin ingest-catalogue
 | 6.1(c) | a scope matching neither live grammar is stored verbatim as a text primary key and the route survives | **pass** | app.esi_scope holds "esi::synthetic~widget/read@v3" = true; the operation was ingested = true |
 | 6.1(d) | an unrecognised x-cache-mode is recorded in app.open_vocabulary, schedules as ttl-based, and the route is NOT rejected | **pass** | cache_mode stored verbatim=true, open_vocabulary cache_mode values=[quantum-entangled ttl-based], still schedulable=true |
 | 6.2-clean | `git status --porcelain` is EMPTY — the ingest required no source change | **pass** | 0 modified paths |
-| 6.2-at-tag | `git rev-parse HEAD` equals the release-candidate tag | **pass** | HEAD=c8604d23cc3d, v1.0.0-rc1=c8604d23cc3d |
+| 6.2-at-tag | `git rev-parse HEAD` equals the release-candidate tag | **pass** | HEAD=3ac0014a4eeb, v1.0.0-rc1=3ac0014a4eeb |
 
 ## Artefacts
 

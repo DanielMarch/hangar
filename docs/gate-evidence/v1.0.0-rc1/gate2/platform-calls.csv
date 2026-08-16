@@ -1,0 +1,5 @@
+platform,grants,revokes,min_interval,round_trip
+discord,0,10003,20ms,30ms
+teamspeak,0,10001,0s,15ms
+mumble,0,10000,0s,10ms
+# metric cross-check, provisioning_revocation_latency_seconds outcomes: map[success:15000]

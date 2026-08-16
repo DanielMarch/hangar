@@ -1,7 +1,7 @@
 {
   "tag": "v1.0.0-rc1",
-  "tag_commit": "c8604d23cc3d4b1b813225765a52c7f4a1eb380b",
-  "head": "c8604d23cc3d4b1b813225765a52c7f4a1eb380b",
+  "tag_commit": "3ac0014a4eeb8068cdae20368896426c615337a2",
+  "head": "3ac0014a4eeb8068cdae20368896426c615337a2",
   "git_status_porcelain": null,
-  "checked_at": "2026-08-15T18:41:28.1891598-05:00"
+  "checked_at": "2026-08-15T18:46:10.4221323-05:00"
 }

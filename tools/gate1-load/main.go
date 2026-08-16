@@ -226,6 +226,47 @@ func run() error {
 		}
 	}()
 
+	// ── wait for the installation to actually be running ──────────────────
+	//
+	// The measurement window opens when the system is in operation, not when
+	// its processes were launched, and at N=3 that distinction decides
+	// condition 1.8.
+	//
+	// ratelimit.Governor1 starts in SOLO optimistically and re-evaluates the
+	// replica registry on its first Acquire — so between "the process is up"
+	// and "the process has made an ESI request", esi_ledger_mode reports
+	// `solo` on every replica regardless of how many are live. The harness
+	// scrapes immediately, so a three-replica run would record modes
+	// [clustered solo] and fail 1.8's "clustered for the WHOLE run" for a
+	// system that never selected the wrong mode — it had not selected one at
+	// all yet.
+	//
+	// This is worth recording as a finding rather than only working around:
+	// the gauge reports its optimistic DEFAULT as though it were an
+	// observation, which is the same family as the divergence gauge that
+	// read 0 over zero samples before Phase 20.4.1 gave "not measured" a
+	// distinct meaning from "measured zero".
+	//
+	// The wait is bounded and its outcome is recorded either way — a run
+	// that never saw a request is not quietly measured for four hours.
+	fmt.Printf("gate1: waiting for the first ESI request to reach the proxy\n")
+	trafficDeadline := time.Now().Add(5 * time.Minute)
+	for time.Now().Before(trafficDeadline) {
+		if _, total := proxy.Served(); total > 0 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(2 * time.Second):
+		}
+	}
+	if _, total := proxy.Served(); total == 0 {
+		fleet.note("no_traffic", "no ESI request reached the proxy within 5 minutes of startup — "+
+			"the measurement window opened anyway, and every throughput condition below should be read in that light")
+	} else {
+		fleet.note("traffic_started", fmt.Sprintf("the installation is serving; %d requests reached the proxy before the measurement window opened", func() int { _, t := proxy.Served(); return t }()))
+	}
+
 	// ── the measurement ───────────────────────────────────────────────────
 	fmt.Printf("gate1: running for %s at N=%d — evidence to %s\n", *duration, *replicas, dir)
 	started := time.Now()

@@ -211,6 +211,25 @@ The groups that represent **absent product surface** rather than test doubles:
 None is named by a gate. Each is a real capability gap for an operator and should be a
 scoping decision before v1.0, not a surprise after it.
 
+### N-8 — Gate 7 §7.5's sunset policy cannot be verified: there are no release notes *(found in Phase 21)*
+
+§7.5 checks the sunset policy against `docs/RELEASE_NOTES.md` — "removed no earlier than two minor
+versions later", "removal announced at least one minor version in advance", and "the `Sunset`
+header matches the announced date, automated check against the release notes". **That file does not
+exist.** Three of the four rows in that table therefore have nothing to check against, and the
+fourth (the shim ships in v1.0) is the only one this release can evidence.
+
+Conditions 7.2 and 7.3 — that every shim response *carries* `Deprecation: true` and an RFC 8594
+`Sunset` — are separate, are numbered pass conditions, and do pass
+(`TestShimEmitsDeprecationAndSunset`, run as part of Gate 7's evidence). What is unverifiable is
+whether the date in that header agrees with an announcement, because no announcement exists.
+
+Also worth stating plainly, since Gate 7's summary should not be read as covering more than it
+does: conditions **7.5** (Laravel pagination synthesised from keyset results), **7.6** (money
+emitted as JSON numbers) and **7.9** (Appendix C complete in *both* documents) are asserted by
+unit and integration tests rather than by the gate run, and the run's `SUMMARY.md` claims only the
+conditions it measured.
+
 ### N-5 — Latent cache-key collision, recorded and not fixed
 
 `esi.Client.cacheKey` hashes the templated upstream path and never `PathParams`, so every item of

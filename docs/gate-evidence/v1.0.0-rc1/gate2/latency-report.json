@@ -1,0 +1,37 @@
+{
+  "started_at": "2026-08-15T18:48:01.2671981-05:00",
+  "finished_at": "2026-08-15T19:19:52.0451981-05:00",
+  "notes": "5000 identities across 3 platforms, bulk reconciliation saturated throughout",
+  "latencies": {
+    "p50": 0.038371,
+    "p95": 0.094397,
+    "p99": 0.133662,
+    "max": 0.323905
+  },
+  "outcomes": {
+    "success": 15000
+  },
+  "pending_revocations": 0,
+  "oldest_pending_age_seconds": 0,
+  "conditions": [
+    {
+      "id": "2.1-sample",
+      "description": "the run produced enough successful revocations to have a p99",
+      "passed": true,
+      "measurement": "15000 successful revocations, minimum 5000"
+    },
+    {
+      "id": "2.1",
+      "description": "p99 of (platform_call_completed_at - event_at) \u003c 1m0s",
+      "passed": true,
+      "measurement": "p50=0.038s p95=0.094s p99=0.134s max=0.324s over 15000 revocations"
+    },
+    {
+      "id": "2.3",
+      "description": "revocations still owed remain visible with their true age",
+      "passed": true,
+      "measurement": "0 pending, oldest 0.0s old"
+    }
+  ],
+  "sample_count": 15000
+}
