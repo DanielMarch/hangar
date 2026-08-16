@@ -1,0 +1,27 @@
+{
+  "duration": "4h0m0.1966236s",
+  "error_limit_pause_at": 20,
+  "finished_at": "2026-08-16T13:23:09.1846711-05:00",
+  "mode_observed": [
+    "clustered",
+    "solo"
+  ],
+  "notes": {
+    "characters_seeded": "5000",
+    "claim_batch_size": "500",
+    "cpus": "16",
+    "error_limit_max": "100",
+    "error_limit_pause_at": "20",
+    "error_limit_resume_at": "60",
+    "host_arch": "amd64",
+    "host_os": "windows",
+    "planner_interval": "5s",
+    "proxy": "test/load recording proxy — floating-window Governor 1, fixed-window Governor 2",
+    "scopes_per_character": "71",
+    "sync_subscriptions": "225008",
+    "ttl_floor": "5m0s"
+  },
+  "replicas": 3,
+  "scrape_interval": "15s",
+  "started_at": "2026-08-16T09:23:08.9880475-05:00"
+}

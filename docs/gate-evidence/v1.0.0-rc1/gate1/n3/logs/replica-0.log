@@ -1,0 +1,5 @@
+time=2026-08-16T09:23:05.485-05:00 level=INFO msg="hangar work: starting" version=dev commit=unknown
+time=2026-08-16T09:23:05.500-05:00 level=INFO msg="hangar: metrics listening" addr=127.0.0.1:9400
+time=2026-08-16T09:23:05.540-05:00 level=INFO msg="alerting: threshold evaluator disabled (HANGAR_ALERT_THRESHOLD_INTERVAL is empty or zero) — §4.4's four threshold alerts will never fire on this installation"
+time=2026-08-16T09:23:07.626-05:00 level=INFO msg="governor1: mode transition" component=esi.ratelimit.governor1 from=solo to=clustered live_replicas=3
+time=2026-08-16T09:39:09.255-05:00 level=WARN msg="governor2: proactive pause" component=esi.ratelimit.governor2 remaining=17 threshold=20
