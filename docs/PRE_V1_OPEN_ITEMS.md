@@ -1,14 +1,26 @@
 # Pre-v1.0 open items — audit at `c0b35ac`
 
-> **Status after Phase 21.** B-2 and B-3 are closed in code (see below for what each turned out to
-> be, precisely). B-1 is closed by building a runner per gate and running them: the evidence is in
+> **Status after Phase 21.** All seven gates have now been run, at `v1.0.0-rc1`. Evidence is in
 > `docs/gate-evidence/v1.0.0-rc1/`, one directory per gate, each with a `SUMMARY.md` stating
-> pass/fail and the measurement. B-4 remains open and is the operator's — it cannot be closed from
-> inside the codebase.
+> pass/fail and the measurement that decided it.
 >
-> Phase 21 also found one thing this audit did not: **the stock `docker-compose.yml` runs `serve`
-> only, and `serve` registers no River workers**, so on a default installation the planner enqueues
-> sync jobs that nothing consumes. See §5.
+> | Gate | Verdict | The measurement |
+> | :-- | :-- | :-- |
+> | 1 ESI Load Stability | **FAIL** | no request reached the proxy for **3h58m** (N=1) and **3h43m** (N=3) against a 5m `ttl_floor` |
+> | 2 Revocation SLO | **PASS** | p99 **0.134s** against 60s, over 15,000 revocations with the bulk queue saturated |
+> | 3 Alert Delivery Integrity | **PASS** | 13,454 enqueued = 595 + 5,190 + 7,669 + **0 pending** + 0 failed |
+> | 4 Feature Parity | **PASS** | 58 capability rows, 58 verified, 0 unreachable, 0 false citations |
+> | 5 Deployment Usability | **FAIL** | 2 conditions failed, 1 partial, 1 unverifiable — the artefacts are unpublished |
+> | 6 Spec-Drift Resilience | **PASS** | four §6.1 outcomes through the production ingest, clean tree at the tag |
+> | 7 Third-Party Migration | **PASS** | 16 of 16 served routes byte-identical across 34 legacy routes |
+>
+> **B-1 is closed** — there is now a runner per gate and every gate has produced its blocking
+> artefact. **B-2 and B-3 are closed in code.** **B-4 remains the operator's** and cannot be closed
+> from inside the codebase.
+>
+> Running the gates found **six defects that no test in the suite could have caught**, listed in
+> §5–§9 below. One of them (§9) makes HANGAR stop calling ESI permanently after any burst of
+> errors, and is the reason Gate 1 failed.
 
 **Question asked:** are Phases 0–20.11 actually complete, do all seven gates pass, and what
 blocks a v1.0 release candidate?
@@ -473,6 +485,8 @@ but until it happens the documented three-command deployment cannot be performed
 
 ## 4. Verdict
 
+### As the audit left it
+
 **Not clear for v1.0 release candidacy.** Four blockers:
 
 1. **B-1** five of seven gates never run, and Gate 1 has no way to run it — the largest item by far
@@ -483,3 +497,52 @@ but until it happens the documented three-command deployment cannot be performed
 B-3 is minutes of work once the placement decision is made. B-2 is a small, well-understood job.
 B-4 is the operator's. **B-1 is the real gate to v1.0**: roughly nine hours of measured runs, an
 N=3 deployment, a clean host, and runners that do not exist yet.
+
+### After Phase 21 — `v1.0.0-rc1` is not a release candidate
+
+Five gates pass. **Two fail**, and `04_RELEASE_GATES.md` §8 is unambiguous: *"Release blocks on all
+seven."*
+
+**Gate 1 fails on a defect that stops the product.** Once Governor 2's proactive pause trips, the
+installation never calls ESI again (§9). Measured at both replica counts: 3h58m and 3h43m with no
+request reaching the proxy, on installations holding 225,000 subscriptions. This is not a
+performance regression or a tuning question — an ordinary burst of upstream errors, well inside
+what ESI produces on a bad day, silently ends all synchronisation until someone restarts the
+process. It must be fixed before any release.
+
+**Gate 5 fails on three things, one of them now fixed.** The installer generated a database
+password that broke roughly half of all turnkey deployments (§6.1, fixed here); a
+`HANGAR_PUBLIC_URL`/callback mismatch is never reported (§6.2); and the binary parses a same-named
+file in its working directory as its config, which is exactly what §9.2's manual layout produces
+(§6.3). Separately, §5.1's three commands cannot be performed by anyone at all: the compose file,
+the installer and the image are all unpublished (§6.4).
+
+**What the failures do not touch, and this matters for what comes next.** The rate-limit ledger —
+the subsystem §8 predicted would fail first — was measured under 150,452 requests across three
+replicas sharing one Postgres, and produced zero Governor 1 breaches, zero overdrawn buckets and
+zero post-reconciliation divergence over 3,739 group-samples. The alert pipeline balanced its
+accounting identity exactly with zero drops over 13,454 deliveries. The revocation SLO came in at
+p99 0.134s against a 60-second budget while the bulk queue performed 15,000 platform calls of its
+own. The `/api/v2` shim is byte-identical on all 16 served routes. The spec-drift ingest handled a
+spec nobody anticipated with a provably clean tree.
+
+The gates that pass are the ones that took years of design to get right. The gates that fail are
+four small defects and one unpublished repository.
+
+### What blocks `rc2`
+
+| # | Item | Where |
+| :-- | :-- | :-- |
+| 1 | Governor 2's pause never resumes | §9 — **blocking, stops the product** |
+| 2 | `serve` registers no River workers, and the stock compose runs only `serve` | §5 — **blocking, the default deployment never syncs** |
+| 3 | The binary parses a same-named file as its config | §6.3 |
+| 4 | A public-URL/callback mismatch is never reported | §6.2 |
+| 5 | Fuel and contract warnings are delivered at the deadline they warn about | §7 |
+| 6 | `esi_ledger_mode` reports its default as an observation | §8 |
+| 7 | Publish the repository, the compose file, the installer and the image | §6.4 |
+| 8 | The two operator actions | B-4 |
+
+Items 1–6 are all small. None was found by a test; all six were found by running gates that had
+never been run. After they land, **every gate must be re-run** — the evidence in
+`docs/gate-evidence/v1.0.0-rc1/` describes a binary that no longer exists the moment item 1 is
+fixed.
