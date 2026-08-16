@@ -61,7 +61,7 @@ func main() {
 func run() error {
 	var (
 		duration    = flag.Duration("duration", 4*time.Hour, "wall-clock length of the run (§8: 4h)")
-		generateFor = flag.Duration("generate-for", 0, "how long to generate alerts; the rest of the run drains (default half the duration)")
+		generateFor = flag.Duration("generate-for", 0, "how long to generate alerts; the rest of the run drains (default: whatever is left after reserving a drain the retry policy can actually settle in)")
 		interval    = flag.Duration("generate-interval", 30*time.Second, "spacing between generation batches")
 		version     = flag.String("version", "", "release version the evidence belongs to")
 		outDir      = flag.String("out", "", "evidence directory (default docs/gate-evidence/<version>/gate3)")
@@ -73,12 +73,6 @@ func run() error {
 
 	if *version == "" {
 		return errors.New("-version is required")
-	}
-	if *generateFor <= 0 {
-		*generateFor = *duration / 2
-	}
-	if *generateFor >= *duration {
-		return errors.New("-generate-for must be shorter than -duration: the remainder is the drain phase")
 	}
 	dir, err := gaterun.EvidenceDir(*outDir, *version, "gate3")
 	if err != nil {
@@ -100,6 +94,39 @@ func run() error {
 		Cap:             cfg.Alerting.RetryCap,
 		DeadLetterAfter: cfg.Alerting.DeadLetterAfter,
 	}
+
+	// ── PHASE 22: THE DEFAULT SPLIT IS DERIVED, NOT HALF ─────────────────
+	//
+	// It used to be duration/2, chosen before the retry policy was read. At
+	// the shipped 4h duration that gives a 2h drain, and this installation's
+	// policy needs 2h3m — so `make gate3`, the command
+	// docs/gate-evidence/README.md tells the next person to run, REFUSED TO
+	// START with the defaults it ships. v1.0.0-rc1's Gate 3 ran only because
+	// the flag was supplied by hand, and nothing recorded that it had to be.
+	//
+	// checkSettleable is right and stays: a drain too short to settle would
+	// make the gate report a DROP — its most serious finding — for a
+	// pipeline behaving exactly as configured. What was wrong is that the
+	// default walked into it. The drain is now RESERVED first, from the
+	// policy, and generation gets what is left; supplying -generate-for
+	// explicitly still overrides.
+	if *generateFor <= 0 {
+		*generateFor = *duration - settleBudget(policy)
+		if *generateFor < *duration/8 {
+			// Reserving the drain has eaten the run. Say which two numbers
+			// disagree rather than failing later on an empty sample.
+			return fmt.Errorf(
+				"-duration %s leaves no useful generation phase: the retry policy needs a %s drain to settle "+
+					"(max_attempts=%d base=%s cap=%s dead_letter_after=%s), so at most %s would remain. Lengthen "+
+					"-duration, or set HANGAR_ALERT_DEAD_LETTER_AFTER / HANGAR_ALERT_MAX_ATTEMPTS to something this run can reach",
+				*duration, settleBudget(policy), policy.MaxAttempts, policy.Base, policy.Cap,
+				policy.DeadLetterAfter, *duration-settleBudget(policy))
+		}
+	}
+	if *generateFor >= *duration {
+		return errors.New("-generate-for must be shorter than -duration: the remainder is the drain phase")
+	}
+
 	drain := *duration - *generateFor
 	if err := checkSettleable(policy, drain); err != nil {
 		return err
@@ -375,11 +402,32 @@ func domainsCovered(ctx context.Context, pool *pgxpool.Pool, since time.Time) (i
 	return covered, missing, rows.Err()
 }
 
-func checkSettleable(policy alerting.RetryPolicy, drain time.Duration) error {
+// settleBudget is the drain phase a run must reserve: the worst case for a
+// delivery to reach a terminal state, plus a margin.
+//
+// The margin is 10% and exists because the worst case is computed from the
+// policy alone, while a real delivery also waits up to one dispatch interval
+// to be claimed for each attempt. Without it a run sized to exactly the worst
+// case would fail checkSettleable's own condition by seconds, which is the
+// most annoying possible way for a four-hour run to end.
+func settleBudget(policy alerting.RetryPolicy) time.Duration {
+	worst := worstCaseSettle(policy)
+	return worst + worst/10
+}
+
+// worstCaseSettle is the longer of the two ways a delivery reaches a terminal
+// state: exhausting its attempts, or crossing the dead-letter horizon —
+// whichever comes FIRST, since either one ends it.
+func worstCaseSettle(policy alerting.RetryPolicy) time.Duration {
 	worst := policy.DeadLetterAfter
 	if backoff := worstCaseBackoff(policy); backoff < worst {
 		worst = backoff
 	}
+	return worst
+}
+
+func checkSettleable(policy alerting.RetryPolicy, drain time.Duration) error {
+	worst := worstCaseSettle(policy)
 	if drain >= worst {
 		return nil
 	}
