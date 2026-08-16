@@ -208,11 +208,26 @@ func run() error {
 	}
 
 	conditions := append([]load.ConditionResult{}, result.Conditions...)
+	// Counted over the EIGHT §4.4 domains by name, not over
+	// count(DISTINCT domain). This run deliberately generates an
+	// unrecognised CCP type, which lands in the `unknown` domain — so a
+	// distinct-count of 8 can be reached while one of the eight is missing,
+	// and the first version of this condition read exactly that way.
+	realDomains, missing, err := domainsCovered(ctx, pool, since)
+	if err != nil {
+		return err
+	}
 	conditions = append(conditions, load.ConditionResult{
 		ID:          "3-domains",
 		Description: "the run exercised all eight §4.4 domains",
-		Passed:      result.Observed.Domains >= len(catalogue.Domains),
-		Measurement: fmt.Sprintf("%d of %d domains produced events", result.Observed.Domains, len(catalogue.Domains)),
+		Passed:      len(missing) == 0,
+		Measurement: fmt.Sprintf("%d of %d domains produced events%s", realDomains, len(catalogue.Domains),
+			func() string {
+				if len(missing) == 0 {
+					return ""
+				}
+				return "; missing: " + strings.Join(missing, ", ")
+			}()),
 	})
 	conditions = append(conditions, load.ConditionResult{
 		ID:          "3.7",
@@ -221,6 +236,25 @@ func run() error {
 		Measurement: fmt.Sprintf("%d dead-lettered from the down channels while %d messages went out on the healthy ones",
 			result.Observed.DeadLettered, result.Observed.MessagesSent),
 	})
+	// The finding the first smoke run surfaced, kept as a measurement rather
+	// than a comment: a delivery whose next_attempt_at lies beyond the end of
+	// the run has not been dropped, but nothing in this run could have
+	// delivered it either. It comes from the structure-fuel and
+	// contract-expiry thresholds stamping OccurredAt as the EXPIRY, which
+	// then becomes the coalescing bucket and therefore the delivery's due
+	// time — so the warning is scheduled for the moment the thing it warns
+	// about happens.
+	beyond, furthest, err := scheduledBeyond(ctx, pool, since, time.Now())
+	if err != nil {
+		return err
+	}
+	conditions = append(conditions, load.ConditionResult{
+		ID:          "3.1-scheduled-beyond-run",
+		Description: "no delivery is scheduled to become claimable after the run ends (see the note — this is about early warnings arriving late, not about drops)",
+		Passed:      beyond == 0,
+		Measurement: fmt.Sprintf("%d deliveries have next_attempt_at after the end of the run%s", beyond, furthest),
+	})
+
 	conditions = append(conditions, load.ConditionResult{
 		ID:          "3.4",
 		Description: "coalesced events arrived as ONE message per group (no query can see this — it is read from the channel stub)",
@@ -278,6 +312,62 @@ func run() error {
 // for a pipeline that was behaving exactly as configured and had simply not
 // been given time to finish. A gate that can fail for a reason unrelated to
 // the property it measures is worse than no gate.
+// domainsCovered reports how many of §4.4's eight domains produced an event
+// in this run, and which did not.
+// scheduledBeyond counts deliveries that will not become claimable until
+// after the run has ended, and reports how far out the furthest one is.
+func scheduledBeyond(ctx context.Context, pool *pgxpool.Pool, since, endOfRun time.Time) (int, string, error) {
+	var count int
+	var furthest *time.Time
+	err := pool.QueryRow(ctx, `
+		SELECT count(*)::int, max(d.next_attempt_at)
+		  FROM app.alert_delivery d
+		  JOIN app.alert_event e ON e.event_id = d.event_id
+		 WHERE e.occurred_at >= $1 AND d.state = 'pending' AND d.next_attempt_at > $2`,
+		since, endOfRun).Scan(&count, &furthest)
+	if err != nil {
+		return 0, "", fmt.Errorf("gate3: counting deliveries scheduled beyond the run: %w", err)
+	}
+	if furthest == nil {
+		return count, "", nil
+	}
+	return count, fmt.Sprintf("; furthest is %s, which is %s after the run ended",
+		furthest.UTC().Format(time.RFC3339), furthest.Sub(endOfRun).Round(time.Minute)), nil
+}
+
+func domainsCovered(ctx context.Context, pool *pgxpool.Pool, since time.Time) (int, []string, error) {
+	names := make([]string, 0, len(catalogue.Domains))
+	for _, d := range catalogue.Domains {
+		names = append(names, string(d))
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT d.domain, EXISTS (
+		    SELECT 1 FROM app.alert_event e
+		      JOIN app.alert_type t ON t.alert_type = e.alert_type
+		     WHERE t.domain = d.domain AND e.occurred_at >= $2)
+		  FROM unnest($1::text[]) AS d(domain)`, names, since)
+	if err != nil {
+		return 0, nil, fmt.Errorf("gate3: counting domains covered: %w", err)
+	}
+	defer rows.Close()
+
+	covered := 0
+	var missing []string
+	for rows.Next() {
+		var domain string
+		var seen bool
+		if err := rows.Scan(&domain, &seen); err != nil {
+			return 0, nil, err
+		}
+		if seen {
+			covered++
+			continue
+		}
+		missing = append(missing, domain)
+	}
+	return covered, missing, rows.Err()
+}
+
 func checkSettleable(policy alerting.RetryPolicy, drain time.Duration) error {
 	worst := policy.DeadLetterAfter
 	if backoff := worstCaseBackoff(policy); backoff < worst {

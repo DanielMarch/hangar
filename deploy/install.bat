@@ -27,7 +27,13 @@ if errorlevel 1 (
 
 for /f "delims=" %%K in ('powershell -NoProfile -Command "[Convert]::ToBase64String((New-Object byte[] 32 ^| %%{ (New-Object Security.Cryptography.RNGCryptoServiceProvider).GetBytes($_); $_ }))"') do set "MASTER_KEY=%%K"
 for /f "delims=" %%K in ('powershell -NoProfile -Command "[Convert]::ToBase64String((New-Object byte[] 32 ^| %%{ (New-Object Security.Cryptography.RNGCryptoServiceProvider).GetBytes($_); $_ }))"') do set "SESSION_SECRET=%%K"
-for /f "delims=" %%K in ('powershell -NoProfile -Command "[Convert]::ToBase64String((New-Object byte[] 32 ^| %%{ (New-Object Security.Cryptography.RNGCryptoServiceProvider).GetBytes($_); $_ }))"') do set "POSTGRES_PASSWORD=%%K"
+REM The database password is HEX, not base64, and the difference is load-bearing.
+REM docker-compose.yml interpolates it into HANGAR_DB_URL, and base64's alphabet
+REM includes "/", which terminates a URL's authority: a generated password
+REM containing one made `migrate` exit 1 with a parse error and took the whole
+REM deployment with it. Found by running Gate 5 for the first time (Phase 21).
+REM See deploy/install.sh's random_db_password for the full account.
+for /f "delims=" %%K in ('powershell -NoProfile -Command "-join ((New-Object byte[] 24 ^| %%{ (New-Object Security.Cryptography.RNGCryptoServiceProvider).GetBytes($_); $_ }) ^| ForEach-Object { $_.ToString('x2') })"') do set "POSTGRES_PASSWORD=%%K"
 
 powershell -NoProfile -Command ^
   "(Get-Content '%ENV_FILE%.tmp') |" ^

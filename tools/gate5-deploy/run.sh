@@ -130,7 +130,7 @@ log "── §5.3 failure modes ────────────────
 
 # 1. Blank .env -> a named, actionable error, not a stack trace.
 log "\$ docker run --rm ghcr.io/hangar-project/hangar:latest serve   # with no configuration at all"
-BLANK_OUT="$(docker run --rm --entrypoint /usr/local/bin/hangar ghcr.io/hangar-project/hangar:latest serve 2>&1 | head -20)"
+BLANK_OUT="$(MSYS_NO_PATHCONV=1 docker run --rm ghcr.io/hangar-project/hangar:latest serve 2>&1 | head -20)"
 echo "$BLANK_OUT" >> "$TRANSCRIPT"
 if echo "$BLANK_OUT" | grep -qiE "HANGAR_(MASTER_KEY|DB_URL|SESSION_SECRET)"; then
   if echo "$BLANK_OUT" | grep -qiE "goroutine|panic:"; then
@@ -146,7 +146,10 @@ fi
 #    expected value shown, not as an opaque OAuth failure.
 log ""
 log "\$ hangar serve   # HANGAR_PUBLIC_URL and HANGAR_SSO_CALLBACK_URL disagreeing"
-MISMATCH_OUT="$(docker run --rm --entrypoint /usr/local/bin/hangar \
+# `serve` does NOT exit on an unreachable database — it starts its listener
+# and reports unready — so this must be bounded or the gate hangs here for
+# ever. 25 seconds is far longer than a configuration check needs.
+MISMATCH_OUT="$(MSYS_NO_PATHCONV=1 timeout 25 docker run --rm \
   -e HANGAR_DB_URL="postgres://x:y@127.0.0.1:5432/z?sslmode=disable" \
   -e HANGAR_MASTER_KEY="$(head -c 32 /dev/urandom | base64)" \
   -e HANGAR_SESSION_SECRET="$(head -c 32 /dev/urandom | base64)" \
@@ -174,6 +177,12 @@ log "── command 3 of 3 ─────────────────�
 START_TS=$(date +%s)
 run docker compose -p "$PROJECT" up -d
 CMD3=$?
+if [ "$CMD3" != 0 ]; then
+  log ""
+  log "-- docker compose up FAILED; the reason is in the service logs -----"
+  docker compose -p "$PROJECT" logs --no-color migrate 2>&1 | tail -30 | tee -a "$TRANSCRIPT"
+  docker compose -p "$PROJECT" logs --no-color hangar 2>&1 | tail -20 | tee -a "$TRANSCRIPT"
+fi
 
 # ── §5.2's PASS CONDITIONS ─────────────────────────────────────────────────
 log ""
@@ -225,17 +234,33 @@ fi
 
 # The first-boot assertions the release checklist cares about, checked here
 # because this is the only place a genuinely fresh installation exists.
-ALERTS="$(docker compose -p "$PROJECT" exec -T postgres psql -U hangar -d hangar -tAc \
-  "SELECT count(*) FROM app.alert_type" 2>/dev/null | tr -d '\r ')"
-THRESHOLDS="$(docker compose -p "$PROJECT" exec -T postgres psql -U hangar -d hangar -tAc \
-  "SELECT count(*) FROM app.alert_type WHERE category = 'threshold'" 2>/dev/null | tr -d '\r ')"
+# ── WHY THIS POLLS ──────────────────────────────────────────────────────────
+# The four THRESHOLD alert types are seeded through a join against
+# app.esi_route, so they do not exist until a catalogue has been ingested — and
+# `serve` runs that ingest IN THE BACKGROUND at startup, deliberately, so an ESI
+# outage cannot delay the listener. /healthz returns 200 well before it lands.
+#
+# Checked once, 9 seconds after the stack came up, this read 50 alert types and
+# 0 thresholds and looked exactly like defect B41. It was the check being early:
+# the ingest completed 40 seconds later with 225 routes from a LIVE fetch and
+# the catalogue completed at 54/4. A first-boot assertion has to wait for first
+# boot to finish.
+ALERTS=""; THRESHOLDS=""
+for _ in $(seq 1 40); do
+  ALERTS="$(docker compose -p "$PROJECT" exec -T postgres psql -U hangar -d hangar -tAc \
+    "SELECT count(*) FROM app.alert_type" 2>/dev/null | tr -d '\r ')"
+  THRESHOLDS="$(docker compose -p "$PROJECT" exec -T postgres psql -U hangar -d hangar -tAc \
+    "SELECT count(*) FROM app.alert_type WHERE category = 'threshold'" 2>/dev/null | tr -d '\r ')"
+  [ "$ALERTS" = "54" ] && [ "$THRESHOLDS" = "4" ] && break
+  sleep 5
+done
 if [ "$ALERTS" = "54" ] && [ "$THRESHOLDS" = "4" ]; then
   record "first-boot-alerts" "pass" "54 alert types with 4 thresholds on the FIRST boot"
 else
   record "first-boot-alerts" "FAIL" "expected 54 alert types and 4 thresholds, got ${ALERTS:-?} and ${THRESHOLDS:-?}"
 fi
 
-METRICS="$(docker compose -p "$PROJECT" exec -T hangar /usr/local/bin/hangar healthcheck 2>&1 | head -3)"
+METRICS="$(MSYS_NO_PATHCONV=1 docker compose -p "$PROJECT" exec -T hangar hangar healthcheck 2>&1 | head -3)"
 log "healthcheck: $METRICS"
 
 # ── 5.7 — re-running after a version bump migrates forward without data loss ─
@@ -273,22 +298,59 @@ run docker run -d --name gate5-pg --network gate5-manual \
   -e POSTGRES_USER=hangar -e POSTGRES_PASSWORD=hangar -e POSTGRES_DB=hangar postgres:18-alpine
 sleep 15
 if [ -f "${REPO_ROOT}/bin/hangar-linux-amd64" ]; then
-  MANUAL_OUT="$(docker run --rm --network gate5-manual \
-    -v "${REPO_ROOT}/bin/hangar-linux-amd64:/hangar:ro" \
+  # Mounted as /opt/hangar-bin, NOT as /hangar, and the difference is a defect
+  # this gate found — see the collision check below.
+  MANUAL_OUT="$(MSYS_NO_PATHCONV=1 docker run --rm --network gate5-manual -w //opt \
+    -v "${REPO_ROOT}/bin/hangar-linux-amd64:/opt/hangar-bin:ro" \
     -e HANGAR_DB_URL="postgres://hangar:hangar@gate5-pg:5432/hangar?sslmode=disable" \
     -e HANGAR_MASTER_KEY="$(head -c 32 /dev/urandom | base64)" \
     -e HANGAR_SESSION_SECRET="$(head -c 32 /dev/urandom | base64)" \
     -e HANGAR_SSO_CLIENT_ID=gate5 -e HANGAR_SSO_CLIENT_SECRET=gate5 \
-    debian:12-slim /hangar migrate up 2>&1 | tail -6)"
+    debian:12-slim //opt/hangar-bin migrate up 2>&1)"
+  MANUAL_CODE=$?
   echo "$MANUAL_OUT" >> "$TRANSCRIPT"
-  if echo "$MANUAL_OUT" | grep -qi "schema current\|successfully migrated\|seed data applied"; then
+  # The EXIT CODE, not a grep for a phrase. The first version of this check
+  # searched the last six lines for a success marker, and on a successful run
+  # those six lines are the deferred-threshold advisory — so a migration that
+  # worked was recorded as a failure. `migrate up` exits non-zero when it
+  # fails; that is the signal, and it does not move when a log line does.
+  if [ "$MANUAL_CODE" = 0 ]; then
     record "5.8" "PARTIAL" "the static binary ran on a bare debian:12-slim with no toolchain and migrated an external PostgreSQL 18. systemd itself was NOT exercised — this host is Windows and has no systemd; the unit file is deploy/ material and remains unverified"
   else
-    record "5.8" "FAIL" "the static binary could not migrate an external PostgreSQL 18: $(echo "$MANUAL_OUT" | tail -2 | tr '\n' ' ')"
+    record "5.8" "FAIL" "the static binary could not migrate an external PostgreSQL 18 (exit $MANUAL_CODE): $(echo "$MANUAL_OUT" | tail -3 | tr '\n' ' ')"
   fi
 else
   record "5.8" "FAIL" "bin/hangar-linux-amd64 is absent — run 'make build-all' first"
 fi
+# ── THE DEFECT 5.8 UNCOVERED ────────────────────────────────────────────────
+# internal/config sets viper SetConfigName("hangar") + SetConfigType("yaml")
+# + AddConfigPath("."), so a file named exactly `hangar` in the working
+# directory is READ AS A YAML CONFIG FILE. In a manual deployment the file
+# with that name in that directory is the binary itself, and §9.2's layout
+# (/opt/hangar/hangar with WorkingDirectory=/opt/hangar) therefore boots into
+#
+#   Error: config: reading config file: While parsing config:
+#          yaml: control characters are not allowed
+#
+# which names neither the file nor the reason. Verified both ways: mounted as
+# /hangar with cwd / it fails; the same bytes mounted as /opt/hangar-bin
+# migrate successfully.
+log ""
+log "\$ /hangar migrate up   # the binary named 'hangar' in its own working directory"
+COLLIDE_OUT="$(MSYS_NO_PATHCONV=1 timeout 60 docker run --rm --network gate5-manual \
+  -v "${REPO_ROOT}/bin/hangar-linux-amd64:/hangar:ro" \
+  -e HANGAR_DB_URL="postgres://hangar:hangar@gate5-pg:5432/hangar?sslmode=disable" \
+  -e HANGAR_MASTER_KEY="$(head -c 32 /dev/urandom | base64)" \
+  -e HANGAR_SESSION_SECRET="$(head -c 32 /dev/urandom | base64)" \
+  -e HANGAR_SSO_CLIENT_ID=gate5 -e HANGAR_SSO_CLIENT_SECRET=gate5 \
+  debian:12-slim //hangar migrate up 2>&1 | tail -3)"
+echo "$COLLIDE_OUT" >> "$TRANSCRIPT"
+if echo "$COLLIDE_OUT" | grep -qi "parsing config\|control characters"; then
+  record "5.8-config-name-collision" "FAIL" "a binary named 'hangar' in its own working directory is parsed as a YAML config file, so §9.2's manual layout boots into an opaque parse error naming neither the file nor the reason"
+else
+  record "5.8-config-name-collision" "pass" "a binary named 'hangar' in its working directory is not mistaken for a config file"
+fi
+
 docker rm -f gate5-pg >/dev/null 2>&1
 docker network rm gate5-manual >/dev/null 2>&1
 

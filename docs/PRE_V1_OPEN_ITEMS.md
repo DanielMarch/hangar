@@ -282,6 +282,113 @@ whose job was to measure. Release-gate rule 6 (instrumentation, and by the same 
 subject of the measurement, lands in a phase earlier than the run) points the same way. It needs
 its own phase, its own exit criteria and its own tests.
 
+## 7. Found by running Gate 3 for the first time — the early warning arrives late *(not fixed)*
+
+`corporation.structure.fuel_low` and `corporation.contract.expiring` are delivered **at the
+deadline they warn about**, not when the threshold is crossed.
+
+The mechanism, end to end:
+
+1. `Evaluator.structureFuel` stamps `OccurredAt` as the **expiry**, deliberately and with a
+   comment: *"it is what the alert is about, and using it means a burst of structures expiring in
+   the same coalescing window rolls up into one message."* `expiringContracts` does the same with
+   `date_expired`.
+2. `Emitter.Emit` derives the coalescing bucket from `OccurredAt`.
+3. `CoalesceKey.Due(window)` is `bucket + window`, and that value is written to
+   `app.alert_delivery.next_attempt_at` — the moment the delivery becomes **claimable**.
+
+So a structure whose fuel runs out in 17 hours produces a delivery the dispatcher cannot pick up
+for 17 hours. Measured directly on a Gate 3 run: 336 deliveries `pending` with `attempts = 0` and
+`next_attempt_at` as far out as the following evening.
+
+The coalescing decision is sound — grouping structures that expire together is exactly right. What
+is wrong is that the same timestamp also became the delivery's **due time**, so an alert whose
+entire purpose is advance warning is scheduled to arrive at the moment it stops being actionable.
+`corporation.member.inactive` is unaffected and its code says why: it passes `now` explicitly,
+because "the moment somebody BECAME inactive is months in the past".
+
+Not fixed here (it is a change to `internal/alerting`, and therefore to the binary every gate in
+`docs/gate-evidence/v1.0.0-rc1` measured). The fix is to separate the two uses: keep the expiry as
+the coalescing bucket, and make the delivery due at `min(bucket + window, now + window)`.
+
+Gate 3's run seeds its threshold subjects with deadlines inside the run so the pipeline is
+exercised end to end, and reports this behaviour through its own condition
+(`3.1-scheduled-beyond-run`) rather than letting it be scored as a drop. A delivery that has not
+come due has not been lost, and §3 is about loss.
+
+---
+
+## 6. Found by running Gate 5 for the first time
+
+Three defects, none of which any test in the suite could have caught, because every test builds its
+own connection string and its own configuration. This is what §5 is for.
+
+### 6.1 — `install.sh` generated a database password that breaks the deployment *(fixed here)*
+
+`install.sh` generated `POSTGRES_PASSWORD` with `openssl rand -base64 32`, and
+`docker-compose.yml` interpolates that value straight into a URL:
+
+```
+HANGAR_DB_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/...
+```
+
+base64's alphabet contains `/`, which **terminates a URL's authority**. Measured:
+
+```
+migrate: connecting to database: cannot parse
+  `postgres://hangar:xxxxxx@postgres:5432/hangar?sslmode=disable`:
+  failed to parse as URL (invalid port ":ab" after host)
+```
+
+The `migrate` service exits 1 and the whole turnkey deployment fails at the third command. A
+43-character base64 string contains at least one `/` roughly half the time, so **about one
+installation in two failed** — non-deterministically, which is worse than always. Both installers
+now generate the database password as hex, which is URL-safe by construction; the two 32-byte
+base64 secrets are unchanged, because neither is ever placed in a URL.
+
+### 6.2 — the `HANGAR_PUBLIC_URL` / callback mismatch is not reported *(not fixed)*
+
+§5.3 requires: *"Wrong `HANGAR_PUBLIC_URL` → the SSO callback mismatch is reported as a
+configuration error with the expected value shown, not as an opaque OAuth failure."*
+
+`internal/config/validate.go` contains no such check, and nothing anywhere compares the two values.
+An operator who sets one and not the other learns about it when a user clicks "log in" and EVE SSO
+rejects the `redirect_uri` — precisely the opaque OAuth failure the condition forbids.
+
+Not fixed here for the same reason as §5 above: it is a change to `internal/config`, and therefore
+to the binary every gate in this directory measured. It is small (compare the two at validation
+time, print the expected callback) and belongs in the phase that can re-run the gates after it.
+
+### 6.3 — the binary parses a same-named file in its working directory as its config *(not fixed)*
+
+`internal/config.New` sets viper's `SetConfigName("hangar")`, `SetConfigType("yaml")` and
+`AddConfigPath(".")`. A file named exactly `hangar` — no extension — in the working directory is
+therefore **read as a YAML configuration file**. In a manual deployment (§9.2, and condition 5.8),
+the file with that name in that directory is *the binary itself*:
+
+```
+Error: config: reading config file: While parsing config: yaml: control characters are not allowed
+```
+
+which names neither the file nor the reason. Verified both directions: the same bytes mounted at
+`/hangar` with the working directory `/` fail, and mounted at `/opt/hangar-bin` migrate an external
+PostgreSQL 18 successfully. So the static binary is fine — what fails is the obvious layout,
+`/opt/hangar/hangar` with `WorkingDirectory=/opt/hangar`, which is what a systemd unit does.
+
+The fix is small (drop `SetConfigType`, or require the config file to carry its extension) but it
+is a change to `internal/config` and therefore to the binary this directory's evidence measures.
+
+### 6.4 — the three §5.1 inputs are unpublished
+
+`raw.githubusercontent.com/hangar-project/hangar/main/docker-compose.yml` → **404**.
+The installer URL → **404**. `ghcr.io/hangar-project/hangar` → **403**, no anonymous pull. The
+repository has no git remote at all.
+
+B-3 corrected the *path* inside the second URL; it could not make the repository exist. Gate 5 was
+therefore run against a substituted local origin, and condition 5.2's "the image is pulled from the
+public registry" is recorded as **not met**. Publishing is a release action, not a code change —
+but until it happens the documented three-command deployment cannot be performed by anybody.
+
 ---
 
 ## 4. Verdict

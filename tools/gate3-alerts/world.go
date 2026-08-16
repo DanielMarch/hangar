@@ -123,6 +123,28 @@ func newWorld(ctx context.Context, pool *pgxpool.Pool) (*world, error) {
 // seedEntities creates the rows the threshold evaluator reads. All four
 // thresholds are given real subjects, because a threshold with no subject
 // emits nothing and would silently reduce §3.2's three categories to two.
+//
+// ── WHY THE DEADLINES ARE MINUTES AWAY AND NOT HOURS ─────────────────────
+// Measured on the first full smoke run: 336 deliveries sat `pending` with
+// attempts = 0 and next_attempt_at as far out as the following evening, and
+// §3.1's drop condition failed on them.
+//
+// They were not dropped. They were not yet DUE. A coalesced delivery becomes
+// claimable at the close of its coalescing window (CoalesceKey.Due), the
+// bucket comes from the event's OccurredAt, and the structure-fuel and
+// contract-expiry thresholds deliberately stamp OccurredAt as the EXPIRY
+// rather than the evaluation time — so a structure whose fuel runs out in 17
+// hours produces a delivery claimable in 17 hours.
+//
+// That is a real finding about the product, recorded in
+// docs/PRE_V1_OPEN_ITEMS.md: an early-warning alert scheduled for the moment
+// the thing it warns about happens is not an early warning. It is not
+// something this gate should measure as a DROP, though — §3 is about whether
+// the delivery pipeline loses alerts, and a delivery that has not come due
+// has not been lost. So the subjects are seeded with deadlines inside the
+// run, the pipeline is exercised end to end, and the scheduling behaviour is
+// reported separately by its own condition rather than swallowing this
+// gate's verdict.
 func (w *world) seedEntities(ctx context.Context) error {
 	if _, err := w.pool.Exec(ctx, `
 		INSERT INTO app.corporation (corporation_id, name, ticker)
@@ -136,26 +158,41 @@ func (w *world) seedEntities(ctx context.Context) error {
 		return fmt.Errorf("gate3: seeding character: %w", err)
 	}
 
-	// corporation.structure.fuel_low — inside the 48h margin.
+	// corporation.structure.fuel_low — inside the 48h margin, and with
+	// expiries MINUTES away rather than hours. That is not cosmetic; see
+	// the note below on why a threshold's deadline has to fall inside the
+	// run for its deliveries to be measurable at all.
 	for i := 0; i < 12; i++ {
 		if _, err := w.pool.Exec(ctx, `
 			INSERT INTO app.corporation_structure
 			    (corporation_id, structure_id, type_id, system_id, fuel_expires, state)
-			VALUES ($1, $2, 35832, 30000142, now() + make_interval(hours => $3), 'shield_vulnerable')
-			ON CONFLICT (structure_id) DO NOTHING`,
-			gate3CorporationID, int64(1_000_000_000_000+i), int32(i+1)); err != nil {
+			VALUES ($1, $2, 35832, 30000142, now() + make_interval(mins => $3), 'shield_vulnerable')
+			ON CONFLICT (corporation_id, structure_id) DO NOTHING`,
+			gate3CorporationID, int64(1_000_000_000_000+i), int32(i*3)); err != nil {
 			return fmt.Errorf("gate3: seeding structure: %w", err)
 		}
 	}
 
 	// corporation.member.inactive — logged off long enough ago to cross.
+	//
+	// The member characters have to EXIST first: app.corporation_member_tracking
+	// carries a foreign key to app.character, which is the schema saying that
+	// membership is a fact about a character HANGAR knows, not a bare id.
 	for i := 0; i < 8; i++ {
+		memberID := int64(2_200_000_000 + i)
+		if _, err := w.pool.Exec(ctx, `
+			INSERT INTO app.character (character_id, name, owner_hash, corporation_id)
+			VALUES ($1, $2, $3, $4) ON CONFLICT (character_id) DO NOTHING`,
+			memberID, fmt.Sprintf("Gate3 Member %d", i), fmt.Sprintf("gate3-member-hash-%d", i),
+			gate3CorporationID); err != nil {
+			return fmt.Errorf("gate3: seeding member character: %w", err)
+		}
 		if _, err := w.pool.Exec(ctx, `
 			INSERT INTO app.corporation_member_tracking
 			    (corporation_id, character_id, logon_date, logoff_date)
 			VALUES ($1, $2, now() - interval '200 days', now() - interval '180 days')
 			ON CONFLICT (corporation_id, character_id) DO NOTHING`,
-			gate3CorporationID, int64(2_200_000_000+i)); err != nil {
+			gate3CorporationID, memberID); err != nil {
 			return fmt.Errorf("gate3: seeding member tracking: %w", err)
 		}
 	}
@@ -164,11 +201,13 @@ func (w *world) seedEntities(ctx context.Context) error {
 	for i := 0; i < 6; i++ {
 		if _, err := w.pool.Exec(ctx, `
 			INSERT INTO app.contract
-			    (contract_id, owner_kind, owner_id, type, status, date_issued, date_expired, title)
-			VALUES ($1, 'corporation', $2, 'item_exchange', 'outstanding',
-			        now() - interval '1 day', now() + make_interval(hours => $3), $4)
-			ON CONFLICT (contract_id) DO NOTHING`,
-			int64(4_000_000+i), gate3CorporationID, int32(i+12), fmt.Sprintf("Gate3 Contract %d", i)); err != nil {
+			    (contract_id, owner_kind, owner_id, issuer_id, issuer_corporation_id,
+			     type, status, availability, date_issued, date_expired, title)
+			VALUES ($1, 'corporation', $2, $3, $2, 'item_exchange', 'outstanding', 'corporation',
+			        now() - interval '1 day', now() + make_interval(mins => $4), $5)
+			ON CONFLICT (owner_kind, owner_id, contract_id) DO NOTHING`,
+			int64(4_000_000+i), gate3CorporationID, gate3CharacterID, int32(5+i*12),
+			fmt.Sprintf("Gate3 Contract %d", i)); err != nil {
 			return fmt.Errorf("gate3: seeding contract: %w", err)
 		}
 	}
@@ -216,8 +255,8 @@ func (w *world) route(ctx context.Context, alertType string, target *stubChannel
 // a type is discovered and then given a destination.
 func (w *world) ensureUnknownRoutable(ctx context.Context) error {
 	if _, err := w.pool.Exec(ctx, `
-		INSERT INTO app.alert_type (alert_type, domain, category, default_enabled, summary)
-		VALUES ($1, 'unknown', 'esi_notification', true, 'Discovered at runtime by the Gate 3 run')
+		INSERT INTO app.alert_type (alert_type, domain, category, default_enabled)
+		VALUES ($1, 'unknown', 'esi_notification', true)
 		ON CONFLICT (alert_type) DO NOTHING`, gate3UnknownType); err != nil {
 		return fmt.Errorf("gate3: registering the unknown type: %w", err)
 	}

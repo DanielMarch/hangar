@@ -1,0 +1,209 @@
+Gate 5 — Deployment Usability
+release:   v1.0.0-rc1
+started:   2026-08-16T01:02:35Z
+workdir:   /tmp/tmp.279MfAaPsv   (empty — no repository clone, no Go toolchain, no Node)
+docker:    Docker version 29.6.2, build dfc4efb
+compose:   5.3.1
+
+── substituted origin (see this script's header) ───────────────────────
+  https://raw.githubusercontent.com/hangar-project/hangar/main/docker-compose.yml -> 404
+  https://raw.githubusercontent.com/hangar-project/hangar/main/deploy/install.sh -> 404
+
+image under test: ghcr.io/hangar-project/hangar:latest 41fe04cf3635 41 minutes ago
+
+── command 1 of 3 ──────────────────────────────────────────────────────
+$ curl -fsSLO http://127.0.0.1:8198/docker-compose.yml
+
+── command 2 of 3 ──────────────────────────────────────────────────────
+install.sh: fetching .env.example...
+
+install.sh: wrote .env with generated HANGAR_MASTER_KEY, HANGAR_SESSION_SECRET
+            and POSTGRES_PASSWORD.
+
+Before running 'docker compose up -d', register an application at
+https://developers.eveonline.com/applications and set in .env:
+  HANGAR_SSO_CLIENT_ID=...
+  HANGAR_SSO_CLIENT_SECRET=...
+The callback URL must be exactly ${HANGAR_PUBLIC_URL}/auth/callback.
+
+── §5.3 failure modes ──────────────────────────────────────────────────
+$ docker run --rm ghcr.io/hangar-project/hangar:latest serve   # with no configuration at all
+Error: config: invalid configuration: HANGAR_DB_URL: required value is not set
+HANGAR_MASTER_KEY: required value is not set
+HANGAR_SESSION_SECRET: required value is not set
+HANGAR_SSO_CLIENT_ID: required value is not set
+HANGAR_SSO_CLIENT_SECRET: required value is not set
+config: invalid configuration: HANGAR_DB_URL: required value is not set
+HANGAR_MASTER_KEY: required value is not set
+HANGAR_SESSION_SECRET: required value is not set
+HANGAR_SSO_CLIENT_ID: required value is not set
+HANGAR_SSO_CLIENT_SECRET: required value is not set
+[pass] 5.3-blank-env — aborts naming the missing variables, no stack trace
+
+$ hangar serve   # HANGAR_PUBLIC_URL and HANGAR_SSO_CALLBACK_URL disagreeing
+{"time":"2026-08-16T01:02:41.415345783Z","level":"INFO","msg":"hangar serve: starting","version":"v1.0.0-rc1","commit":"3ac0014"}
+{"time":"2026-08-16T01:02:41.423387578Z","level":"WARN","msg":"hangar: could not verify the schema against the migrations","error":"db: listing existing tables: failed to connect to `user=x database=z`: 127.0.0.1:5432 (127.0.0.1): dial error: dial tcp 127.0.0.1:5432: connect: connection refused"}
+{"time":"2026-08-16T01:02:41.423919163Z","level":"INFO","msg":"hangar: metrics listening","addr":"0.0.0.0:9090"}
+{"time":"2026-08-16T01:02:41.423984061Z","level":"WARN","msg":"hangar: could not read the SDE state","error":"failed to connect to `user=x database=z`: 127.0.0.1:5432 (127.0.0.1): dial error: dial tcp 127.0.0.1:5432: connect: connection refused"}
+{"time":"2026-08-16T01:02:41.423880974Z","level":"WARN","msg":"replica heartbeat: upsert failed","component":"telemetry.replica_heartbeat","role":"serve","error":"failed to connect to `user=x database=z`: 127.0.0.1:5432 (127.0.0.1): dial error: dial tcp 127.0.0.1:5432: connect: connection refused"}
+{"time":"2026-08-16T01:02:41.42396768Z","level":"ERROR","msg":"hangar: esi catalogue ingest failed at startup — the route catalogue may be empty or stale; run 'hangar admin ingest-catalogue' once ESI is reachable","error":"catalogue: reading esi.compatibility_pin: failed to connect to `user=x database=z`: 127.0.0.1:5432 (127.0.0.1): dial error: dial tcp 127.0.0.1:5432: connect: connection refused"}
+{"time":"2026-08-16T01:02:41.432516545Z","level":"WARN","msg":"acquiring leadership failed","component":"sync.planner","error":"planner: dedicated leader connection: failed to connect to `user=x database=z`: 127.0.0.1:5432 (127.0.0.1): dial error: dial tcp 127.0.0.1:5432: connect: connection refused"}
+{"time":"2026-08-16T01:02:41.432790135Z","level":"ERROR","msg":"housekeeping: sweep failed","error":"housekeeping: deleting expired sessions: failed to connect to `user=x database=z`: 127.0.0.1:5432 (127.0.0.1): dial error: dial tcp 127.0.0.1:5432: connect: connection refused","sessions_deleted":0,"cache_entries_deleted":0,"replicas_deleted":0}
+{"time":"2026-08-16T01:02:41.56097806Z","level":"ERROR","msg":"sync: subscription reconciliation failed — newly authorised characters and newly catalogued routes will not be scheduled until this succeeds; run 'hangar admin sync reconcile' to see the error directly","error":"subscribe: listing characters with valid tokens: failed to connect to `user=x database=z`: 127.0.0.1:5432 (127.0.0.1): dial error: dial tcp 127.0.0.1:5432: connect: connection refused"}
+{"time":"2026-08-16T01:02:41.567923847Z","level":"INFO","msg":"hangar serve: listening","addr":"0.0.0.0:8080"}
+{"time":"2026-08-16T01:02:46.436078068Z","level":"WARN","msg":"acquiring leadership failed","component":"sync.planner","error":"planner: dedicated leader connection: failed to connect to `user=x database=z`: 127.0.0.1:5432 (127.0.0.1): dial error: dial tcp 127.0.0.1:5432: connect: connection refused"}
+{"time":"2026-08-16T01:02:51.424812958Z","level":"WARN","msg":"replica heartbeat: upsert failed","component":"telemetry.replica_heartbeat","role":"serve","error":"failed to connect to `user=x database=z`: 127.0.0.1:5432 (127.0.0.1): dial error: dial tcp 127.0.0.1:5432: connect: connection refused"}
+{"time":"2026-08-16T01:02:51.437213557Z","level":"WARN","msg":"acquiring leadership failed","component":"sync.planner","error":"planner: dedicated leader connection: failed to connect to `user=x database=z`: 127.0.0.1:5432 (127.0.0.1): dial error: dial tcp 127.0.0.1:5432: connect: connection refused"}
+{"time":"2026-08-16T01:02:56.428805541Z","level":"ERROR","msg":"events: webhook dispatch tick failed","error":"failed to connect to `user=x database=z`: 127.0.0.1:5432 (127.0.0.1): dial error: dial tcp 127.0.0.1:5432: connect: connection refused"}
+{"time":"2026-08-16T01:02:56.438281958Z","level":"WARN","msg":"acquiring leadership failed","component":"sync.planner","error":"planner: dedicated leader connection: failed to connect to `user=x database=z`: 127.0.0.1:5432 (127.0.0.1): dial error: dial tcp 127.0.0.1:5432: connect: connection refused"}
+{"time":"2026-08-16T01:03:01.427416197Z","level":"WARN","msg":"replica heartbeat: upsert failed","component":"telemetry.replica_heartbeat","role":"serve","error":"failed to connect to `user=x database=z`: 127.0.0.1:5432 (127.0.0.1): dial error: dial tcp 127.0.0.1:5432: connect: connection refused"}
+{"time":"2026-08-16T01:03:01.437746657Z","level":"WARN","msg":"acquiring leadership failed","component":"sync.planner","error":"planner: dedicated leader connection: failed to connect to `user=x database=z`: 127.0.0.1:5432 (127.0.0.1): dial error: dial tcp 127.0.0.1:5432: connect: connection refused"}
+[FAIL] 5.3-callback-mismatch — a public-url/callback mismatch is NOT reported at boot: {"time":"2026-08-16T01:02:41.415345783Z","level":"INFO","msg":"hangar serve: starting","version":"v1.0.0-rc1","commit":"3ac0014"} {"time":"2026-08-16T01:02:41.423387578Z","level":"WARN","msg":"hangar: could not verify the schema against the migrations","error":"db: listing existing tables: failed to connect to `user=x database=z`: 127.0.0.1:5432 (127.0.0.1): dial error: dial tcp 127.0.0.1:5432: connect: connection refused"} 
+[pass] 5.3-postgres-not-ready — the migrate service depends_on postgres with condition: service_healthy
+
+── command 3 of 3 ──────────────────────────────────────────────────────
+$ docker compose -p hangar-gate5 up -d
+ Network hangar Creating 
+ Network hangar Created 
+ Volume hangar-postgres-data Creating 
+ Volume hangar-postgres-data Created 
+ Container hangar-postgres Creating 
+ Container hangar-postgres Created 
+ Container hangar-migrate Creating 
+ Container hangar-migrate Created 
+ Container hangar Creating 
+ Container hangar Created 
+ Container hangar-postgres Starting 
+ Container hangar-postgres Started 
+ Container hangar-postgres Waiting 
+ Container hangar-postgres Healthy 
+ Container hangar-migrate Starting 
+ Container hangar-migrate Started 
+ Container hangar-migrate Waiting 
+ Container hangar-postgres Waiting 
+ Container hangar-postgres Healthy 
+ Container hangar-migrate Exited 
+ Container hangar Starting 
+ Container hangar Started 
+
+── §5.2 pass conditions ────────────────────────────────────────────────
+[pass] 5.1 — exactly three commands, no editor step (the two SSO values are prompted for by install.sh)
+[SUBSTITUTED] 5.2 — no build: key and no compilation, but the image is NOT pulled from a public registry: ghcr.io/hangar-project/hangar returns 403 and the repository is unpublished. Verified against a locally built image of the same commit
+[pass] 5.4 — /healthz and /readyz both 200 after 9s (budget 300s); migrations ran from the one-shot migrate service
+default-profile services: hangar migrate postgres 
+[pass] 5.5 — services are exactly: hangar migrate postgres  (no redis)
+[pass] 5.6 — the SPA is served by the binary itself on the same port as the API
+[pass] first-boot-alerts — 54 alert types with 4 thresholds on the FIRST boot
+healthcheck: 
+
+── §5.2 condition 5.7: re-run after a version bump ─────────────────────
+INSERT 0 1
+$ docker compose -p hangar-gate5 up -d
+ Container hangar-postgres Running 
+ Container hangar-migrate Recreate 
+ Container hangar-migrate Recreated 
+ Container hangar Recreate 
+ Container hangar Recreated 
+ Container hangar-postgres Waiting 
+ Container hangar-postgres Healthy 
+ Container hangar-migrate Starting 
+ Container hangar-migrate Started 
+ Container hangar-postgres Waiting 
+ Container hangar-migrate Waiting 
+ Container hangar-migrate Exited 
+ Container hangar-postgres Healthy 
+ Container hangar Starting 
+ Container hangar Started 
+[pass] 5.7 — after a version bump and a second 'docker compose up -d', migrations re-ran and the seeded row survived
+
+── §5.2 condition 5.8: manual deployment, external PostgreSQL 18 ───────
+The static linux/amd64 binary, its .env, and an external PostgreSQL 18 —
+no compose, no image, nothing from the repository but the binary.
+$ docker network create gate5-manual
+e53a58ae5a32b561dbde74efefd4f6f602b4f4da5a2cb7e2f543f30b54bda0f4
+$ docker run -d --name gate5-pg --network gate5-manual -e POSTGRES_USER=hangar -e POSTGRES_PASSWORD=hangar -e POSTGRES_DB=hangar postgres:18-alpine
+0fd0c51a24bb66730b1c2fceb6f7dbbedc16b5bc2d3adaae3fb9cb99166ba9c6
+migrate up: river schema current
+2026/08/16 01:04:04 OK   00001_schemas.sql (3.23ms)
+2026/08/16 01:04:04 OK   00002_platform_vocabulary.sql (10.13ms)
+2026/08/16 01:04:04 OK   00003_platform_reference.sql (23.17ms)
+2026/08/16 01:04:05 OK   00004_platform_identity.sql (58.11ms)
+2026/08/16 01:04:05 OK   00005_platform_rbac.sql (53.92ms)
+2026/08/16 01:04:05 OK   00006_platform_esi_gateway.sql (52.68ms)
+2026/08/16 01:04:05 OK   00007_platform_provisioning.sql (30.94ms)
+2026/08/16 01:04:05 OK   00008_platform_alerting.sql (33.5ms)
+2026/08/16 01:04:05 OK   00009_platform_events.sql (18.57ms)
+2026/08/16 01:04:05 OK   00010_domain_corporation_structure.sql (70.93ms)
+2026/08/16 01:04:05 OK   00011_domain_corporation_projects.sql (12.78ms)
+2026/08/16 01:04:05 OK   00012_domain_history.sql (12.08ms)
+2026/08/16 01:04:05 OK   00013_domain_assets.sql (12.95ms)
+2026/08/16 01:04:05 OK   00014_domain_wallets.sql (25.9ms)
+2026/08/16 01:04:05 OK   00015_domain_contracts.sql (18.35ms)
+2026/08/16 01:04:05 OK   00016_domain_industry_mining.sql (25.77ms)
+2026/08/16 01:04:05 OK   00017_domain_market.sql (22.55ms)
+2026/08/16 01:04:05 OK   00018_domain_killmails.sql (23.69ms)
+2026/08/16 01:04:05 OK   00019_domain_social.sql (20.72ms)
+2026/08/16 01:04:05 OK   00020_domain_character_sheet.sql (40.22ms)
+2026/08/16 01:04:05 OK   00021_domain_fittings.sql (10.19ms)
+2026/08/16 01:04:05 OK   00022_domain_mail.sql (21.41ms)
+2026/08/16 01:04:05 OK   00023_domain_notifications.sql (14.61ms)
+2026/08/16 01:04:05 OK   00024_domain_calendar.sql (14.56ms)
+2026/08/16 01:04:05 OK   00025_domain_planetary.sql (10.62ms)
+2026/08/16 01:04:05 OK   00026_domain_sovereignty.sql (30.69ms)
+2026/08/16 01:04:05 OK   00027_domain_tools.sql (15.29ms)
+2026/08/16 01:04:05 OK   00028_domain_intel.sql (8.12ms)
+2026/08/16 01:04:05 OK   00029_domain_fixups.sql (4.31ms)
+2026/08/16 01:04:05 OK   00030_phase7_character_fixups.sql (30.61ms)
+2026/08/16 01:04:05 OK   00031_phase8_acting_character_history.sql (7.14ms)
+2026/08/16 01:04:05 OK   00032_phase8_mining_extraction_structure_id.sql (3.87ms)
+2026/08/16 01:04:05 OK   00033_phase8_1_skyhook_reagent_fixup.sql (6.71ms)
+2026/08/16 01:04:05 OK   00034_phase9_market_issued_by.sql (3.23ms)
+2026/08/16 01:04:05 OK   00035_phase9_notification_payload.sql (5.6ms)
+2026/08/16 01:04:05 OK   00036_phase9_sde_core_tables.sql (78.73ms)
+2026/08/16 01:04:05 OK   00037_phase11_entitlement_source_fixup.sql (2.67ms)
+2026/08/16 01:04:05 OK   00038_phase12_discord_invalid_budget.sql (4.8ms)
+2026/08/16 01:04:05 OK   00039_phase13_teamspeak_challenge.sql (7.81ms)
+2026/08/16 01:04:05 OK   00040_phase15_1_defect_closure.sql (6.13ms)
+2026/08/16 01:04:05 OK   00041_phase19_outbox_dispatch.sql (7.41ms)
+2026/08/16 01:04:05 OK   00042_phase20_4_ledger_divergence_pair.sql (3.6ms)
+2026/08/16 01:04:05 OK   00043_phase20_4_1_reconcile_residual.sql (2.94ms)
+2026/08/16 01:04:05 OK   00044_phase20_5_webhook_secret_rotation.sql (4.83ms)
+2026/08/16 01:04:05 OK   00045_phase20_6_keyset_covering_indexes.sql (13.61ms)
+2026/08/16 01:04:05 OK   00046_phase20_9_character_skill_summary.sql (5.95ms)
+2026/08/16 01:04:05 goose: successfully migrated database to version: 46
+migrate up: app/sde schema current (verified against the migrations, not just goose's log)
+migrate up: seed data applied
+migrate up: 50 alert types seeded, and 4 THRESHOLD types are DEFERRED.
+migrate up:   corporation.structure.fuel_low, corporation.starbase.fuel_low,
+migrate up:   corporation.member.inactive, corporation.contract.expiring
+migrate up: each declares an ESI source route, and app.esi_route is empty until the
+migrate up: catalogue is ingested. They complete automatically on the first ingest —
+migrate up: `serve` does one at startup, or run `hangar admin ingest-catalogue`.
+migrate up: Until then no routing rule can be created for them and they cannot fire.
+[PARTIAL] 5.8 — the static binary ran on a bare debian:12-slim with no toolchain and migrated an external PostgreSQL 18. systemd itself was NOT exercised — this host is Windows and has no systemd; the unit file is deploy/ material and remains unverified
+
+$ /hangar migrate up   # the binary named 'hangar' in its own working directory
+Error: config: reading config file: While parsing config: yaml: control characters are not allowed
+config: reading config file: While parsing config: yaml: control characters are not allowed
+[FAIL] 5.8-config-name-collision — a binary named 'hangar' in its own working directory is parsed as a YAML config file, so §9.2's manual layout boots into an opaque parse error naming neither the file nor the reason
+
+finished:  2026-08-16T01:04:08Z
+transcript: /c/HANGAR/docs/gate-evidence/v1.0.0-rc1/gate5/transcript.txt
+
+── teardown ────────────────────────────────────────────────────────────
+ Container hangar Stopping 
+ Container hangar Stopped 
+ Container hangar Removing 
+ Container hangar Removed 
+ Container hangar-migrate Stopping 
+ Container hangar-migrate Stopped 
+ Container hangar-migrate Removing 
+ Container hangar-migrate Removed 
+ Container hangar-postgres Stopping 
+ Container hangar-postgres Stopped 
+ Container hangar-postgres Removing 
+ Container hangar-postgres Removed 
+ Volume hangar-postgres-data Removing 
+ Network hangar Removing 
+ Volume hangar-postgres-data Removed 
+ Network hangar Removed 

@@ -66,17 +66,37 @@ number that decided it. That is the intended outcome of a gate that does not pas
 the phase that produced this directory both take the view that a recorded failure is worth more
 than an unrun gate, and considerably more than a gate quietly skipped.
 
-## One note on the tag and Gate 2
+## One note on the tag: the runners were fixed while the gates ran
 
-Gate 2 was run at commit `3ac0014`; the `v1.0.0-rc1` tag was subsequently moved forward to pick up
-harness fixes for Gates 1 and 3. **The release-candidate build is identical across that move** —
-every change between the two commits is under `tools/` (the gate runners), `docs/`, or a `_test.go`
-file, and none of them is compiled into `cmd/hangar`. The check is mechanical:
+Running these gates for the first time found defects **in the runners** as well as in the product,
+and each fix moved the `v1.0.0-rc1` tag forward. Some evidence here was therefore produced at an
+earlier commit than the tag now points at.
+
+**The release-candidate build is identical across every one of those moves.** Each is confined to
+`tools/` (the gate runners), `docs/`, or a `_test.go` file — none is compiled into `cmd/hangar`.
+That is checkable rather than asserted:
 
 ```bash
-git diff --name-only 3ac0014 v1.0.0-rc1 | grep -vE '^tools/|^docs/|_test\.go$'
+git diff --name-only <earlier-commit> v1.0.0-rc1 | grep -vE '^tools/|^docs/|_test\.go$'
 ```
 
-which returns nothing. Gates 4, 6 and 7 were re-run at the final tag because they are cheap;
-re-running Gate 2's hour to observe the same binary produce the same number was not a good use of
-the machine, and saying so is better than implying it ran later than it did.
+returns nothing for each. The cheap gates (4, 6, 7) were re-run at the final tag; Gate 2's hour was
+not spent again to watch the same binary produce the same number. Saying so is better than implying
+everything ran at the final commit.
+
+The runner defects are worth listing, because each would have produced a wrong verdict rather than
+an error:
+
+* Gates 1 and 6 answered `/meta/compatibility-dates` with a bare array where the catalogue decodes
+  an object — so the ingest silently fell back to the embedded snapshot, and **Gate 6 spent its
+  first run asserting the four synthetic outcomes against the real spec** and reporting four
+  failures that said nothing about drift resilience.
+* Gate 2 saturated the bulk queue against the same platforms it measured, so the bulk pass revoked
+  everything first and the urgent path — the one §2.2 measures — had nothing left to do.
+* Gate 1's condition 1.4 could not pass at any duration, because the harness's default adversarial
+  schedule produces ~20 errors against a budget of 100 per 60-second window.
+* Gate 3's notification generator advanced through the catalogue too slowly to reach two of the
+  eight domains inside a short run, so "all eight domains" depended on run length.
+* Gate 5 checked its first-boot alert counts nine seconds after `/healthz` went green, before the
+  background catalogue ingest had landed, and read 50/0 — which looks exactly like defect B41 and
+  was not.

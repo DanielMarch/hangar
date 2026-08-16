@@ -57,10 +57,18 @@ func generate(
 		batch++
 
 		// ── category 1: CCP notifications through the real sync handler ────
+		//
+		// EVERY notification type, every batch. The first version took a
+		// sliding window of 24 consecutive types advancing by one per batch,
+		// which covers the catalogue eventually but not soon: after ten
+		// batches it had touched types 1..35 of 49 and the run reported "7 of
+		// 8 domains", missing sovereignty and alliances entirely — they sit at
+		// the end of catalogue order. Whether §3's "all eight domains" clause
+		// was satisfied then depended on how long the run happened to be,
+		// which is not a property a gate should have.
 		var notifications []handlers.CharacterNotificationDTO
-		for i := 0; i < 24; i++ {
+		for i, alertType := range w.notificationTypes {
 			notificationID++
-			alertType := w.notificationTypes[(batch+i)%len(w.notificationTypes)]
 			notifications = append(notifications, handlers.CharacterNotificationDTO{
 				NotificationID: notificationID, SenderID: 1, SenderType: "corporation",
 				Type: alertType, Timestamp: time.Now(),

@@ -39,11 +39,44 @@ fi
 
 random_key() {
   # 32 raw bytes, base64-encoded — the format internal/config/validate.go
-  # requires for HANGAR_MASTER_KEY and HANGAR_SESSION_SECRET.
+  # requires for HANGAR_MASTER_KEY and HANGAR_SESSION_SECRET. These two are
+  # read as base64 and are never placed in a URL.
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -base64 32
   else
     head -c 32 /dev/urandom | base64
+  fi
+}
+
+# ── THE DATABASE PASSWORD IS NOT BASE64, AND THAT IS THE POINT ─────────────
+# It goes into a URL. docker-compose.yml interpolates POSTGRES_PASSWORD into
+#
+#     HANGAR_DB_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/...
+#
+# and base64's alphabet includes `/`, `+` and `=`. A `/` TERMINATES THE
+# AUTHORITY of a URL, so a generated password containing one produced:
+#
+#     migrate: connecting to database: cannot parse
+#       `postgres://hangar:xxxxxx@postgres:5432/hangar?sslmode=disable`:
+#       failed to parse as URL (invalid port ":ab" after host)
+#
+# and the `migrate` service exited 1, taking the whole turnkey deployment
+# with it. A 43-character base64 string contains at least one `/` about half
+# the time, so roughly one installation in two failed at the third command —
+# non-deterministically, which is worse than always.
+#
+# Found by RUNNING Gate 5 for the first time (Phase 21). It is exactly the
+# class of defect §5 exists to catch and could not have been caught any other
+# way: every test in the suite builds its own connection string.
+#
+# hex is URL-safe by construction. 24 bytes is 192 bits of entropy, which is
+# not the constraint here — the constraint is that the password survives
+# being pasted into a URL, an .env file and a shell.
+random_db_password() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 24
+  else
+    head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n'
   fi
 }
 
@@ -59,7 +92,7 @@ fi
 
 MASTER_KEY="$(random_key)"
 SESSION_SECRET="$(random_key)"
-POSTGRES_PASSWORD="$(random_key)"
+POSTGRES_PASSWORD="$(random_db_password)"
 
 # Fill in the generated secrets; leave the two SSO values for the operator —
 # per SRS §9.1, that is the ONLY input a novice administrator should have to
