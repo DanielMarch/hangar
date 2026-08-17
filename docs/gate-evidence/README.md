@@ -102,7 +102,41 @@ table smaller. The instinct was right and had been applied too narrowly.
 per run and needed no change. If you add a gate, make it start from a known state, and then run it
 twice and diff the verdicts.
 
-## One note on the tag: the runners were fixed while the gates ran
+## Where `v1.0.0-rc2` points, and the one commit after it
+
+`v1.0.0-rc2` is `e1d668c`. Exactly one commit follows it, and it contains exactly two files:
+
+```
+$ git log --oneline v1.0.0-rc2..HEAD
+6d37c6d test(gate6): re-run at the final tag, so §6.2's proof holds where the release points
+
+$ git diff --name-only v1.0.0-rc2 HEAD
+docs/gate-evidence/v1.0.0-rc2/gate6/SUMMARY.md
+docs/gate-evidence/v1.0.0-rc2/gate6/zero-code-changes.json
+```
+
+That is unavoidable rather than untidy, and it is worth stating so nobody has to work it out
+twice. §6.2 requires a clean tree at the tag; Gate 6 checks that **before** writing its own
+artefacts, so the check at `e1d668c` was valid — but committing the artefacts it then produces
+necessarily moves HEAD past the tag. Tagging the later commit would only move the problem, since
+re-running Gate 6 there would produce another commit.
+
+So the tag names the commit whose tree Gate 6 verified clean, and the only thing after it is Gate
+6's own evidence for that verification.
+
+Gate 1's and Gate 3's runners were also fixed after the first Gate 6 run of this release (the
+database resets, and gate3's default split). The binary is unchanged across all of them, and that
+is checkable rather than asserted:
+
+```bash
+git diff --name-only bf1d136 v1.0.0-rc2 | grep -vE '^tools/|^docs/'
+```
+
+returns nothing. Nothing under `tools/` or `docs/` is compiled into `cmd/hangar`. The image was
+rebuilt `--no-cache` at the final commit regardless, and reports
+`hangar version v1.0.0-rc2 (commit e1d668c)`.
+
+## One note on the rc1 tag: the runners were fixed while the gates ran
 
 Running these gates for the first time found defects **in the runners** as well as in the product,
 and each fix moved the `v1.0.0-rc1` tag forward. Some evidence here was therefore produced at an
