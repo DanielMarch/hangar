@@ -1,0 +1,50 @@
+[
+  {
+    "id": "3.1-sample",
+    "description": "the run actually generated alerts — \"zero dropped\" is meaningless over an empty pipeline",
+    "passed": true,
+    "measurement": "15120 occurrences offered (minimum 1000), 2520 events in the database"
+  },
+  {
+    "id": "3.1-categories",
+    "description": "all three §4.4 alert categories were exercised (esi_notification, domain_event, threshold)",
+    "passed": false,
+    "measurement": "1 distinct categories, 1 distinct domains (minimum 3 categories)"
+  },
+  {
+    "id": "3.1-occurrences",
+    "description": "offered == events_written + suppressed_by_dedupe",
+    "passed": true,
+    "measurement": "15120 offered, 2520 written + 12600 deduplicated = 15120"
+  },
+  {
+    "id": "3.1-events-persisted",
+    "description": "every event the emitter reported writing is in the database",
+    "passed": true,
+    "measurement": "emitter reported 2520 events written, database holds 2520"
+  },
+  {
+    "id": "3.1",
+    "description": "enqueued == messages_sent + coalesced_into + dead_lettered + pending (the §3.1 accounting identity)",
+    "passed": true,
+    "measurement": "5040 enqueued = 0 messages + 0 coalesced + 5040 dead-lettered + 0 pending + 0 failed"
+  },
+  {
+    "id": "3.1-dropped",
+    "description": "no delivery is left neither sent nor dead-lettered at end of run — §3.1's definition of a drop",
+    "passed": true,
+    "measurement": "0 still pending, 0 in the unreachable 'failed' state"
+  },
+  {
+    "id": "3.1-actionable",
+    "description": "every generated event has at least one delivery — an event with none can never be acted on",
+    "passed": true,
+    "measurement": "0 of 2520 events have no delivery row"
+  },
+  {
+    "id": "3.2",
+    "description": "unrecognised CCP notification types reached the unknown-types board",
+    "passed": true,
+    "measurement": "42 unknown types boarded during the run"
+  }
+]

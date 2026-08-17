@@ -60,6 +60,9 @@ type world struct {
 func newWorld(ctx context.Context, pool *pgxpool.Pool) (*world, error) {
 	w := &world{pool: pool, store: store.New(pool), byID: map[uuid.UUID]*stubChannel{}}
 
+	if err := w.reset(ctx); err != nil {
+		return nil, err
+	}
 	if err := w.seedEntities(ctx); err != nil {
 		return nil, err
 	}
@@ -118,6 +121,62 @@ func newWorld(ctx context.Context, pool *pgxpool.Pool) (*world, error) {
 		return nil, fmt.Errorf("gate3: the catalogue produced no notification or domain-event types to generate")
 	}
 	return w, nil
+}
+
+// ── PHASE 22: THE RUN STARTS FROM A KNOWN STATE ──────────────────────────
+//
+// It did not before, and the second Gate 3 run ever performed failed four
+// conditions because of it. What that run actually measured, against a
+// database still holding v1.0.0-rc1's:
+//
+//	3.1-categories  FAIL  1 distinct category, 1 distinct domain
+//	3-domains       FAIL  1 of 8 domains produced events
+//	3.7             FAIL  5040 dead-lettered, 0 messages sent
+//	3.4             FAIL  largest roll-up carried 0 events
+//
+// and 12,600 of 15,120 offered occurrences were DEDUPLICATED — against
+// alert_event rows the previous run had written. app.alert_event's
+// dedupe_hash is a permanent uniqueness constraint, deliberately and
+// correctly (§4.4: re-reading the same notification on the next poll is the
+// common case, not an error), so a generator that produces deterministic
+// content produces nothing at all the second time. Only the threshold
+// category still fired, it routes round-robin to ONE channel, that channel
+// was the permanently-failing stub, and every downstream condition followed.
+//
+// The stale rows also silently defeated the seeding below. seedEntities uses
+// ON CONFLICT DO NOTHING, so the structures kept the previous run's
+// fuel_expires — minutes out when they were written, two days EXPIRED by the
+// time this run read them. Condition 3.1-scheduled-beyond-run therefore
+// passed on deadlines in the past, which is exactly the case where the B-9
+// cap it exists to test cannot engage. It reported a pass and measured
+// nothing.
+//
+// So: not a defect in the product, and not a tuning question. A gate whose
+// verdict depends on whether it has been run before is not evidence, and it
+// is the runner's job to say what state it starts in. This is the same
+// discipline tools/gate1-load already applies when it clears
+// app.esi_replica, and for the same reason.
+//
+// TRUNCATE ... CASCADE rather than a hand-ordered list of DELETEs: the
+// cascade follows the foreign keys itself, so this does not rot into the
+// wrong order as the schema grows. The database name is already required to
+// contain "gate" (tools/gaterun.GuardDatabase), which is what makes this
+// safe to do at all.
+func (w *world) reset(ctx context.Context) error {
+	if _, err := w.pool.Exec(ctx, `
+		TRUNCATE TABLE
+		    app.alert_delivery,
+		    app.alert_event,
+		    app.alert_routing_rule,
+		    app.alert_channel,
+		    app.notification_unknown_type,
+		    app.corporation_structure,
+		    app.corporation_member_tracking,
+		    app.contract
+		RESTART IDENTITY CASCADE`); err != nil {
+		return fmt.Errorf("gate3: resetting the gate database: %w", err)
+	}
+	return nil
 }
 
 // seedEntities creates the rows the threshold evaluator reads. All four

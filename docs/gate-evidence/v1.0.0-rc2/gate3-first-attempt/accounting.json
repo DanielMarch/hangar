@@ -1,0 +1,25 @@
+{
+  "generated": {
+    "offered": 15120,
+    "events_written": 2520,
+    "suppressed_by_dedupe": 12600,
+    "deliveries_enqueued": 0
+  },
+  "metric_cross_check": {
+    "dead_lettered": 5040
+  },
+  "observed": {
+    "events": 2520,
+    "events_without_delivery": 0,
+    "deliveries": 5040,
+    "messages_sent": 0,
+    "coalesced_into": 0,
+    "dead_lettered": 5040,
+    "pending": 0,
+    "failed": 0,
+    "categories": 1,
+    "domains": 1,
+    "unknown_types_boarded": 42
+  },
+  "settled_before_end_of_run": true
+}
