@@ -154,6 +154,61 @@ func run() error {
 	}
 	defer pool.Close()
 
+	// ── A RUN INHERITS NOTHING FROM THE LAST ONE ─────────────────────────
+	//
+	// app.esi_replica was cleared here from the start, because mode selection
+	// counts rows in it and the corpses of a previous run are the difference
+	// between solo and clustered at N=1. Phase 22 found that the same
+	// argument applies to considerably more, after Gate 3 failed four
+	// conditions for exactly this reason and its runner gained a reset.
+	//
+	// Measured on this host before that fix, in hangar_gate1, left by
+	// v1.0.0-rc1's four-hour N=1 run:
+	//
+	//	app.esi_error_budget   paused = t, error_count = 80, window 19h old
+	//	public.river_job       1,324,000 completed rows
+	//	app.sync_run           1,331,246 rows
+	//
+	// A run starting from that is not the run the gate describes. The budget
+	// row alone would have had the installation begin PAUSED — the precise
+	// state defect B-5 leaves behind — so condition 1.4's "a pause fired at
+	// the configured threshold" could have been satisfied by a pause that
+	// fired four hours before the run began, in a different process, against
+	// a different binary. And 1.3M leftover rows in the two hottest tables
+	// change what is being measured even when they change no verdict.
+	//
+	// What is deliberately NOT reset: app.character, app.character_token and
+	// app.character_token_scope. Seeding 5,000 characters means sealing 5,000
+	// refresh tokens against the real keyring, which is slow, and none of the
+	// three carries per-run state — seedCharacter is idempotent by
+	// construction. app.sync_subscription DOES carry per-run state
+	// (snoozed_until, etag, backoff), so it is truncated and rebuilt by
+	// subscribe.All in seedWorld.
+	//
+	// TRUNCATE ... CASCADE rather than a hand-ordered list of DELETEs, so
+	// this cannot rot into the wrong order as the schema grows.
+	// GuardDatabase already requires the database name to contain "gate".
+	if _, err := pool.Exec(ctx, `
+		TRUNCATE TABLE
+		    app.esi_replica,
+		    app.esi_ledger_entry,
+		    app.esi_ledger_bucket,
+		    app.sync_run,
+		    app.sync_subscription,
+		    public.river_job
+		RESTART IDENTITY CASCADE`); err != nil {
+		return fmt.Errorf("resetting the gate database: %w", err)
+	}
+	// The budget is a single fixed row, so it is reset rather than removed:
+	// Governor2.Init only creates it when absent (ON CONFLICT DO NOTHING),
+	// and a run must not depend on which process gets there first.
+	if _, err := pool.Exec(ctx, `
+		UPDATE app.esi_error_budget
+		   SET window_start = now(), error_count = 0, paused = false, updated_at = now()
+		 WHERE id = 1`); err != nil {
+		return fmt.Errorf("resetting the error budget: %w", err)
+	}
+
 	keyring, err := crypto.NewKeyring(cfg.Crypto)
 	if err != nil {
 		return fmt.Errorf("building the keyring: %w", err)
@@ -161,14 +216,6 @@ func run() error {
 	world, err := seedWorld(ctx, pool, keyring, *characters)
 	if err != nil {
 		return err
-	}
-
-	// A run inherits nothing from the last one. app.esi_replica in
-	// particular must hold exactly the replicas this run starts, or mode
-	// selection reads a count that includes the corpses of the previous
-	// run — which is the difference between solo and clustered at N=1.
-	if _, err := pool.Exec(ctx, `DELETE FROM app.esi_replica`); err != nil {
-		return fmt.Errorf("clearing the replica registry: %w", err)
 	}
 
 	logDir := filepath.Join(dir, "logs")

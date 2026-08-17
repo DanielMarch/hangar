@@ -1,0 +1,211 @@
+Gate 5 — Deployment Usability
+release:   v1.0.0-rc2
+started:   2026-08-16T21:28:39Z
+workdir:   /tmp/tmp.rsx6qABYje   (empty — no repository clone, no Go toolchain, no Node)
+docker:    Docker version 29.6.2, build dfc4efb
+compose:   5.3.1
+
+── substituted origin (see this script's header) ───────────────────────
+  https://raw.githubusercontent.com/hangar-project/hangar/main/docker-compose.yml -> 404
+  https://raw.githubusercontent.com/hangar-project/hangar/main/deploy/install.sh -> 404
+
+image under test: ghcr.io/hangar-project/hangar:latest 3c493a02f84f 22 seconds ago
+
+── command 1 of 3 ──────────────────────────────────────────────────────
+$ curl -fsSLO http://127.0.0.1:8198/docker-compose.yml
+
+── command 2 of 3 ──────────────────────────────────────────────────────
+install.sh: fetching .env.example...
+
+install.sh: wrote .env with generated HANGAR_MASTER_KEY, HANGAR_SESSION_SECRET
+            and POSTGRES_PASSWORD.
+
+Before running 'docker compose up -d', register an application at
+https://developers.eveonline.com/applications and set in .env:
+  HANGAR_SSO_CLIENT_ID=...
+  HANGAR_SSO_CLIENT_SECRET=...
+The callback URL must be exactly ${HANGAR_PUBLIC_URL}/auth/callback.
+
+── §5.3 failure modes ──────────────────────────────────────────────────
+$ docker run --rm ghcr.io/hangar-project/hangar:latest serve   # with no configuration at all
+Error: config: invalid configuration: HANGAR_DB_URL: required value is not set
+HANGAR_MASTER_KEY: required value is not set
+HANGAR_SESSION_SECRET: required value is not set
+HANGAR_SSO_CLIENT_ID: required value is not set
+HANGAR_SSO_CLIENT_SECRET: required value is not set
+config: invalid configuration: HANGAR_DB_URL: required value is not set
+HANGAR_MASTER_KEY: required value is not set
+HANGAR_SESSION_SECRET: required value is not set
+HANGAR_SSO_CLIENT_ID: required value is not set
+HANGAR_SSO_CLIENT_SECRET: required value is not set
+[pass] 5.3-blank-env — aborts naming the missing variables, no stack trace
+
+$ hangar serve   # HANGAR_PUBLIC_URL and HANGAR_SSO_CALLBACK_URL disagreeing
+Error: config: invalid configuration: HANGAR_SSO_CALLBACK_URL does not match HANGAR_PUBLIC_URL — the callback must be exactly ${HANGAR_PUBLIC_URL}/auth/callback:
+      HANGAR_PUBLIC_URL       = https://hangar.example.com
+      HANGAR_SSO_CALLBACK_URL = https://SOMETHING-ELSE.example.com/auth/callback
+      expected                = https://hangar.example.com/auth/callback
+    Correct whichever of the two is wrong, and make sure the value you keep is the one registered at https://developers.eveonline.com/applications — EVE SSO rejects a redirect_uri that does not match its registration exactly, and does so at login rather than at boot
+config: invalid configuration: HANGAR_SSO_CALLBACK_URL does not match HANGAR_PUBLIC_URL — the callback must be exactly ${HANGAR_PUBLIC_URL}/auth/callback:
+      HANGAR_PUBLIC_URL       = https://hangar.example.com
+      HANGAR_SSO_CALLBACK_URL = https://SOMETHING-ELSE.example.com/auth/callback
+      expected                = https://hangar.example.com/auth/callback
+    Correct whichever of the two is wrong, and make sure the value you keep is the one registered at https://developers.eveonline.com/applications — EVE SSO rejects a redirect_uri that does not match its registration exactly, and does so at login rather than at boot
+[pass] 5.3-callback-mismatch — reported at boot as a configuration error naming the EXPECTED callback (https://hangar.example.com/auth/callback), not an opaque OAuth failure
+[pass] 5.3-postgres-not-ready — the migrate service depends_on postgres with condition: service_healthy
+
+── command 3 of 3 ──────────────────────────────────────────────────────
+$ docker compose -p hangar-gate5 up -d
+ Network hangar Creating 
+ Network hangar Created 
+ Volume hangar-postgres-data Creating 
+ Volume hangar-postgres-data Created 
+ Container hangar-postgres Creating 
+ Container hangar-postgres Created 
+ Container hangar-migrate Creating 
+ Container hangar-migrate Created 
+ Container hangar Creating 
+ Container hangar Created 
+ Container hangar-postgres Starting 
+ Container hangar-postgres Started 
+ Container hangar-postgres Waiting 
+ Container hangar-postgres Healthy 
+ Container hangar-migrate Starting 
+ Container hangar-migrate Started 
+ Container hangar-migrate Waiting 
+ Container hangar-postgres Waiting 
+ Container hangar-postgres Healthy 
+ Container hangar-migrate Exited 
+ Container hangar Starting 
+ Container hangar Started 
+
+── §5.2 pass conditions ────────────────────────────────────────────────
+[pass] 5.1 — exactly three commands, no editor step (the two SSO values are prompted for by install.sh)
+[SUBSTITUTED] 5.2 — no build: key and no compilation, but the image is NOT pulled from a public registry: ghcr.io/hangar-project/hangar returns 403, raw.githubusercontent.com/hangar-project/hangar 404s, and 'git remote -v' is empty. DECIDED IN PHASE 22 (defect B-12): recorded as PERMANENTLY SUBSTITUTED for this release candidate, because publishing is an operator action with credentials this session does not hold, not a code change. Verified against a locally built image of the same commit; see docs/PRE_V1_OPEN_ITEMS.md B-12 for exactly what remains
+[pass] 5.4 — /healthz and /readyz both 200 after 9s (budget 300s); migrations ran from the one-shot migrate service
+default-profile services: hangar migrate postgres 
+[pass] 5.5 — services are exactly: hangar migrate postgres  (no redis)
+[pass] 5.6 — the SPA is served by the binary itself on the same port as the API
+[pass] first-boot-alerts — 54 alert types with 4 thresholds on the FIRST boot
+healthcheck: 
+
+── §5.2 condition 5.7: re-run after a version bump ─────────────────────
+INSERT 0 1
+$ docker compose -p hangar-gate5 up -d
+ Container hangar-postgres Running 
+ Container hangar-migrate Recreate 
+ Container hangar-migrate Recreated 
+ Container hangar Recreate 
+ Container hangar Recreated 
+ Container hangar-postgres Waiting 
+ Container hangar-postgres Healthy 
+ Container hangar-migrate Starting 
+ Container hangar-migrate Started 
+ Container hangar-postgres Waiting 
+ Container hangar-migrate Waiting 
+ Container hangar-postgres Healthy 
+ Container hangar-migrate Exited 
+ Container hangar Starting 
+ Container hangar Started 
+[pass] 5.7 — after a version bump and a second 'docker compose up -d', migrations re-ran and the seeded row survived
+
+── §5.2 condition 5.8: manual deployment, external PostgreSQL 18 ───────
+The static linux/amd64 binary, its .env, and an external PostgreSQL 18 —
+no compose, no image, nothing from the repository but the binary.
+$ docker network create gate5-manual
+67b530f45de7068ad325ce14efeb7cba849adbfd9b02c14c1db41e44e09e9f05
+$ docker run -d --name gate5-pg --network gate5-manual -e POSTGRES_USER=hangar -e POSTGRES_PASSWORD=hangar -e POSTGRES_DB=hangar postgres:18-alpine
+3b70dcf9ec5ac176083f1f7a3225dcb9be26160cedeee7ba7509e483028d56ae
+migrate up: river schema current
+2026/08/16 21:29:45 OK   00001_schemas.sql (3.41ms)
+2026/08/16 21:29:45 OK   00002_platform_vocabulary.sql (11.03ms)
+2026/08/16 21:29:45 OK   00003_platform_reference.sql (23.77ms)
+2026/08/16 21:29:45 OK   00004_platform_identity.sql (61.06ms)
+2026/08/16 21:29:45 OK   00005_platform_rbac.sql (57.13ms)
+2026/08/16 21:29:45 OK   00006_platform_esi_gateway.sql (54.95ms)
+2026/08/16 21:29:45 OK   00007_platform_provisioning.sql (30.97ms)
+2026/08/16 21:29:45 OK   00008_platform_alerting.sql (34.17ms)
+2026/08/16 21:29:45 OK   00009_platform_events.sql (19.04ms)
+2026/08/16 21:29:45 OK   00010_domain_corporation_structure.sql (72.76ms)
+2026/08/16 21:29:45 OK   00011_domain_corporation_projects.sql (13.69ms)
+2026/08/16 21:29:45 OK   00012_domain_history.sql (11.28ms)
+2026/08/16 21:29:45 OK   00013_domain_assets.sql (13.6ms)
+2026/08/16 21:29:45 OK   00014_domain_wallets.sql (27.76ms)
+2026/08/16 21:29:45 OK   00015_domain_contracts.sql (18.82ms)
+2026/08/16 21:29:45 OK   00016_domain_industry_mining.sql (27.01ms)
+2026/08/16 21:29:45 OK   00017_domain_market.sql (25.45ms)
+2026/08/16 21:29:45 OK   00018_domain_killmails.sql (26.15ms)
+2026/08/16 21:29:45 OK   00019_domain_social.sql (21.81ms)
+2026/08/16 21:29:45 OK   00020_domain_character_sheet.sql (40.84ms)
+2026/08/16 21:29:45 OK   00021_domain_fittings.sql (11.61ms)
+2026/08/16 21:29:46 OK   00022_domain_mail.sql (21.87ms)
+2026/08/16 21:29:46 OK   00023_domain_notifications.sql (17.71ms)
+2026/08/16 21:29:46 OK   00024_domain_calendar.sql (15.99ms)
+2026/08/16 21:29:46 OK   00025_domain_planetary.sql (11.5ms)
+2026/08/16 21:29:46 OK   00026_domain_sovereignty.sql (42.67ms)
+2026/08/16 21:29:46 OK   00027_domain_tools.sql (16.79ms)
+2026/08/16 21:29:46 OK   00028_domain_intel.sql (8.38ms)
+2026/08/16 21:29:46 OK   00029_domain_fixups.sql (4.29ms)
+2026/08/16 21:29:46 OK   00030_phase7_character_fixups.sql (32.21ms)
+2026/08/16 21:29:46 OK   00031_phase8_acting_character_history.sql (7.91ms)
+2026/08/16 21:29:46 OK   00032_phase8_mining_extraction_structure_id.sql (4.3ms)
+2026/08/16 21:29:46 OK   00033_phase8_1_skyhook_reagent_fixup.sql (8.3ms)
+2026/08/16 21:29:46 OK   00034_phase9_market_issued_by.sql (4.39ms)
+2026/08/16 21:29:46 OK   00035_phase9_notification_payload.sql (6.22ms)
+2026/08/16 21:29:46 OK   00036_phase9_sde_core_tables.sql (83.6ms)
+2026/08/16 21:29:46 OK   00037_phase11_entitlement_source_fixup.sql (3.15ms)
+2026/08/16 21:29:46 OK   00038_phase12_discord_invalid_budget.sql (4.43ms)
+2026/08/16 21:29:46 OK   00039_phase13_teamspeak_challenge.sql (8.15ms)
+2026/08/16 21:29:46 OK   00040_phase15_1_defect_closure.sql (6.11ms)
+2026/08/16 21:29:46 OK   00041_phase19_outbox_dispatch.sql (7.91ms)
+2026/08/16 21:29:46 OK   00042_phase20_4_ledger_divergence_pair.sql (3.4ms)
+2026/08/16 21:29:46 OK   00043_phase20_4_1_reconcile_residual.sql (3.62ms)
+2026/08/16 21:29:46 OK   00044_phase20_5_webhook_secret_rotation.sql (4.66ms)
+2026/08/16 21:29:46 OK   00045_phase20_6_keyset_covering_indexes.sql (14.81ms)
+2026/08/16 21:29:46 OK   00046_phase20_9_character_skill_summary.sql (6.02ms)
+2026/08/16 21:29:46 goose: successfully migrated database to version: 46
+migrate up: app/sde schema current (verified against the migrations, not just goose's log)
+migrate up: seed data applied
+migrate up: 50 alert types seeded, and 4 THRESHOLD types are DEFERRED.
+migrate up:   corporation.structure.fuel_low, corporation.starbase.fuel_low,
+migrate up:   corporation.member.inactive, corporation.contract.expiring
+migrate up: each declares an ESI source route, and app.esi_route is empty until the
+migrate up: catalogue is ingested. They complete automatically on the first ingest —
+migrate up: `serve` does one at startup, or run `hangar admin ingest-catalogue`.
+migrate up: Until then no routing rule can be created for them and they cannot fire.
+[PARTIAL] 5.8 — the static binary ran on a bare debian:12-slim with no toolchain and migrated an external PostgreSQL 18. systemd itself was NOT exercised — this host is Windows and has no systemd; the unit file is deploy/ material and remains unverified
+
+$ /hangar migrate up   # the binary named 'hangar' in its own working directory
+migrate up: river schema current
+2026/08/16 21:29:47 goose: no migrations to run. current version: 46
+migrate up: app/sde schema current (verified against the migrations, not just goose's log)
+migrate up: seed data applied
+migrate up: 50 alert types seeded, and 4 THRESHOLD types are DEFERRED.
+migrate up:   corporation.structure.fuel_low, corporation.starbase.fuel_low,
+migrate up:   corporation.member.inactive, corporation.contract.expiring
+migrate up: each declares an ESI source route, and app.esi_route is empty until the
+migrate up: catalogue is ingested. They complete automatically on the first ingest —
+migrate up: `serve` does one at startup, or run `hangar admin ingest-catalogue`.
+migrate up: Until then no routing rule can be created for them and they cannot fire.
+[pass] 5.8-config-name-collision — the binary named 'hangar' in its own working directory (§9.2's documented layout) is not mistaken for a config file, and migrated the external PostgreSQL 18 from there
+
+finished:  2026-08-16T21:29:49Z
+transcript: /c/HANGAR/docs/gate-evidence/v1.0.0-rc2/gate5/transcript.txt
+
+── teardown ────────────────────────────────────────────────────────────
+ Container hangar Stopping 
+ Container hangar Stopped 
+ Container hangar Removing 
+ Container hangar Removed 
+ Container hangar-migrate Stopping 
+ Container hangar-migrate Stopped 
+ Container hangar-migrate Removing 
+ Container hangar-migrate Removed 
+ Container hangar-postgres Stopping 
+ Container hangar-postgres Stopped 
+ Container hangar-postgres Removing 
+ Container hangar-postgres Removed 
+ Network hangar Removing 
+ Volume hangar-postgres-data Removing 
+ Volume hangar-postgres-data Removed 
+ Network hangar Removed 

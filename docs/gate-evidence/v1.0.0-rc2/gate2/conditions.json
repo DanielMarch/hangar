@@ -1,0 +1,20 @@
+[
+  {
+    "id": "2.1-sample",
+    "description": "the run produced enough successful revocations to have a p99",
+    "passed": true,
+    "measurement": "15000 successful revocations, minimum 5000"
+  },
+  {
+    "id": "2.1",
+    "description": "p99 of (platform_call_completed_at - event_at) \u003c 1m0s",
+    "passed": true,
+    "measurement": "p50=0.040s p95=0.091s p99=0.132s max=0.221s over 15000 revocations"
+  },
+  {
+    "id": "2.3",
+    "description": "revocations still owed remain visible with their true age",
+    "passed": true,
+    "measurement": "0 pending, oldest 0.0s old"
+  }
+]

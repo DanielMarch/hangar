@@ -1,0 +1,12 @@
+5.3-blank-env	pass	aborts naming the missing variables, no stack trace
+5.3-callback-mismatch	pass	reported at boot as a configuration error naming the EXPECTED callback (https://hangar.example.com/auth/callback), not an opaque OAuth failure
+5.3-postgres-not-ready	pass	the migrate service depends_on postgres with condition: service_healthy
+5.1	pass	exactly three commands, no editor step (the two SSO values are prompted for by install.sh)
+5.2	SUBSTITUTED	no build: key and no compilation, but the image is NOT pulled from a public registry: ghcr.io/hangar-project/hangar returns 403, raw.githubusercontent.com/hangar-project/hangar 404s, and 'git remote -v' is empty. DECIDED IN PHASE 22 (defect B-12): recorded as PERMANENTLY SUBSTITUTED for this release candidate, because publishing is an operator action with credentials this session does not hold, not a code change. Verified against a locally built image of the same commit; see docs/PRE_V1_OPEN_ITEMS.md B-12 for exactly what remains
+5.4	pass	/healthz and /readyz both 200 after 9s (budget 300s); migrations ran from the one-shot migrate service
+5.5	pass	services are exactly: hangar migrate postgres  (no redis)
+5.6	pass	the SPA is served by the binary itself on the same port as the API
+first-boot-alerts	pass	54 alert types with 4 thresholds on the FIRST boot
+5.7	pass	after a version bump and a second 'docker compose up -d', migrations re-ran and the seeded row survived
+5.8	PARTIAL	the static binary ran on a bare debian:12-slim with no toolchain and migrated an external PostgreSQL 18. systemd itself was NOT exercised — this host is Windows and has no systemd; the unit file is deploy/ material and remains unverified
+5.8-config-name-collision	pass	the binary named 'hangar' in its own working directory (§9.2's documented layout) is not mistaken for a config file, and migrated the external PostgreSQL 18 from there
