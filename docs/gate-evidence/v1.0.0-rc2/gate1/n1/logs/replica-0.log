@@ -1,0 +1,26 @@
+time=2026-08-17T00:28:41.114-05:00 level=INFO msg="hangar work: starting" version=v1.0.0-rc2 commit=bf1d136
+time=2026-08-17T00:28:41.129-05:00 level=INFO msg="hangar: metrics listening" addr=127.0.0.1:9400
+time=2026-08-17T00:28:41.173-05:00 level=INFO msg="alerting: threshold evaluator disabled (HANGAR_ALERT_THRESHOLD_INTERVAL is empty or zero) — §4.4's four threshold alerts will never fire on this installation"
+time=2026-08-17T00:44:43.995-05:00 level=WARN msg="governor2: proactive pause" component=esi.ratelimit.governor2 remaining=20 threshold=20
+time=2026-08-17T00:45:43.935-05:00 level=INFO msg="governor2: resume" component=esi.ratelimit.governor2 remaining=100 threshold=60 note="the error budget window elapsed or recovered while paused; no request was needed to notice"
+time=2026-08-17T00:45:43.939-05:00 level=INFO msg="governor2: resume" component=esi.ratelimit.governor2 remaining=100 threshold=60 note="the error budget window elapsed or recovered while paused; no request was needed to notice"
+time=2026-08-17T00:45:43.940-05:00 level=INFO msg="governor2: resume" component=esi.ratelimit.governor2 remaining=100 threshold=60 note="the error budget window elapsed or recovered while paused; no request was needed to notice"
+time=2026-08-17T00:45:43.942-05:00 level=INFO msg="governor2: resume" component=esi.ratelimit.governor2 remaining=100 threshold=60 note="the error budget window elapsed or recovered while paused; no request was needed to notice"
+time=2026-08-17T00:45:43.946-05:00 level=INFO msg="governor2: resume" component=esi.ratelimit.governor2 remaining=99 threshold=60 note="the error budget window elapsed or recovered while paused; no request was needed to notice"
+time=2026-08-17T00:45:43.950-05:00 level=INFO msg="governor2: resume" component=esi.ratelimit.governor2 remaining=98 threshold=60 note="the error budget window elapsed or recovered while paused; no request was needed to notice"
+time=2026-08-17T00:45:43.953-05:00 level=INFO msg="governor2: resume" component=esi.ratelimit.governor2 remaining=98 threshold=60 note="the error budget window elapsed or recovered while paused; no request was needed to notice"
+time=2026-08-17T00:45:43.956-05:00 level=INFO msg="governor2: resume" component=esi.ratelimit.governor2 remaining=98 threshold=60 note="the error budget window elapsed or recovered while paused; no request was needed to notice"
+time=2026-08-17T00:45:43.959-05:00 level=INFO msg="governor2: resume" component=esi.ratelimit.governor2 remaining=98 threshold=60 note="the error budget window elapsed or recovered while paused; no request was needed to notice"
+time=2026-08-17T00:45:43.962-05:00 level=INFO msg="governor2: resume" component=esi.ratelimit.governor2 remaining=98 threshold=60 note="the error budget window elapsed or recovered while paused; no request was needed to notice"
+time=2026-08-17T00:45:43.965-05:00 level=INFO msg="governor2: resume" component=esi.ratelimit.governor2 remaining=98 threshold=60 note="the error budget window elapsed or recovered while paused; no request was needed to notice"
+time=2026-08-17T00:45:43.968-05:00 level=INFO msg="governor2: resume" component=esi.ratelimit.governor2 remaining=98 threshold=60 note="the error budget window elapsed or recovered while paused; no request was needed to notice"
+time=2026-08-17T00:45:43.976-05:00 level=INFO msg="governor2: resume" component=esi.ratelimit.governor2 remaining=96 threshold=60 note="the error budget window elapsed or recovered while paused; no request was needed to notice"
+time=2026-08-17T00:45:43.979-05:00 level=INFO msg="governor2: resume" component=esi.ratelimit.governor2 remaining=96 threshold=60 note="the error budget window elapsed or recovered while paused; no request was needed to notice"
+time=2026-08-17T00:45:43.982-05:00 level=INFO msg="governor2: resume" component=esi.ratelimit.governor2 remaining=96 threshold=60 note="the error budget window elapsed or recovered while paused; no request was needed to notice"
+time=2026-08-17T00:45:43.985-05:00 level=INFO msg="governor2: resume" component=esi.ratelimit.governor2 remaining=96 threshold=60 note="the error budget window elapsed or recovered while paused; no request was needed to notice"
+time=2026-08-17T01:10:33.350-05:00 level=ERROR msg="maintenance.JobScheduler: Error scheduling jobs" error="error scheduling jobs: ERROR: deadlock detected (SQLSTATE 40P01)"
+time=2026-08-17T01:11:47.085-05:00 level=ERROR msg="jobcompleter.BatchCompleter: Completer error (will retry after sleep)" attempt=1 err="ERROR: deadlock detected (SQLSTATE 40P01)" sleep_duration=1.030288239s timeout=10s
+time=2026-08-17T02:30:12.975-05:00 level=INFO msg="hangar work: starting" version=v1.0.0-rc2 commit=bf1d136
+time=2026-08-17T02:30:12.990-05:00 level=INFO msg="hangar: metrics listening" addr=127.0.0.1:9400
+time=2026-08-17T02:30:13.035-05:00 level=INFO msg="alerting: threshold evaluator disabled (HANGAR_ALERT_THRESHOLD_INTERVAL is empty or zero) — §4.4's four threshold alerts will never fire on this installation"
+time=2026-08-17T03:44:50.406-05:00 level=ERROR msg="maintenance.JobScheduler: Error scheduling jobs" error="error scheduling jobs: ERROR: deadlock detected (SQLSTATE 40P01)"

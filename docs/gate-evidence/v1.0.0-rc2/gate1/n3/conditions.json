@@ -1,0 +1,62 @@
+[
+  {
+    "id": "1.1",
+    "description": "Zero Governor 1 breaches",
+    "passed": true,
+    "measurement": "proxy recorded 0 requests admitted with available \u003c= 0"
+  },
+  {
+    "id": "1.2",
+    "description": "Zero Governor 2 breaches",
+    "passed": true,
+    "measurement": "esi_420_total peaked at 0"
+  },
+  {
+    "id": "1.3",
+    "description": "Ledger divergence == 0 tokens after reconciliation, per group",
+    "passed": true,
+    "measurement": "max(esi_ledger_divergence) = 0 (group \"char-asset\") over 30232 group-samples"
+  },
+  {
+    "id": "1.3a",
+    "description": "Ledger prediction error recorded (no threshold)",
+    "passed": true,
+    "measurement": "max(esi_ledger_prediction_error) = 7 (group \"char-location\") over 30232 group-samples; recorded as evidence, not bounded"
+  },
+  {
+    "id": "1.4",
+    "description": "Proactive error-limit pause fired, and no 420 followed",
+    "passed": true,
+    "measurement": "esi_error_limit_remaining reached 15 against a pause threshold of 20; esi_420_total = 0"
+  },
+  {
+    "id": "1.5",
+    "description": "Failure stayed scoped",
+    "passed": true,
+    "measurement": "1145965 requests served, 1145851 of them 200 while adversarial conditions were active"
+  },
+  {
+    "id": "1.6",
+    "description": "No stall — throughput never drops to zero for more than one ttl_floor",
+    "passed": true,
+    "measurement": "longest interval with no request reaching the proxy: 1m0s, against a ttl_floor of 5m0s, over 962 throughput samples"
+  },
+  {
+    "id": "1.6-raw",
+    "description": "the weaker reading 1.6 used to be — whether the run served any request AT ALL. Kept so the difference stays visible",
+    "passed": true,
+    "measurement": "1145965 requests reached the proxy over 4h0m1s"
+  },
+  {
+    "id": "1.7",
+    "description": "Aggregate consumption respected at N\u003e1",
+    "passed": true,
+    "measurement": "0 proxy-side samples showed consumption above max_tokens (replicas=3)"
+  },
+  {
+    "id": "1.8",
+    "description": "Mode selection correct throughout",
+    "passed": true,
+    "measurement": "esi_ledger_mode observed as [clustered], expected \"clustered\" throughout"
+  }
+]

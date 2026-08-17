@@ -66,6 +66,42 @@ number that decided it. That is the intended outcome of a gate that does not pas
 the phase that produced this directory both take the view that a recorded failure is worth more
 than an unrun gate, and considerably more than a gate quietly skipped.
 
+## `v1.0.0-rc2`: what the second full run added
+
+All seven gates pass at `v1.0.0-rc2`. `v1.0.0-rc1/` is kept beside it — a release that had to
+correct itself should be able to show what it corrected — and the two directories are directly
+comparable, because the runners changed but the harness's conditions did not weaken.
+
+Two extra directories exist at rc2 and are deliberate:
+
+* **`gate3-first-attempt/`** — a recorded FAIL that measured the apparatus rather than HANGAR. It
+  is the only artefact showing what a stale gate database does to a verdict, including a condition
+  that reported **pass while measuring nothing**. Its own `WHY_THIS_IS_HERE.md` has the derivation.
+* **`gate1/n1/` and `gate1/n3/`** now cover the whole run: `divergence.csv` holds **240 of 240
+  minutes** at N=1 (rc1: 18) and 241 at N=3 (rc1: 32), because the installation no longer stops
+  serving sixteen minutes in.
+
+## RUN EACH GATE TWICE BEFORE YOU TRUST IT
+
+This is the lesson of Phase 22 and it is worth more than any single fix in it. Running the gates a
+second time found **six defects in the runners** — and five of the six would have produced a wrong
+VERDICT rather than an error:
+
+* `make build` wrote `bin/hangar` while every runner executes `bin/hangar.exe` on Windows, so the
+  gates would have measured a five-week-old binary and said nothing.
+* Gate 5 leaked a `hangar serve` container per run; three were found still retrying 21 hours later.
+* `make gate3` — the command this file names — could not start with its shipped defaults.
+* Gate 3 and Gate 1 never reset their databases, so their verdicts depended on whether they had
+  been run before. Gate 3's second run turned that into a false FAIL on four conditions **and a
+  false PASS on the one condition testing that release's headline fix**.
+
+`tools/gate1-load` had cleared `app.esi_replica` since it was written, for exactly this reason one
+table smaller. The instinct was right and had been applied too narrowly.
+
+**Gates 1 and 3 now reset the state they own before measuring.** Gate 2 creates a fresh population
+per run and needed no change. If you add a gate, make it start from a known state, and then run it
+twice and diff the verdicts.
+
 ## One note on the tag: the runners were fixed while the gates ran
 
 Running these gates for the first time found defects **in the runners** as well as in the product,

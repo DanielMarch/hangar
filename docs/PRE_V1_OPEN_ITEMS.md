@@ -1,26 +1,33 @@
 # Pre-v1.0 open items — audit at `c0b35ac`
 
-> **Status after Phase 21.** All seven gates have now been run, at `v1.0.0-rc1`. Evidence is in
-> `docs/gate-evidence/v1.0.0-rc1/`, one directory per gate, each with a `SUMMARY.md` stating
-> pass/fail and the measurement that decided it.
+> **Status after Phase 22.** All seven gates have been re-run at `v1.0.0-rc2`, against a binary
+> with the six defects of §§5–9 closed. Evidence is in `docs/gate-evidence/v1.0.0-rc2/`.
+> `docs/gate-evidence/v1.0.0-rc1/` is kept: a release that had to correct itself should be able to
+> show what it corrected.
 >
-> | Gate | Verdict | The measurement |
-> | :-- | :-- | :-- |
-> | 1 ESI Load Stability | **FAIL** | no request reached the proxy for **3h58m** (N=1) and **3h43m** (N=3) against a 5m `ttl_floor` |
-> | 2 Revocation SLO | **PASS** | p99 **0.134s** against 60s, over 15,000 revocations with the bulk queue saturated |
-> | 3 Alert Delivery Integrity | **PASS** | 13,454 enqueued = 595 + 5,190 + 7,669 + **0 pending** + 0 failed |
-> | 4 Feature Parity | **PASS** | 58 capability rows, 58 verified, 0 unreachable, 0 false citations |
-> | 5 Deployment Usability | **FAIL** | 2 conditions failed, 1 partial, 1 unverifiable — the artefacts are unpublished |
-> | 6 Spec-Drift Resilience | **PASS** | four §6.1 outcomes through the production ingest, clean tree at the tag |
-> | 7 Third-Party Migration | **PASS** | 16 of 16 served routes byte-identical across 34 legacy routes |
+> | Gate | rc1 | rc2 | The measurement at rc2 |
+> | :-- | :-- | :-- | :-- |
+> | 1 ESI Load Stability | **FAIL** | **PASS** | longest zero-throughput interval **1m30s** (N=1) and **1m0s** (N=3) against a 5m `ttl_floor`; 1,143,649 and 1,145,965 requests served |
+> | 2 Revocation SLO | PASS | **PASS** | p99 **0.132s** against 60s, over 15,000 revocations with the bulk queue saturated |
+> | 3 Alert Delivery Integrity | PASS | **PASS** | 13,454 enqueued = 595 + 5,190 + 7,669 + **0 pending** + 0 failed |
+> | 4 Feature Parity | PASS | **PASS** | 58 capability rows, 58 verified, 0 unreachable, 0 false citations |
+> | 5 Deployment Usability | **FAIL** | **PASS (with substitution)** | 0 conditions failed; 5.8 partial (no systemd on this host), 5.2 substituted (nothing is published) |
+> | 6 Spec-Drift Resilience | PASS | **PASS** | four §6.1 outcomes through the production ingest, clean tree at the tag |
+> | 7 Third-Party Migration | PASS | **PASS** | 16 of 16 served routes byte-identical across 34 legacy routes |
 >
-> **B-1 is closed** — there is now a runner per gate and every gate has produced its blocking
-> artefact. **B-2 and B-3 are closed in code.** **B-4 remains the operator's** and cannot be closed
-> from inside the codebase.
+> **The two gates that failed at rc1 now pass, and the numbers that decided them moved by orders
+> of magnitude rather than marginally.** Gate 1 at N=1 served **1,143,649** requests against
+> rc1's 8,371, and its `divergence.csv` covers **240 of 240 minutes** against rc1's 18. Condition
+> 1.4 still fires the proactive pause and condition 1.6 still shows throughput continuing —
+> together, that pairing is what proves §9's deadlock is gone.
 >
-> Running the gates found **six defects that no test in the suite could have caught**, listed in
-> §5–§9 below. One of them (§9) makes HANGAR stop calling ESI permanently after any burst of
-> errors, and is the reason Gate 1 failed.
+> **B-1, B-2 and B-3 are closed. B-4 remains the operator's** and cannot be closed from inside the
+> codebase. **B-12 is decided** rather than deferred: nothing is published, and §5.2 is recorded as
+> permanently substituted.
+>
+> Running the gates a SECOND time found six more defects — **in the gate runners**, not in the
+> product — and they are listed in §10 because five of the six would have produced a wrong verdict
+> rather than an error, and two would have produced a false PASS.
 
 **Question asked:** are Phases 0–20.11 actually complete, do all seven gates pass, and what
 blocks a v1.0 release candidate?
@@ -319,7 +326,7 @@ close. It belongs with N-9 in a phase of its own.
 
 ---
 
-## 5. Found in Phase 21 — the default deployment runs no workers *(blocking)*
+## 5. Found in Phase 21 — the default deployment runs no workers *(B-6, CLOSED in Phase 22)*
 
 Not in the audit above, found while building Gate 1's runner (which had to answer "which process
 actually calls ESI?"), and re-derived three ways:
@@ -380,7 +387,7 @@ The regression guard is `cmd/hangar/workers_test.go`, and it guards the SHAPE ra
 instance: `river.AddWorker` may appear only in `workers.go`, and both role files must call
 `buildWorkerPool` and start the client. A copy is how this happened, so a copy is what it forbids.
 
-## 9. Found by running Gate 1 — the proactive pause never resumes *(blocking, not fixed)*
+## 9. Found by running Gate 1 — the proactive pause never resumes *(B-5, CLOSED in Phase 22)*
 
 **This is the most serious defect in this document, and it is the one Gate 1 exists to find.**
 
@@ -478,7 +485,7 @@ names, and reports the harness's weaker reading beside it as `1.6-raw`.
 
 ---
 
-## 8. Found by running Gate 1 — `esi_ledger_mode` reports a default as an observation *(not fixed)*
+## 8. Found by running Gate 1 — `esi_ledger_mode` reports a default as an observation *(B-10, CLOSED in Phase 22)*
 
 `ratelimit.NewGovernor1` starts in `ModeSolo` optimistically and only consults the replica
 registry inside `ensureMode`, which `Acquire` calls. Between a process starting and its first ESI
@@ -526,7 +533,7 @@ metric can say "I don't know".
 
 ---
 
-## 7. Found by running Gate 3 for the first time — the early warning arrives late *(not fixed)*
+## 7. Found by running Gate 3 for the first time — the early warning arrives late *(B-9, CLOSED in Phase 22)*
 
 `corporation.structure.fuel_low` and `corporation.contract.expiring` are delivered **at the
 deadline they warn about**, not when the threshold is crossed.
@@ -582,7 +589,7 @@ end of it means B-9 is not fixed.
 
 ---
 
-## 6. Found by running Gate 5 for the first time
+## 6. Found by running Gate 5 for the first time *(B-7 and B-8 CLOSED in Phase 22; B-12 decided)*
 
 Three defects, none of which any test in the suite could have caught, because every test builds its
 own connection string and its own configuration. This is what §5 is for.
@@ -700,6 +707,66 @@ Closing it is four steps, none of which touch the codebase: create `hangar-proje
 
 ---
 
+## 10. Found by running the gates a SECOND time — six defects in the gate runners *(all fixed)*
+
+Phase 21 found six defects in the product by running the gates for the first time. Phase 22 found
+six more by running them AGAIN, and every one was in the measuring apparatus rather than in
+HANGAR.
+
+They are recorded here at the same weight as the product defects, for one reason: **five of the six
+would have produced a wrong VERDICT rather than an error, and two would have produced a false
+PASS.** A gate that fails loudly costs an afternoon. A gate that passes wrongly costs the release.
+
+| # | Defect | What it would have done |
+| :-- | :-- | :-- |
+| 10.1 | `make build` wrote `bin/hangar`; every runner runs `bin/hangar.exe` on Windows | The gates would have measured a **five-week-old binary** left over from a previous phase. "Every gate must measure one build" would have been false and nothing would have said so |
+| 10.2 | Gate 5 leaked a container per run | Three `hangar serve` containers from Phase 21 were still retrying their database connection **21 hours later**, holding the image the release must be able to delete, on a host Gate 1 needs quiet |
+| 10.3 | `make gate3` could not start with its shipped defaults | The documented command refuses: the default `duration/2` split leaves a 2h drain against a policy needing 2h3m. rc1's run happened only because `-generate-for` was passed by hand, and nothing recorded that it had to be |
+| 10.4 | Gate 3 never reset its database | **A false FAIL and a false PASS in one run.** See below |
+| 10.5 | Gate 1 never reset its database | Would have begun the run **already paused**, from `app.esi_error_budget` left `paused = t` by rc1 — so condition 1.4's "a pause fired at the configured threshold" could have been satisfied by a pause that fired four hours earlier, in another process, against another binary |
+| 10.6 | `esi_ledger_mode`'s settling-window exclusion in the runner | Correct while B-10 was open, and would have silently kept excluding samples after it was fixed. Deleted with the amendment it justified |
+
+### 10.4 in full, because it is the one that produced a false pass
+
+Gate 3's second run ever failed four conditions. `hangar_gate3` held **15,974 events, 8 channels,
+110 routing rules and 18,494 deliveries** — two runs in one database.
+
+**12,600 of 15,120 offered occurrences were DEDUPLICATED** against rows the previous run wrote.
+`app.alert_event.dedupe_hash` is a permanent uniqueness constraint and correctly so (§4.4:
+re-reading the same notification on the next poll is the common case, not an error), so a
+generator producing deterministic content produces nothing at all the second time. Only the
+threshold category still fired; routing deals the four stub behaviours round-robin and
+`corporation.structure.fuel_low` lands on the *permanently failing* one; so 0 messages reached a
+healthy channel. `3.1-categories`, `3-domains`, `3.7` and `3.4` all followed from that.
+
+**And then the part that matters more.** `seedEntities` uses `ON CONFLICT DO NOTHING`, so the
+structures kept rc1's `fuel_expires` — minutes out when rc1 wrote them, **two days EXPIRED** by the
+time this run read them. Condition `3.1-scheduled-beyond-run`, which exists precisely to test
+B-9's `min(bucket + window, now + window)` cap, therefore evaluated deadlines in the PAST, where
+the cap cannot engage. **It reported a pass and measured nothing.**
+
+The corrected run is the one that measures it: 2,526 threshold deliveries with coalescing buckets
+**46 and 66 hours out** — so the bucket is still the deadline, exactly as `structureFuel` intends —
+every one of them *attempted and settled inside a four-hour run*. Under rc1's code
+`next_attempt_at` would have been `bucket + 5m`, up to 66 hours ahead, and the dispatcher could
+not have claimed a single one.
+
+The failed run is kept at `docs/gate-evidence/v1.0.0-rc2/gate3-first-attempt/` with its own
+derivation.
+
+### The rule this leaves behind
+
+`tools/gate1-load` had cleared `app.esi_replica` since it was written, for exactly this reason one
+step smaller: mode selection counts rows in it, and the corpses of a previous run are the
+difference between solo and clustered at N=1. That instinct was right and was applied to one
+table. It needed to be applied to the runner.
+
+**A gate whose verdict depends on whether it has been run before is not evidence.** Both Gate 1 and
+Gate 3 now reset the state they own before they measure; Gate 2 already created a fresh population
+per run and needed no change.
+
+---
+
 ## 4. Verdict
 
 ### As the audit left it
@@ -715,7 +782,43 @@ B-3 is minutes of work once the placement decision is made. B-2 is a small, well
 B-4 is the operator's. **B-1 is the real gate to v1.0**: roughly nine hours of measured runs, an
 N=3 deployment, a clean host, and runners that do not exist yet.
 
-### After Phase 21 — `v1.0.0-rc1` is not a release candidate
+### After Phase 22 — `v1.0.0-rc2` IS a release candidate, with one item outside the codebase
+
+**All seven gates pass.** §8's "release blocks on all seven" is satisfied, with one condition
+recorded as substituted rather than met — Gate 5.2, and only because nothing has been published.
+
+What changed, and why it is more than a re-run: the six defects of §§5–9 were closed, and each was
+then measured by the gate that found it rather than by the test that fixed it.
+
+| Defect | The measurement that closed it |
+| :-- | :-- |
+| §9 B-5, the pause never resumes | Gate 1 N=1: condition **1.4 fired the proactive pause** *and* condition **1.6 measured a longest stall of 1m30s** against a 5m floor. Both, in one run. At rc1 the same pause ended the run at minute 16 |
+| §5 B-6, no workers in the default deployment | 92 `sync_route` jobs reached `completed` under a single live `serve`, with 94 real ESI calls (68×304, 26×200) |
+| §6.3 B-7, the binary parsed as its own config | Gate 5 `5.8-config-name-collision`: **pass**, and the binary migrated an external PostgreSQL 18 from §9.2's documented layout |
+| §6.2 B-8, callback mismatch unreported | Gate 5 `5.3-callback-mismatch`: **pass**, naming the expected `https://hangar.example.com/auth/callback` |
+| §7 B-9, warnings due at the deadline | Gate 3: 2,526 threshold deliveries with coalescing buckets **46h and 66h out**, every one attempted and settled **inside a 4-hour run** |
+| §8 B-10, the mode gauge reports a default | Gate 1: `esi_ledger_mode` observed as `[solo]` at N=1 and `[clustered]` at N=3, through §1.4's mandatory kill-and-restart, **with the Phase 21 amendment withdrawn and no samples excluded** |
+
+**What a reader should check first to disbelieve this.** In order of how likely each is to be
+wrong:
+
+1. **Gate 5.2 is not met, and I have called the release a candidate anyway.** That is a judgement,
+   and the honest way to read it is that HANGAR is code-complete against its gates while its
+   *distribution* is not done at all. Nobody but this repository can perform the documented
+   install. If your bar for "release candidate" includes "an operator can obtain it", this is a no.
+2. **Gate 1's two runs used a recording proxy, not CCP's ESI.** That is by design and §1.1 says so,
+   but it means the load numbers describe HANGAR's governors against a server that behaves exactly
+   as the spec says. Real ESI does not.
+3. **`make bench-ledger-clustered` FAILS on this host** — p99 10.78/10.92/10.98 ms against a 10 ms
+   budget. It fails identically at rc1 (10.46/10.20/10.83 ms), so it is the Windows/Docker-Desktop
+   environment rather than a regression, but it has never been demonstrated passing here.
+4. **§4.4's alert pipeline still runs only under `work`** (N-9), so the stock single-process
+   deployment syncs and provisions but delivers no alerts. Gate 3 passes because the gate runs the
+   pump itself. This is the largest known gap between what the gates measure and what an operator
+   gets.
+5. **The unit file has never been executed** (§5.8 PARTIAL, this host has no systemd).
+
+### After Phase 21 — `v1.0.0-rc1` was not a release candidate
 
 Five gates pass. **Two fail**, and `04_RELEASE_GATES.md` §8 is unambiguous: *"Release blocks on all
 seven."*
