@@ -1,7 +1,7 @@
 Gate 5 — Deployment Usability
 release:   v1.0.0-rc3
-started:   2026-08-21T03:28:22Z
-workdir:   /tmp/tmp.AP9qR4lofp   (empty — no repository clone, no Go toolchain, no Node)
+started:   2026-08-21T03:30:06Z
+workdir:   /tmp/tmp.thiwR64oCP   (empty — no repository clone, no Go toolchain, no Node)
 docker:    Docker version 29.6.2, build dfc4efb
 compose:   5.3.1
 
@@ -77,8 +77,8 @@ $ docker compose -p hangar-gate5 up -d
  Container hangar-postgres Healthy 
  Container hangar-migrate Starting 
  Container hangar-migrate Started 
- Container hangar-migrate Waiting 
  Container hangar-postgres Waiting 
+ Container hangar-migrate Waiting 
  Container hangar-postgres Healthy 
  Container hangar-migrate Exited 
  Container hangar Starting 
@@ -108,8 +108,8 @@ $ docker compose -p hangar-gate5 up -d
  Container hangar-postgres Healthy 
  Container hangar-migrate Starting 
  Container hangar-migrate Started 
- Container hangar-postgres Waiting 
  Container hangar-migrate Waiting 
+ Container hangar-postgres Waiting 
  Container hangar-postgres Healthy 
  Container hangar-migrate Exited 
  Container hangar Starting 
@@ -120,6 +120,134 @@ $ docker compose -p hangar-gate5 up -d
 The static linux/amd64 binary, its .env, and an external PostgreSQL 18 —
 no compose, no image, nothing from the repository but the binary.
 $ docker network create gate5-manual
-db05807f21e74d2e3cdd3d47d05d80ad65e76dbecc771cfdfcffe8f3e198edd6
+02361f79fdde9facc0178bc290af12f4dbc74e266557a8a2f15c047a538f9674
 $ docker run -d --name gate5-pg --network gate5-manual -e POSTGRES_USER=hangar -e POSTGRES_PASSWORD=hangar -e POSTGRES_DB=hangar postgres:18-alpine
-761f9f89b9841b62d92f483f2e7a9b16e14e130a8f0d34f4ec6d5e08033b565f
+fb010bfbda9128ce49403ae789ddec328a0b43e0a215f2b056de6f876df17653
+migrate up: river schema current
+2026/08/21 03:31:13 OK   00001_schemas.sql (3.11ms)
+2026/08/21 03:31:13 OK   00002_platform_vocabulary.sql (11.23ms)
+2026/08/21 03:31:13 OK   00003_platform_reference.sql (24.92ms)
+2026/08/21 03:31:13 OK   00004_platform_identity.sql (60.28ms)
+2026/08/21 03:31:13 OK   00005_platform_rbac.sql (59.47ms)
+2026/08/21 03:31:13 OK   00006_platform_esi_gateway.sql (55.45ms)
+2026/08/21 03:31:13 OK   00007_platform_provisioning.sql (31.96ms)
+2026/08/21 03:31:14 OK   00008_platform_alerting.sql (34ms)
+2026/08/21 03:31:14 OK   00009_platform_events.sql (18.52ms)
+2026/08/21 03:31:14 OK   00010_domain_corporation_structure.sql (73.03ms)
+2026/08/21 03:31:14 OK   00011_domain_corporation_projects.sql (14.11ms)
+2026/08/21 03:31:14 OK   00012_domain_history.sql (11.63ms)
+2026/08/21 03:31:14 OK   00013_domain_assets.sql (12.96ms)
+2026/08/21 03:31:14 OK   00014_domain_wallets.sql (27.11ms)
+2026/08/21 03:31:14 OK   00015_domain_contracts.sql (18.33ms)
+2026/08/21 03:31:14 OK   00016_domain_industry_mining.sql (26.1ms)
+2026/08/21 03:31:14 OK   00017_domain_market.sql (25.82ms)
+2026/08/21 03:31:14 OK   00018_domain_killmails.sql (23.19ms)
+2026/08/21 03:31:14 OK   00019_domain_social.sql (21.44ms)
+2026/08/21 03:31:14 OK   00020_domain_character_sheet.sql (40.84ms)
+2026/08/21 03:31:14 OK   00021_domain_fittings.sql (10.25ms)
+2026/08/21 03:31:14 OK   00022_domain_mail.sql (22.05ms)
+2026/08/21 03:31:14 OK   00023_domain_notifications.sql (14.6ms)
+2026/08/21 03:31:14 OK   00024_domain_calendar.sql (15.51ms)
+2026/08/21 03:31:14 OK   00025_domain_planetary.sql (11.12ms)
+2026/08/21 03:31:14 OK   00026_domain_sovereignty.sql (44.61ms)
+2026/08/21 03:31:14 OK   00027_domain_tools.sql (17.52ms)
+2026/08/21 03:31:14 OK   00028_domain_intel.sql (7.81ms)
+2026/08/21 03:31:14 OK   00029_domain_fixups.sql (4.87ms)
+2026/08/21 03:31:14 OK   00030_phase7_character_fixups.sql (31.78ms)
+2026/08/21 03:31:14 OK   00031_phase8_acting_character_history.sql (7.89ms)
+2026/08/21 03:31:14 OK   00032_phase8_mining_extraction_structure_id.sql (4.88ms)
+2026/08/21 03:31:14 OK   00033_phase8_1_skyhook_reagent_fixup.sql (7.72ms)
+2026/08/21 03:31:14 OK   00034_phase9_market_issued_by.sql (2.88ms)
+2026/08/21 03:31:14 OK   00035_phase9_notification_payload.sql (6.12ms)
+2026/08/21 03:31:14 OK   00036_phase9_sde_core_tables.sql (81.88ms)
+2026/08/21 03:31:14 OK   00037_phase11_entitlement_source_fixup.sql (2.77ms)
+2026/08/21 03:31:14 OK   00038_phase12_discord_invalid_budget.sql (4.94ms)
+2026/08/21 03:31:14 OK   00039_phase13_teamspeak_challenge.sql (7.88ms)
+2026/08/21 03:31:14 OK   00040_phase15_1_defect_closure.sql (6.32ms)
+2026/08/21 03:31:14 OK   00041_phase19_outbox_dispatch.sql (8.31ms)
+2026/08/21 03:31:14 OK   00042_phase20_4_ledger_divergence_pair.sql (4.19ms)
+2026/08/21 03:31:14 OK   00043_phase20_4_1_reconcile_residual.sql (2.94ms)
+2026/08/21 03:31:14 OK   00044_phase20_5_webhook_secret_rotation.sql (4.75ms)
+2026/08/21 03:31:14 OK   00045_phase20_6_keyset_covering_indexes.sql (14.7ms)
+2026/08/21 03:31:14 OK   00046_phase20_9_character_skill_summary.sql (5.78ms)
+2026/08/21 03:31:14 goose: successfully migrated database to version: 46
+migrate up: app/sde schema current — tables, columns and indexes verified against the migrations, not just goose's log
+migrate up: seed data applied
+migrate up: 50 alert types seeded, and 4 THRESHOLD types are DEFERRED.
+migrate up:   corporation.structure.fuel_low, corporation.starbase.fuel_low,
+migrate up:   corporation.member.inactive, corporation.contract.expiring
+migrate up: each declares an ESI source route, and app.esi_route is empty until the
+migrate up: catalogue is ingested. They complete automatically on the first ingest —
+migrate up: `serve` does one at startup, or run `hangar admin ingest-catalogue`.
+migrate up: Until then no routing rule can be created for them and they cannot fire.
+
+── §5.2 condition 5.8, second half: the systemd unit ───────────────
+
+### cleaning up anything a previous run left behind
+
+### pulling a systemd-capable image
+
+### starting an external PostgreSQL 18 — §9.2's 'manually provisioned' database
+
+### booting systemd as PID 1
+systemd version: systemd 252 (252-67.el9_8.4)
+
+### installing HANGAR the way deploy/hangar.service's header says to
+
+### systemd-analyze verify — does the unit PARSE
+[PASS] 5.8-verify — systemd-analyze verify reported no unknown lvalue, unknown section, or parse failure. It exits 1 on this image for an unrelated missing alias directory (see systemd-transcript.txt); the verdict is the absence of a parse complaint, not the exit code
+
+### systemctl start hangar
+[PASS] 5.8-start — systemctl start hangar reached active (running), with ExecStartPre 'hangar migrate up' completing first
+
+### the migration ran as part of the unit, not as a separate step
+[PASS] 5.8-migrate — ExecStartPre migrated the external PostgreSQL 18 and verified the schema (tables, columns and indexes) in the unit's own journal
+
+### /healthz, from inside the unit's own network namespace
+[PASS] 5.8-healthz — GET /healthz answered 200 from the systemd-managed process
+
+### systemctl stop — a clean shutdown, not a kill
+[PASS] 5.8-stop — SIGTERM inside TimeoutStopSec: the unit is inactive (dead) and not failed
+
+### verdicts
+5.8-verify	PASS	systemd-analyze verify reported no unknown lvalue, unknown section, or parse failure. It exits 1 on this image for an unrelated missing alias directory (see systemd-transcript.txt); the verdict is the absence of a parse complaint, not the exit code
+5.8-start	PASS	systemctl start hangar reached active (running), with ExecStartPre 'hangar migrate up' completing first
+5.8-migrate	PASS	ExecStartPre migrated the external PostgreSQL 18 and verified the schema (tables, columns and indexes) in the unit's own journal
+5.8-healthz	PASS	GET /healthz answered 200 from the systemd-managed process
+5.8-stop	PASS	SIGTERM inside TimeoutStopSec: the unit is inactive (dead) and not failed
+[pass] 5.8 — the static binary ran on a bare debian:12-slim with no toolchain and migrated an external PostgreSQL 18, AND deploy/hangar.service started under real systemd (5 sub-checks: the unit parses, ExecStartPre migrates, the service reaches active (running), /healthz answers 200 from inside it, and systemctl stop leaves it inactive and not failed). See systemd-verdict.txt. It is a CONTAINER, so cgroup delegation and some sandboxing directives are enforced more weakly than on metal
+
+$ /hangar migrate up   # the binary named 'hangar' in its own working directory
+migrate up: river schema current
+2026/08/21 03:31:33 goose: no migrations to run. current version: 46
+migrate up: app/sde schema current — tables, columns and indexes verified against the migrations, not just goose's log
+migrate up: seed data applied
+migrate up: 50 alert types seeded, and 4 THRESHOLD types are DEFERRED.
+migrate up:   corporation.structure.fuel_low, corporation.starbase.fuel_low,
+migrate up:   corporation.member.inactive, corporation.contract.expiring
+migrate up: each declares an ESI source route, and app.esi_route is empty until the
+migrate up: catalogue is ingested. They complete automatically on the first ingest —
+migrate up: `serve` does one at startup, or run `hangar admin ingest-catalogue`.
+migrate up: Until then no routing rule can be created for them and they cannot fire.
+[pass] 5.8-config-name-collision — the binary named 'hangar' in its own working directory (§9.2's documented layout) is not mistaken for a config file, and migrated the external PostgreSQL 18 from there
+
+finished:  2026-08-21T03:31:34Z
+transcript: /c/HANGAR/docs/gate-evidence/v1.0.0-rc3/gate5/transcript.txt
+
+── teardown ────────────────────────────────────────────────────────────
+ Container hangar Stopping 
+ Container hangar Stopped 
+ Container hangar Removing 
+ Container hangar Removed 
+ Container hangar-migrate Stopping 
+ Container hangar-migrate Stopped 
+ Container hangar-migrate Removing 
+ Container hangar-migrate Removed 
+ Container hangar-postgres Stopping 
+ Container hangar-postgres Stopped 
+ Container hangar-postgres Removing 
+ Container hangar-postgres Removed 
+ Volume hangar-postgres-data Removing 
+ Network hangar Removing 
+ Volume hangar-postgres-data Removed 
+ Network hangar Removed 

@@ -8,3 +8,5 @@
 5.6	pass	the SPA is served by the binary itself on the same port as the API
 first-boot-alerts	pass	54 alert types with 4 thresholds on the FIRST boot
 5.7	pass	after a version bump and a second 'docker compose up -d', migrations re-ran and the seeded row survived
+5.8	pass	the static binary ran on a bare debian:12-slim with no toolchain and migrated an external PostgreSQL 18, AND deploy/hangar.service started under real systemd (5 sub-checks: the unit parses, ExecStartPre migrates, the service reaches active (running), /healthz answers 200 from inside it, and systemctl stop leaves it inactive and not failed). See systemd-verdict.txt. It is a CONTAINER, so cgroup delegation and some sandboxing directives are enforced more weakly than on metal
+5.8-config-name-collision	pass	the binary named 'hangar' in its own working directory (§9.2's documented layout) is not mistaken for a config file, and migrated the external PostgreSQL 18 from there
