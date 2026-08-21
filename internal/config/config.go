@@ -104,6 +104,13 @@ type AlertingConfig struct {
 	// up to RetryCap. PHASE 14 ADDITIONS.
 	RetryBase time.Duration
 	RetryCap  time.Duration
+	// Lease is how long a claimed delivery is hidden from other pumps
+	// while its send is in flight (HANGAR_ALERT_LEASE, 2m). PHASE 23
+	// ADDITION (N-10): before this phase the claim was a bare SELECT and
+	// two pumps sent every message twice. See
+	// internal/alerting.RetryPolicy.Lease for the two numbers that bound
+	// it — the channel timeout below, and one pass's own duration above.
+	Lease time.Duration
 
 	// SMTP: HANGAR_SMTP_*.
 	SMTPEnabled  bool
@@ -537,6 +544,9 @@ func applyDefaults(v *viper.Viper) {
 	v.SetDefault("alert_claim_size", 500)
 	v.SetDefault("alert_retry_base", "60s")
 	v.SetDefault("alert_retry_cap", "1h")
+	// Phase 23 (N-10). 2m matches internal/events' webhook lease so an
+	// operator has one mental model for both queues.
+	v.SetDefault("alert_lease", "2m")
 	// Phase 20.4 — the threshold evaluator. The four margins default to 0
 	// here on purpose: internal/alerting.ThresholdPolicy owns the real
 	// defaults (and the reasoning for each), and duplicating the numbers
@@ -716,6 +726,7 @@ func Load(v *viper.Viper) (*Config, error) {
 			ClaimSize:        int32(v.GetInt("alert_claim_size")),
 			RetryBase:        v.GetDuration("alert_retry_base"),
 			RetryCap:         v.GetDuration("alert_retry_cap"),
+			Lease:            v.GetDuration("alert_lease"),
 			SMTPEnabled:      v.GetBool("smtp_enabled"),
 			SMTPHost:         v.GetString("smtp_host"),
 			SMTPPort:         v.GetInt("smtp_port"),

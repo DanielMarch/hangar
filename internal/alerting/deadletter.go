@@ -53,6 +53,31 @@ type RetryPolicy struct {
 	// where an operator can see it, not in a queue where they cannot.
 	// Zero disables the age bound.
 	DeadLetterAfter time.Duration
+	// Lease is how long a CLAIMED delivery is hidden from other pumps
+	// while its send is in flight (HANGAR_ALERT_LEASE, 2m). Zero selects
+	// DefaultLease. PHASE 23 (N-10).
+	//
+	// Two numbers bound it from either side, and both are worth stating
+	// because neither is enforced by a type:
+	//
+	//   * It must comfortably EXCEED the channel timeout — 15s for the
+	//     webhook channels, 30s for SMTP — or a slow receiver produces a
+	//     duplicate message from a second pump while the first is still
+	//     waiting.
+	//   * It must exceed the time ONE Tick spends between its claim and
+	//     its last settle, which is roughly (groups × channel timeout) in
+	//     the worst case. The operator's knob for that is ClaimSize, not
+	//     this: a pass that claims fewer deliveries settles them sooner.
+	//     Dispatcher.Tick logs a warning when a pass outruns its own
+	//     lease, so the condition is observable rather than silent.
+	//
+	// A LONGER lease is not free either. It is how long a delivery waits
+	// after a pump crashes mid-send before another pump may retry it, so
+	// it is also the worst-case added latency on an alert during a
+	// restart. Two minutes matches internal/events.DefaultLease
+	// deliberately: an operator should have one mental model for both
+	// queues.
+	Lease time.Duration
 }
 
 // Defaults chosen so an exhausted delivery dead-letters within about half
@@ -64,6 +89,7 @@ const (
 	DefaultMaxAttempts = 5
 	DefaultRetryBase   = time.Minute
 	DefaultRetryCap    = time.Hour
+	DefaultLease       = 2 * time.Minute
 )
 
 func (p RetryPolicy) maxAttempts() int {
@@ -85,6 +111,18 @@ func (p RetryPolicy) cap() time.Duration {
 		return DefaultRetryCap
 	}
 	return p.Cap
+}
+
+// Lease resolves the claim lease, applying DefaultLease to a zero. Exported
+// because the dispatcher is not the only legitimate caller: a gate runner
+// or an operator tool that claims deliveries directly must use the same
+// window the pump does, and a second copy of the default is a second thing
+// that can drift.
+func (p RetryPolicy) LeaseWindow() time.Duration {
+	if p.Lease <= 0 {
+		return DefaultLease
+	}
+	return p.Lease
 }
 
 // Backoff returns the delay before attempt number `attempt` (1-based:

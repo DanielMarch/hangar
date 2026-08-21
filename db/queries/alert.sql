@@ -56,10 +56,49 @@ VALUES ($1, $2, $3)
 RETURNING *;
 
 -- name: ClaimPendingAlertDeliveries :many
-SELECT * FROM app.alert_delivery
- WHERE state = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= now())
- ORDER BY created_at
- LIMIT sqlc.arg(claim_size);
+-- Claim-by-lease, not claim-by-read. PHASE 23 (N-10).
+--
+-- This was a bare SELECT until this phase, and that was a double-send:
+-- alerting.Dispatcher.Tick makes an HTTP call between claiming a delivery
+-- and settling it, so two pumps ticking together read the SAME rows and
+-- sent the same message twice. Nothing has ever stopped an operator
+-- running two `hangar work` replicas — River's normal scale-out, and what
+-- docker-compose.yml's own comments describe — and Gate 3 never saw it
+-- because Gate 3 runs one pump. It became urgent when `serve` gained the
+-- alerting role (N-9), because that is what makes a two-process
+-- installation the ordinary case rather than an operator's choice.
+--
+-- The shape is LeasePendingWebhookDeliveries', for the reason stated
+-- there: the dispatcher must not hold a transaction open across an HTTP
+-- call, so the claim MOVES next_attempt_at forward by a lease before
+-- releasing the transaction. A crash between claim and send leaves the row
+-- untouched except for the lease, and it becomes claimable again when the
+-- lease expires. The guarantee is at-least-once with no double-send inside
+-- the lease window — the same one the webhook contract makes.
+--
+-- attempts is deliberately NOT incremented here. Waiting out a lease is
+-- not a failed attempt, and counting it as one would let a pump crash
+-- spend a delivery's dead-letter budget. Settle() owns attempts, and it is
+-- also what overwrites this lease with the real backoff.
+--
+-- Unlike the webhook claim there is no join: an alert delivery for a
+-- channel that has since been disabled must still be CLAIMED, because
+-- dispatch.go dead-letters it on sight rather than leaving it pending
+-- forever. Filtering it out here would recreate the "neither delivered nor
+-- dead-lettered" state §4.4 exists to rule out.
+UPDATE app.alert_delivery AS d
+   SET next_attempt_at = now() + sqlc.arg(lease)::interval
+  FROM (
+       SELECT c.delivery_id
+         FROM app.alert_delivery c
+        WHERE c.state = 'pending'
+          AND (c.next_attempt_at IS NULL OR c.next_attempt_at <= now())
+        ORDER BY c.created_at
+        LIMIT sqlc.arg(claim_size)
+          FOR UPDATE SKIP LOCKED
+       ) AS claimed
+ WHERE d.delivery_id = claimed.delivery_id
+RETURNING d.*;
 
 -- name: MarkAlertDeliverySent :exec
 UPDATE app.alert_delivery
@@ -159,3 +198,14 @@ SELECT count(*) FROM app.alert_delivery WHERE state = 'dead_letter';
 UPDATE app.alert_delivery
    SET state = 'pending', attempts = 0, next_attempt_at = NULL
  WHERE delivery_id = $1 AND state = 'dead_letter';
+
+-- name: SetAlertChannelEnabled :exec
+-- PHASE 23 (N-4). The disable, and deliberately not a delete.
+--
+-- app.alert_delivery.channel_id is ON DELETE CASCADE, so removing a channel
+-- would silently erase every delivery ever made through it — the audit
+-- trail §4.4 requires, destroyed by an operator tidying up a channel they
+-- stopped using. Disabling is what they actually want: the pump refuses a
+-- disabled channel and DEAD-LETTERS what was owed to it (dispatch.go), so
+-- the alerts are visible on the board rather than lost.
+UPDATE app.alert_channel SET enabled = $2 WHERE channel_id = $1;

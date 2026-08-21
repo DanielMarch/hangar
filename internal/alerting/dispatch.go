@@ -95,11 +95,31 @@ type TickResult struct {
 }
 
 // Tick runs one pass of the pump.
+//
+// ── PHASE 23 (N-10): THE CLAIM IS A LEASE ────────────────────────────────
+// The claim moves each row's next_attempt_at forward by Policy.Lease
+// before this function does anything else, so a second pump ticking
+// concurrently sees nothing to claim. Before this phase the claim was a
+// bare SELECT and two pumps sent every message twice; see
+// ClaimPendingAlertDeliveries' own comment and
+// TestTwoDispatchersDoNotDoubleSend.
+//
+// The pass then measures itself against that lease. A Tick settles each
+// group as it finishes it, so the exposure per delivery runs from the
+// claim to its own group's settle — but the LAST group of a slow pass is
+// exposed for the whole pass, and if that outruns the lease another pump
+// may legitimately re-claim it and send a duplicate. That is a real
+// trade-off in an at-least-once queue rather than a defect, and it is
+// bounded by ClaimSize. What would be a defect is it happening silently,
+// so the pass says so.
 func (d *Dispatcher) Tick(ctx context.Context) (TickResult, error) {
 	var result TickResult
 	s := store.New(d.Pool)
 
-	claimed, err := s.ClaimPendingAlertDeliveries(ctx, d.claimSize())
+	lease := d.Policy.LeaseWindow()
+	startedAt := d.now()
+
+	claimed, err := s.ClaimPendingAlertDeliveries(ctx, lease, d.claimSize())
 	if err != nil {
 		return result, fmt.Errorf("alerting: claiming pending deliveries: %w", err)
 	}
@@ -119,6 +139,12 @@ func (d *Dispatcher) Tick(ctx context.Context) (TickResult, error) {
 		result.Sent += sent
 		result.Retried += retried
 		result.DeadLettered += dead
+	}
+
+	if elapsed := d.now().Sub(startedAt); elapsed > lease && d.Log != nil {
+		d.Log.WarnContext(ctx, "alerting: dispatch pass outran its claim lease; a concurrent pump could have re-claimed its tail — "+
+			"lower HANGAR_ALERT_CLAIM_SIZE or raise HANGAR_ALERT_LEASE",
+			"elapsed", elapsed, "lease", lease, "claimed", result.Claimed, "groups", result.Groups)
 	}
 	return result, nil
 }

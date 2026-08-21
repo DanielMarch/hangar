@@ -72,6 +72,13 @@ func newMigratedPool(t testing.TB) *pgxpool.Pool {
 type recordingChannel struct {
 	kind     string
 	failWith error
+	// delay holds Send open for this long BEFORE recording anything, and
+	// deliberately outside the mutex. It exists for
+	// TestTwoDispatchersDoNotDoubleSend: the defect that test covers lives
+	// entirely in the window between claiming a delivery and settling it,
+	// so a test for it needs that window to be wide enough for a second
+	// pump to reach the claim inside it.
+	delay time.Duration
 
 	mu       sync.Mutex
 	messages []channels.Message
@@ -81,6 +88,9 @@ type recordingChannel struct {
 func (c *recordingChannel) Kind() string { return c.kind }
 
 func (c *recordingChannel) Send(_ context.Context, msg channels.Message) error {
+	if c.delay > 0 {
+		time.Sleep(c.delay)
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.attempts++
@@ -749,4 +759,153 @@ func TestDisplacedUpstreamTypeStillDeliversViaOpenVocabulary(t *testing.T) {
 	line := recorder.sent()[0].Lines[0]
 	require.Contains(t, line, "structure ", "the StructureFuelAlert template must still be the one that rendered it")
 	require.NotContains(t, line, "structureShowInfoData:", "that would be the generic key/value fallback")
+}
+
+// ── N-10: THE ALERT CLAIM MUST BE A LEASE, NOT A READ ────────────────────
+//
+// `ClaimPendingAlertDeliveries` was a bare SELECT: no FOR UPDATE SKIP
+// LOCKED, no lease, no state transition at claim time — while
+// Dispatcher.Tick makes an HTTP call between claiming a delivery and
+// settling it. Two pumps ticking together therefore claimed the SAME rows
+// and sent the same message twice.
+//
+// Nothing has ever stopped an operator running two `hangar work` replicas
+// (River's normal scale-out, and what docker-compose.yml's own comments
+// describe), and Gate 3 never saw it because Gate 3 runs one pump.
+//
+// Both tests below FAIL against the pre-lease claim. They are the reason
+// N-9 could not be fixed first: starting a second pump in `serve` before
+// this would have turned "alerts are never delivered on a default
+// installation" into "alerts are delivered twice on a scaled-out one".
+
+// TestClaimedAlertDeliveryIsInvisibleToASecondPump is the protocol-level
+// statement, and the exact counterpart of internal/events'
+// "a leased delivery must be invisible to a second dispatcher".
+func TestClaimedAlertDeliveryIsInvisibleToASecondPump(t *testing.T) {
+	pool := newMigratedPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+
+	const alertType = "StructureUnderAttack"
+	seedChannelAndRule(t, s, alertType, "squad", "42")
+
+	window := alerting.DefaultCoalesceWindow
+	burstAt := time.Now().Add(-10 * time.Minute).Truncate(window)
+	emitter := &alerting.Emitter{Pool: pool, Window: window}
+	result, err := emitter.IngestNotification(ctx, alerting.Notification{
+		Type: alertType, NotificationID: 3100000001,
+		Payload: fixturePayload(t, "valid_structure_under_attack.yaml"), OccurredAt: burstAt,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.DeliveriesEnqueued)
+
+	const lease = 750 * time.Millisecond
+	first, err := s.ClaimPendingAlertDeliveries(ctx, lease, 10)
+	require.NoError(t, err)
+	require.Len(t, first, 1, "the first pump claims the pending delivery")
+
+	// No settlement in between — this is precisely the window in which the
+	// first pump is making its HTTP call.
+	inLease, err := s.ClaimPendingAlertDeliveries(ctx, lease, 10)
+	require.NoError(t, err)
+	require.Empty(t, inLease, "a leased delivery must be invisible to a second pump")
+
+	// And the guarantee is at-least-once, not at-most-once: a pump that
+	// dies mid-send must not strand the row. Once the lease expires it is
+	// claimable again, with its attempts budget untouched — waiting out a
+	// lease is not a failed attempt.
+	require.Zero(t, first[0].Attempts, "leasing must not consume an attempt")
+	require.Equal(t, alerting.StatePending, first[0].State, "a leased delivery is still pending")
+
+	time.Sleep(lease + 250*time.Millisecond)
+	afterLease, err := s.ClaimPendingAlertDeliveries(ctx, lease, 10)
+	require.NoError(t, err)
+	require.Len(t, afterLease, 1, "an expired lease returns the delivery to the queue")
+	require.Equal(t, first[0].DeliveryID, afterLease[0].DeliveryID)
+}
+
+// TestTwoDispatchersDoNotDoubleSend is the product-level statement: two
+// pumps, one seeded outbox, ticking at the same instant. It is the shape
+// N-10 describes and the shape an operator produces by running two
+// `hangar work` replicas.
+//
+// The recording channel is deliberately SLOW. The defect lives in the gap
+// between claim and settle, so a test that sends instantly would only
+// catch it by luck; 250 ms is long enough that the second pump reaches its
+// claim while the first is still "in flight", every run.
+func TestTwoDispatchersDoNotDoubleSend(t *testing.T) {
+	pool := newMigratedPool(t)
+	ctx := context.Background()
+	s := store.New(pool)
+
+	const alertType = "StructureUnderAttack"
+	const events = 6
+	seedChannelAndRule(t, s, alertType, "squad", "42")
+
+	window := alerting.DefaultCoalesceWindow
+	burstAt := time.Now().Add(-10 * time.Minute).Truncate(window)
+	emitter := &alerting.Emitter{Pool: pool, Window: window}
+	payload := fixturePayload(t, "valid_structure_under_attack.yaml")
+	for i := 0; i < events; i++ {
+		result, err := emitter.IngestNotification(ctx, alerting.Notification{
+			Type: alertType, NotificationID: int64(3200000000 + i),
+			Payload: payload, OccurredAt: burstAt.Add(time.Duration(i) * time.Second),
+		})
+		require.NoError(t, err)
+		require.Equal(t, 1, result.DeliveriesEnqueued)
+	}
+
+	recorder := &recordingChannel{kind: channels.KindSlackWebhook, delay: 250 * time.Millisecond}
+	newPump := func() *alerting.Dispatcher {
+		return &alerting.Dispatcher{
+			Pool:     pool,
+			Channels: func(gen.AppAlertChannel) (channels.Channel, error) { return recorder, nil },
+		}
+	}
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	results := make([]alerting.TickResult, 2)
+	errs := make([]error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			pump := newPump()
+			<-start
+			results[i], errs[i] = pump.Tick(ctx)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	require.NoError(t, errs[0])
+	require.NoError(t, errs[1])
+
+	// One of the two pumps claims the whole group; the other claims
+	// nothing. Which one wins is a race and the test does not care.
+	require.Equal(t, events, results[0].Claimed+results[1].Claimed,
+		"between them the two pumps claim each delivery exactly once")
+	require.Equal(t, events, results[0].Sent+results[1].Sent)
+
+	require.Len(t, recorder.sent(), 1,
+		"one coalesced group is ONE message however many pumps are ticking")
+	require.Equal(t, 1, recorder.sendAttempts(),
+		"and the second pump must not even attempt the send")
+
+	// The database is the authority, not the fake: MarkAlertDeliverySent
+	// increments attempts, so a row settled twice says so.
+	rows, err := pool.Query(ctx, `SELECT state, attempts FROM app.alert_delivery`)
+	require.NoError(t, err)
+	defer rows.Close()
+	settled := 0
+	for rows.Next() {
+		var state string
+		var attempts int
+		require.NoError(t, rows.Scan(&state, &attempts))
+		require.Equal(t, alerting.StateSent, state)
+		require.Equal(t, 1, attempts, "a delivery sent twice would carry two attempts")
+		settled++
+	}
+	require.NoError(t, rows.Err())
+	require.Equal(t, events, settled)
 }
