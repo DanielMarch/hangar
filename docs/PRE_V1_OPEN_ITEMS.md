@@ -150,7 +150,7 @@ as `deploy/` in `01_ARCHITECTURE.md` and `03_IMPLEMENTATION_ROADMAP.md`: moving 
 make three documents wrong to make one right, to save seven characters in a URL that is
 copy-pasted once. Both stale references are corrected.
 
-### B-4 — Two operator actions outstanding, unchanged since Phase 20.8 *(blocking, external)*
+### B-4 — Two operator actions outstanding, unchanged since Phase 20.8 *(CLOSED in Phase 23)*
 
 Re-measured at this commit: **52** GET scopes derived (`go run ./tools/scopedump`), **50** in
 `app.character_token_scope`. The diff is exactly `esi-universe.read_structures.v1` and
@@ -169,160 +169,304 @@ Note, measured in 20.9 and still true: when the grant lands the structure fan-ou
 **nothing and not even 403** — `ListCharacterStructureIDs` unions four sources and all four hold
 zero rows on this installation.
 
----
+#### Closed in Phase 23 — one half by the operator, the other by measurement
 
-## 3. Non-blocking open items
+Full evidence in `docs/gate-evidence/v1.0.0-rc3/b4/`.
 
-### N-1 — Gate 7 is 16 of 34, and that is a product decision, not a defect
+**The re-authorisation was performed.** The operator revoked HANGAR and logged in again during
+this phase, and `app.character_token_scope` went from **50 to 52** — both previously-missing
+scopes granted, the derived and granted sets now identical. **Standing trap 10 did not fire**:
+EVE silently drops scopes the SSO registration lacks, and it dropped neither, so the registration
+carries all 52.
 
-12 pending, 4 unshimmable, 2 breaking. **Fourteen of the eighteen unserved routes are
-permanently unservable** with reasons re-derived against legacy source in this audit:
+**Capability #41's structure half now runs against real ESI**, and 20.9's prediction was exact:
 
-| Reason | Routes | Audit verdict |
-| :-- | :-- | :-- |
-| `reasonSurrogateID` | 3 wallet | **Confirmed.** `CharacterWalletTransaction`/`CorporationWalletTransaction` declare `$primaryKey='id'`, `CorporationWalletJournal` `'internal_id'`, all `$incrementing=true` and none hidden — the auto-increment key is on the wire |
-| `reasonMySQLDoubleRounding` | character.wallet-journal | Confirmed in 20.7 against PHP 8.2.33 |
-| `reasonContractDoublePrice` | 2 contracts | Confirmed in 20.10; `contract_details.price` is a MySQL `double` |
-| `reasonAssetMapColumns` | 2 assets | Confirmed in 20.10; `map_id`/`map_name` are real persisted columns and row two of the recording carries real values |
-| `reasonKillmailHash` | 3 killmails | **Confirmed.** `attacker_hash` is the leading key of every attacker object in `killmails.detail` |
-| `reasonIdentitySpace` | 4 users/squads | **Confirmed.** All four recordings lead with `"id": 1`, a MySQL auto-increment |
-| `reasonGrantModel` | 2 roles (breaking) | Not re-derived; never recorded, breaking by construction |
-| `reasonCharacterSheetFields` | character.sheet | **Reason holds; its evidence was mis-stated — corrected in this commit.** See N-2 |
-
-### N-2 — `character.sheet`'s reason cited evidence that does not exist *(corrected here)*
-
-The reason said `user_id` "has no honest value". The recording actually shows
-`"user_id": null` — because `CharacterSheetResource` emits `$this->user->id` and
-`CharacterInfo::user()` is a `hasOneThrough` over `refresh_tokens`, which `fixtures.php` never
-seeds.
-
-So a shim emitting a constant `null` would be **byte-identical to the recording and wrong on
-every real installation**. The route correctly stays pending; the reason now says so accurately.
-This is the `corporation.structures`/`services` trap in a new place, and it is the third time a
-Gate 7 reason has been true-but-mis-evidenced (B55, B57, this).
-
-**Correction available:** seed one `refresh_tokens` row in `fixtures.php` and re-record. That
-pins the populated case permanently, in whichever direction it falls.
-
-### N-3 — Five served routes still rest on single-row recordings
-
-`character.{industry, jump-clones, market-orders, skills, skill-queue}` and
-`corporation.{industry, market-orders, member-tracking}` are byte-verified against recordings
-holding one row. Field names, order, types and formatting are pinned; **their own multi-row
-ordering is not.**
-
-The ordering *rule* is no longer an inference — the 20.10 re-recording inserted two structures in
-descending id order and two services non-alphabetically, and legacy returned both ascending by
-key. Adding a second row to any of these recordings is cheap and would close the gap.
-
-### N-4 — 50 generated queries and 36 symbols have no production caller
-
-Both are policed by guards that fail if an entry gains a caller, so the registers are accurate.
-The groups that represent **absent product surface** rather than test doubles:
-
-* Subscription management — an operator cannot snooze, disable or opt a subscription out of
-  caching except by SQL (`SetSyncSubscriptionEnabled`, `SetSyncNoCacheOptIn`, `ListRecentSyncRuns`)
-* Alert routing/channel CRUD and the unknown-type boards (8 queries)
-* Platform and entitlement configuration (5 queries) — no surface at all
-* Open-vocabulary boards (4 queries) — Gate 6 surfaces these; no reader is wired
-* Webhook dead-letter board and outbox backlog gauge (`events.DeadLetterBoard`, `events.PendingCount`)
-
-None is named by a gate. Each is a real capability gap for an operator and should be a
-scoping decision before v1.0, not a surprise after it.
-
-### N-8 — Gate 7 §7.5's sunset policy cannot be verified: there are no release notes *(found in Phase 21)*
-
-> **Closed in Phase 22.** `docs/RELEASE_NOTES.md` now exists and announces `/api/v2`'s deprecation
-> in the release that introduces it, with the removal date, the replacement and the migration
-> guide. §7.5's fourth row — "the `Sunset` header matches the announced date, automated check
-> against the release notes" — is `TestReleaseNotesMatchTheSunsetHeader`, which reads
-> `v2shim.SunsetDate` and requires the notes to carry it. The direction is deliberate: the header
-> is authoritative and the notes are checked against it, because a release note that disagrees with
-> the header the server actually sends is worse than none — it is an announcement an integrator
-> would act on.
-
-§7.5 checks the sunset policy against `docs/RELEASE_NOTES.md` — "removed no earlier than two minor
-versions later", "removal announced at least one minor version in advance", and "the `Sunset`
-header matches the announced date, automated check against the release notes". **That file did not
-exist.** Three of the four rows in that table therefore have nothing to check against, and the
-fourth (the shim ships in v1.0) is the only one this release can evidence.
-
-Conditions 7.2 and 7.3 — that every shim response *carries* `Deprecation: true` and an RFC 8594
-`Sunset` — are separate, are numbered pass conditions, and do pass
-(`TestShimEmitsDeprecationAndSunset`, run as part of Gate 7's evidence). What is unverifiable is
-whether the date in that header agrees with an announcement, because no announcement exists.
-
-Also worth stating plainly, since Gate 7's summary should not be read as covering more than it
-does: conditions **7.5** (Laravel pagination synthesised from keyset results), **7.6** (money
-emitted as JSON numbers) and **7.9** (Appendix C complete in *both* documents) are asserted by
-unit and integration tests rather than by the gate run, and the run's `SUMMARY.md` claims only the
-conditions it measured.
-
-### N-5 — Latent cache-key collision, recorded and not fixed
-
-`esi.Client.cacheKey` hashes the templated upstream path and never `PathParams`, so every item of
-a detail fan-out shares one cache key. Not live: the cache is read only on a 304 the caller
-conditioned, and no fan-out sends validators. **It becomes real the moment anyone adds per-item
-ETags to a fan-out.**
-
-### N-6 — Schema integrity check covers tables only
-
-`db.MissingTables` (Phase 20.11) verifies tables. A dropped index, constraint, column or
-partition would still pass. Named for what it checks; extending it is a larger parse.
-
-### N-7 — No SDE imported on the development installation
-
-`hangar admin import-sde` resolves it. Not a defect — EFT exports render `[<type_id>]`
-placeholders and the skyhook/sovereignty-hub backfills leave columns NULL until it runs.
-
-### N-9 — §4.4's alert pipeline runs only under `work`, so the stock deployment delivers no alerts *(found in Phase 22)*
-
-Found while fixing B-6, by asking the same question B-6 asks — *which process actually does this?*
-— of the rest of `work.go` rather than only of its River workers. Re-derived three ways at this
-commit:
-
-| Claim | Evidence |
-| :-- | :-- |
-| The producers are wired only in `work` | `wireAlertGeneration` (the CCP-notification hook) and `runThresholdEvaluator` (the four threshold alerts) are called from `cmd/hangar/work.go` and nowhere else |
-| The pump is wired only in `work` | `runAlertDispatcher` and `ensureDefaultAlertChannels`, likewise |
-| The stock stack runs one process, `serve` | `docker-compose.yml`'s only `hangar` service is `command: ["serve"]` |
-
-So after B-6 a default installation synchronises, provisions, serves and sweeps — and produces no
-alert events and delivers no messages. §4.4 is entirely absent from it. **This is the same defect
-class as B-6 and it is not fixed in Phase 22**, for a reason that is worth stating rather than
-leaving as a scope note: it cannot be fixed by starting the pump in `serve`, because of N-10 below.
-
-`serve` therefore registers no alert-delivery metrics either, which is why
-`buildMetricsRegistry` still receives `nil` for them there.
-
-### N-10 — the alert dispatcher claims without a lease, so two pumps double-send *(found in Phase 22)*
-
-`ClaimPendingAlertDeliveries` (`db/queries/alert.sql`) is a bare
-
-```sql
-SELECT * FROM app.alert_delivery
- WHERE state = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= now())
- ORDER BY created_at LIMIT $1;
+```
+/universe/structures/{structure_id}
+  last_status = 200   last_success = 2026-08-21 02:50:36+00
+  sync_run: outcome 200, rows_affected 0, error none
 ```
 
-with no `FOR UPDATE SKIP LOCKED`, no lease, and no state transition at claim time —
-`alerting.Dispatcher.Tick` makes an HTTP call between claiming and settling. Two dispatcher
-processes ticking together therefore claim the **same** rows and send the same message twice.
+The scope gate no longer excludes the subscription, the reconciler created it, the planner
+claimed it and the worker ran it — **the whole path is live and there is nothing for it to fan
+out over.** A 403 would have meant the grant was wrong; a 200 with zero rows means the grant is
+right and the installation is empty.
 
-This is **not** a consequence of B-6 and is not new: nothing has ever stopped an operator running
-two `hangar work` replicas, which is River's normal scale-out and what `docker-compose.yml`'s own
-comments describe. Gate 3 has never seen it because Gate 3 runs one pump.
+**The alliance half was never an operator action, and this phase has the measurement that says
+so.** Phase 20.8 recorded it as one. It is not:
 
-`LeasePendingWebhookDeliveries`, twelve lines away in `db/queries/outbox.sql`, is the correct
-shape and says why in its own comment: claim-by-lease, not claim-by-read, because the dispatcher
-must not hold a transaction open across an HTTP call. The fix is to give the alert claim the same
-treatment, and it is the prerequisite for N-9 — starting a second pump before then would turn
-"alerts are never delivered on a default installation" into "alerts are delivered twice on a
-scaled-out one", which is worse.
+```
+characters:                  2
+corporations:                1
+corps with an alliance_id:   0
+character 2124613505  corp = 98840805  alliance = null
+```
 
-Deliberately not done in Phase 22: it is a change to the claim protocol Gate 3 measures, made in
-the phase that must then re-run Gate 3, and it was not one of the six defects this phase exists to
-close. It belongs with N-9 in a phase of its own.
+**The operator's corporation is not in an alliance.** No action available to them populates
+`app.alliance` short of joining one, so `AllianceWorker` cannot be dispatched on this
+installation and will not be on any installation whose corporations are unallied.
+`TestSyncAllianceSubscriptionsAreOrdered` remains the only claim that can be made for it.
+
+That is a **limitation of the evidence, not an outstanding action**, and the distinction decides
+the release: an unfinished task blocks, and a fact about one developer's EVE character does not.
+
+---
+
+## 3. Non-blocking open items — EMPTY
+
+**Every N-item is closed.** An item could leave this section by being FIXED or by being DECIDED,
+and by no other route; "leave it for another phase" had been the answer four times and was not
+available again. Seven were fixed, three were decided, and the register below records which was
+which and the measurement that settled it.
+
+Two of them were fixed by measurements nobody had taken, and both are worth reading as method
+rather than as changelog: an importer that had never once worked, and a five-phase-old blocker
+that dissolved when somebody finally asked the database what it held.
+
+| # | What it was | How it left | The measurement |
+| :-- | :-- | :-- | :-- |
+| N-1 | Gate 7 is 16 of 34, and 12 of the 18 are merely "pending" | **FIXED and DECIDED** | 11 reclassified to unshimmable, 1 measured and reclassified, 1 SERVED. **Gate 7 is 17 of 34 and no route is pending** |
+| N-2 | `character.sheet`'s reason cited evidence that does not exist | **DECIDED by measurement** | One `refresh_tokens` row seeded, corpus re-recorded: `"user_id": 1`, a MySQL auto-increment against HANGAR's uuid |
+| N-3 | Eight served routes rest on single-row recordings | **FIXED** | A second row in each, higher key inserted first. Ordering rule held; **two byte-compatibility defects found and fixed** |
+| N-4 | 47 generated queries and 36 symbols with no production caller | **FIXED** | All five groups built with API and UI; 21 allowlist entries removed; both guards pass |
+| N-5 | Latent cache-key collision | **FIXED** | Key hashes the resolved path; two tests that fail against the template |
+| N-6 | Schema integrity covers tables only | **FIXED** | 163 tables, **1,133 columns, 115 indexes**, verified against a real PG18 |
+| N-7 | No SDE imported (D-4) | **FIXED** | Build 3475087 imported in 59s — after fixing an importer that had never worked |
+| N-8 | §7.5's sunset policy cannot be verified | Closed in Phase 22 | `docs/RELEASE_NOTES.md` exists and is checked against the `Sunset` header |
+| N-9 | The stock deployment delivers no alerts | **FIXED** | One assembly both roles call; proven on a stock compose stack, **seven verdicts, receiver's own transcript** |
+| N-10 | The alert dispatcher claims without a lease | **FIXED** | Claim-by-lease; against the old code two pumps made **12 claims for 6 deliveries and sent every message twice** |
+
+---
+
+### N-1 — Gate 7 is 17 of 34, and every unserved route now says why
+
+**Twelve routes were `StatusPending`, and that status means "unfinished work recorded as
+unfinished; it is not a design decision".** A release cannot ship a compatibility shim making
+twelve promises. All twelve are decided and **no route holds that status any more.**
+
+**Eleven moved to `StatusUnshimmable`**, and the only thing that changed is the status: every
+reason was already derived against legacy's source in Phase 22's audit, and the status
+contradicted the derivation. A route whose reason is "legacy puts a MySQL auto-increment on the
+wire" is not waiting on work anybody intends to do, and the 501 body it was serving said "not
+yet" to integrators who would have waited for a release that could never ship.
+
+`StatusUnshimmable`'s own definition had to widen to hold them. It read "because HANGAR's
+identifier space differs from legacy's", which described four of the routes and none of the
+eleven. What all fifteen share is the property that matters: **the bytes come from legacy's own
+storage, and HANGAR's storage is correct rather than merely different.** A decimal money column
+cannot reproduce a double's rounding error; a uuid cannot reproduce an auto-increment. Serving
+them would mean storing legacy's mistakes.
+
+**The twelfth became the seventeenth SERVED route** — see the N-3 entry below for how, because
+the two items solved each other.
+
+### N-2 — settled, and it fell the way the reason predicted
+
+`fixtures.php` now seeds **one** `refresh_tokens` row (character 90000001, user_id 1) and the
+corpus is re-recorded. `character.sheet` emits
+
+```
+"user_id": 1
+```
+
+where it used to emit `null`. The reason held and is now **evidenced rather than merely true**:
+that `1` is legacy's `users.id`, a MySQL auto-increment, against HANGAR's uuid — the same
+blocker `users.index` and `users.show` already carry.
+
+The old recording could not have shown this. **A shim emitting a constant `null` would have been
+byte-identical to it and wrong on every real installation**, which is the
+`corporation.structures`/`services` trap in a new place and the third time a Gate 7 reason has
+been true-but-mis-evidenced (B55, B57, this). Character 90000002 deliberately keeps no token, so
+the corpus now records the populated and the unpopulated case and the difference between them is
+visible rather than inferred.
+
+### N-3 — two defects a one-row recording could not have shown
+
+A second row in all eight recordings, each inserted with a key that sorts **before** the row
+already there, so insertion order and ascending order disagree and the recording says which one
+legacy uses. **The 20.10 ordering rule held.** Two byte-compatibility defects fell out of served
+routes:
+
+* **`corporation.market-orders`** — legacy's `issued_by` is `bigint NOT NULL DEFAULT 0`, so a
+  legacy installation cannot hold a null there. HANGAR's column is nullable and the shim emitted
+  `null`, a value no legacy client has ever seen from that field. The one recorded order had an
+  issuer.
+* **`character.market-orders`** — a price above 2^53 diverged, which is
+  `reasonMySQLDoubleRounding`: the blocker on a **different** route, surfacing on a served one.
+  The single recorded price was `5.55`.
+
+#### The second one is the phase's best find, and it is a lesson about where to look
+
+Phase 20.6 measured that the corpus and the formatter disagree. Phase 20.7 measured PHP itself
+and **refuted** the 14-significant-digit hypothesis — `serialize_precision = -1`,
+`json_encode(9007199254740993.01) = 9007199254740994` — concluding, correctly, that "the
+divergence is in what legacy's MySQL DOUBLE column came to hold, upstream of any encoder", and
+reading that as unreproducible.
+
+Nobody had asked the database what it held:
+
+```sql
+SELECT price FROM character_orders WHERE order_id = 8999;
+-- 9.007199254741e15
+```
+
+**Thirteen significant digits, in the table.** MySQL 8.4 renders doubles at full
+shortest-round-trip precision on read, so the loss is not the read either. It is the **write**:
+PDO binds a PHP float by *stringifying* it at the `precision` ini, which is 14, so MySQL received
+the text `9.007199254741E+15` and stored the double nearest to that.
+
+Both earlier phases looked at the encoder because that is where the divergence appeared. It was
+introduced three layers earlier, on a path neither had reason to think about.
+
+**So it is reproducible.** `v2shim.phpPrecision` applies the same stringification to the exact
+decimal before the float64 conversion, `reasonMySQLDoubleRounding` is **deleted** rather than
+kept as a blocker known to be false, and **`character.wallet-journal` is served** — the shim's
+seventeenth route and its first wallet route. `$incrementing = false` on
+`CharacterWalletJournal` means its `id` is ESI's journal-entry id, not the surrogate that keeps
+the other three wallet routes unshimmable.
+
+It is also the first served route with a **real second page** (20 rows against a page size of
+15), so Laravel's `prev`/`next` links are finally exercised against something other than the
+degenerate single-page shape.
+
+### N-4 — all five groups built, and one of them should have had a defect number
+
+Every group is BUILT, with an API route and a UI surface. **21 allowlist entries are gone** and
+both reachability guards pass.
+
+| Group | What an operator could not do | Now |
+| :-- | :-- | :-- |
+| §4.4 routing and channels (8 queries) | say where any alert goes, except by SQL | `/api/v1/admin/alerts/*`, and an **Alert routing** screen |
+| Platform and entitlement config (5) | **create a platform at all** | `POST /admin/platforms`, groups, and a rules-by-source reverse lookup |
+| Subscription management (3) | disable or un-cache a subscription | `PATCH /admin/sync/subscriptions/{id}`, per-entity lookup, runs board |
+| Open-vocabulary boards (3 of 4) | read what Principle 14 recorded | `/api/v1/admin/vocabularies`, seven boards with counts |
+| Webhook dead-letter and outbox (2) | see a dead-lettered webhook | `/api/v1/admin/webhooks/*` |
+
+**`CreatePlatform` deserved a defect number rather than an allowlist line.** `app.platform` had
+**no production writer anywhere**, so no installation could create a platform row by any means
+the product offered — and `cmd/hangar/discord.go`'s own comment says exactly that ("there can be
+zero (an administrator hasn't created the platform record)") before warning and registering no
+driver. Phases 11–13 built three provisioning drivers, an entitlement engine, an exposure board
+and the revocation SLO Gate 2 measures, **on top of a table nothing could populate.** Every test
+inserts the row it needs, which is why no test could see it.
+
+`SetEntitlementRuleEnabled` did not simply gain a caller. Disabling a grant rule reduces
+entitlements exactly as deleting one does, so a bare flag write would have been **B32 — the
+silent deferral — reintroduced through a different verb.** It now goes through the same urgent
+revocation, with `eventAt` stamped once for §2.2's SLO.
+
+**The sixth is `GetEsiScope`, and it is the honest one.** It was DELETED this phase on the
+reading that nothing wants one scope row, and then **restored** when its two callers turned out
+to be Gate 6's own assertions — the novel scope grammar landing unrejected, and the board not
+refilling itself after an acknowledge. The alternative was those tests issuing raw SQL, which
+passes while the query layer production uses is broken. Recorded as a measurement rather than a
+mechanism.
+
+### N-5 — fixed while it was two lines
+
+`esi.Client.cacheKey` hashes the **resolved** path now, as §5.3's formula and
+`cache.KeyInput.Path`'s own doc comment have said since Phase 3. Two tests fail against the
+templated key: character 2's conditional request replayed character 1's body, and wallet division
+2 replayed division 1's — the second exists because a partial fix using only the first path
+parameter would pass the first test.
+
+Not live, and not harmless: the cache is read only on a 304 the caller conditioned and no fan-out
+sends validators, so nothing ever collided. **It becomes real the moment anyone adds per-item
+ETags to a fan-out** — a natural optimisation, since that is what ETags are for — and the failure
+mode is serving one character's detail body as another's. A data-disclosure bug wearing a
+performance improvement's clothes, which would have been attributed to the optimisation.
+
+### N-6 — columns and indexes, and two parse bugs the baseline assertion caught
+
+`hangar migrate up` and every serving process now verify **163 tables, 1,133 columns and 115
+indexes**, all derived from the embedded migrations rather than listed.
+
+Indexes compare by **signature** — table, access method, key columns, partial or not — because
+110 of the 111 `CREATE INDEX` statements are unnamed, so Postgres generates the name and there is
+nothing stable to compare. The blind spot that leaves is stated in the type comment and held
+closed by a test rather than by hope.
+
+**Two parse bugs were caught by `TestAFullyMigratedDatabaseHasNoDrift`**, which exists for exactly
+that, because reporting drift on a CORRECT database is the worst failure a check like this can
+have — an operator learns to ignore it and then ignores it on the day it means something:
+
+* migration 00033 writes `DROP COLUMN` as one clause of a five-clause `ALTER TABLE`, so a regex
+  anchored on `ALTER TABLE x.y DROP COLUMN` matched none of it and the register expected
+  `fuel_expires` on two tables that dropped it three migrations ago;
+* migration 00045 retires four indexes by their **server-generated** names, so the parse has to
+  reconstruct `<table>_<col>_..._idx` to see the drop at all.
+
+Constraints and runtime partitions are still not covered, and the file says so rather than
+carrying a name that implies more.
+
+### N-7 / D-4 — the SDE imported, after fixing an importer that had never worked
+
+`hangar admin import-sde` **had never worked against a real export and could not have.** It asked
+its `SourceProvider` for `<postgres table name>.jsonl` — `category.jsonl`, `group_.jsonl`,
+`type.jsonl` — and CCP ships `categories.jsonl`, `groups.jsonl`, `types.jsonl`: plural,
+camelCase, map-prefixed. **Not one of the twenty-two names matched.** The command downloaded
+99 MB, found nothing, imported zero rows into every table, and correctly refused to swap on the
+first smoke query.
+
+It was invisible because `testdata/sde/*.jsonl` had been named after the **Postgres tables** and
+shaped to match the extractors — fixtures invented to agree with the code rather than recorded
+from the thing the code reads. `tools/gate4-traceability`'s header names that failure mode
+exactly: *"a document that agrees with itself."*
+
+Five more mismatches were behind the first (`iconFile`/`graphicFile` not `fileName`; a moon's
+parent is `orbitID`; `operationName` not `name`; skins have a `types` array and an
+`internalName`; `npcStations` has no name at all), and **two of the three tables described as
+"derived" are not** — `typeDogma.jsonl` and `typeMaterials.jsonl` are their own exports.
+
+Measured on a real PG18: **swapped in 59s, 25 tables, 52,863 types, 645,769 type dogma
+attributes, 47,051 type materials, 19,138 blueprint activities.** The fixtures are now verbatim
+lines from build 3475087, and two guards check every source name against a **recorded listing of
+the real archive**.
+
+Importing it then exposed a second defect: `BackfillSkyhookTypeIDFromSDE` resolved
+`sde.type` by name — Principle 13, correctly applied — and **the name does not exist.** There is
+no type called `Skyhook`; the anchorable structure is 81080 `Orbital Skyhook`. The backfill
+resolved nothing before the import and would have gone on resolving nothing after it.
+
+### N-9 — proven on a stock compose stack, by the receiver
+
+`serve` runs §4.4's producers and pump, from **one assembly both roles call**
+(`cmd/hangar/alerting.go`) rather than four calls copied into `serve.go`, because four calls
+copied is how this happens a fourth time. This was the **third** seam wired in one process only
+to have been a defect — B-25's producers, B-6's workers, this — so the seam now has the
+structural guard the worker seam has. All three guards fail at `cdbd15d`.
+
+`tools/gate3-alerts/compose-proof.sh` asserts the thing Gate 3 cannot, because Gate 3 runs the
+pump itself. **Seven verdicts, all PASS**, with one container running `command: ["serve"]`:
+
+```
+n9-serve            one container, command serve, healthy
+n9-catalogue        54 alert types with 4 thresholds resolved by serve's own startup ingest
+n9-default-channel  serve provisioned app.alert_channel from the environment
+n9-event            app.alert_event holds 1 row, written by serve's own threshold evaluator
+n9-delivered        1 delivery reached state 'sent' through serve's own pump
+n9-received         the webhook sink recorded 206 bytes of delivered message
+n9-metrics          alert_delivery_total (12 series) and alert_dead_letter_depth (1)
+```
+
+The receiver is a real HTTP server whose transcript is written by the **receiver**, because "the
+pump marked it sent" is the pump's opinion. Both Gate 3 metrics were literal `nil`s on `serve`'s
+registry before this phase.
+
+### N-10 — the claim is a lease, and the old code sent everything twice
+
+`ClaimPendingAlertDeliveries` was a bare `SELECT` while `Dispatcher.Tick` makes an HTTP call
+between claiming and settling. Measured against the old code, with six deliveries and two pumps:
+**12 claims and two messages.** After: 6 claims, one message, `attempts = 1` on every row.
+
+Nothing had ever stopped an operator running two `hangar work` replicas — River's normal
+scale-out, and what `docker-compose.yml`'s own comments describe. Gate 3 never saw it because
+Gate 3 runs one pump. It became urgent the moment `serve` gained the alerting role, which is why
+it had to land first.
+
+The guarantee is at-least-once with no double-send inside the lease window, and `Tick` logs a
+warning when a pass outruns its own lease — a real trade-off in an at-least-once queue rather
+than a defect, but not one that should happen silently.
 
 ---
 

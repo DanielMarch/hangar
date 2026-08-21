@@ -49,22 +49,51 @@ window gets two of them.
 breaks the §10 promise and must not happen. Either way the value lives in exactly one place,
 `v2shim.SunsetDate`, and this file is checked against it.
 
-**16 of 34 legacy routes are served.** That is a product decision, not an omission, and the
-eighteen that are not are enumerated with a reason each in `APPENDIX_C_MIGRATION.md`. Fourteen of
-them are permanently unservable: they expose MySQL auto-increment surrogate keys, MySQL `double`
-rounding, or legacy-schema columns that have no honest value in HANGAR's data model. A shim that
-invented values for those would be byte-identical to a recording and wrong on every real
-installation.
+**17 of 34 legacy routes are served, and the other 17 will never be.** That is a product
+decision, not an omission, and every one is enumerated with a reason in
+`APPENDIX_C_MIGRATION.md`. They expose MySQL auto-increment surrogate keys, a MySQL `double`
+money column, a legacy-computed attacker hash, or a legacy identifier space — values that come
+from legacy's own storage and have no honest source in HANGAR's. A shim that invented them would
+be byte-identical to a recording and wrong on every real installation.
+
+**Nothing answers "not yet".** At rc2 twelve of those routes were marked pending, which told an
+integrator to wait for a release that was never coming. Every route now serves, or says
+permanently why it does not.
 
 ### Known limitations at v1.0.0
 
 Stated here rather than discovered. `docs/PRE_V1_OPEN_ITEMS.md` carries the full derivation of
 each.
 
-- **§4.4's alert pipeline runs only under `hangar work`.** The stock single-service deployment
-  syncs, provisions and serves, but produces and delivers no alerts (item N-9).
-- **Absent product surface.** Subscription management (snooze, disable, cache opt-out), alert
-  routing and channel CRUD, and platform/entitlement configuration have no API or UI, and are
-  reachable only by SQL (item N-4).
+**Both limitations this section named at rc2 are gone.** §4.4's pipeline runs under `serve`
+(N-9, proven on a stock compose stack), and every absent product surface N-4 named has an API
+route and a UI screen — including platform configuration, which had **no production writer at
+all**, so no installation could create a platform row by any means the product offered.
+
+What is left is what the release has decided to ship with. Each is a decision with a
+measurement behind it, not an unfinished task.
+
 - **`/api/v2` is read-only.** Every write route answers 405 with a pointer to the `/api/v1`
   equivalent, deliberately: SRS §10 scopes the shim to reads.
+- **17 of legacy's 34 `/api/v2` read routes are served; the other 17 never will be.** Fifteen
+  answer 501 with a permanent reason and two answer 410. Nothing answers "not yet" any more —
+  every unserved route says *why*, and each reason was derived against legacy's own source. The
+  short version: legacy puts values on the wire that come from its own storage — a MySQL
+  auto-increment, a `double` money column, a computed attacker hash — and HANGAR's storage is
+  correct rather than merely different. Reproducing them would mean storing legacy's mistakes.
+  `APPENDIX_C_MIGRATION.md` maps every one to its `/api/v1` equivalent.
+- **`AllianceWorker` has never run against real ESI**, and cannot on this installation: the
+  development corporation is not in an alliance, so `app.alliance` is empty and there is nothing
+  to reconcile. Capability #37 rests on its seeded integration test. This is a limitation of the
+  *evidence*, not of the code, and it applies to any installation whose corporations are
+  unallied.
+- **Capability #41's structure fan-out resolves nothing on an installation with no structure
+  ids.** It runs — verified against real ESI at rc3, HTTP 200 — and
+  `ListCharacterStructureIDs` unions four sources, all four of which are empty on a fresh
+  install. It will do useful work on an installation that has synced structures; it has never
+  been observed doing so.
+- **`sde.station.name` is empty for every station.** CCP's JSONL export ships no station names —
+  the client composes them — so the column imports empty. Nothing in HANGAR reads it today.
+- **The systemd unit is verified in a container, not on metal.** `deploy/hangar.service` starts,
+  migrates, serves and stops cleanly under systemd 252, but a few sandboxing directives are
+  enforced more weakly inside a container than they would be on a real host.
