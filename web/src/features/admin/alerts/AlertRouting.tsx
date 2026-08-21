@@ -313,7 +313,7 @@ function RoutingDialog({
   const data = detail.data?.data as Record<string, unknown> | undefined;
   const rules = (data?.routing_rules ?? []) as Record<string, unknown>[];
   const routed = data?.routed === true;
-  const channelRows = (channels.data?.data ?? []) as Record<string, unknown>[];
+  const channelRows = channels.data?.rows ?? [];
 
   return (
     <Dialog open={alertType !== ""} onOpenChange={(next) => !next && onClose()}>
