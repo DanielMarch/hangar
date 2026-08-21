@@ -1,0 +1,2 @@
+{"_key": 25, "anchorable": false, "anchored": false, "categoryID": 6, "fittableNonSingleton": false, "name": {"de": "Fregatte", "en": "Frigate", "es": "Fragata", "fr": "Frégate", "ja": "フリゲート", "ko": "프리깃", "ru": "Фрегат", "zh": "护卫舰"}, "published": true, "useBasePrice": false}
+{"_key": 0, "anchorable": false, "anchored": false, "categoryID": 0, "fittableNonSingleton": false, "name": {"de": "#System", "en": "#System", "es": "#System", "fr": "#Système", "ja": "#システム", "ko": "#항성계", "ru": "#Система", "zh": "#星系"}, "published": false, "useBasePrice": false}

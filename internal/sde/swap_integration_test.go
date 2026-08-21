@@ -71,7 +71,7 @@ func TestSDEAtomicSwap(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("failed build leaves the live schema completely untouched", func(t *testing.T) {
-		src := failingSource{DirSource: sde.DirSource{Dir: "../../testdata/sde"}, failOn: "type"}
+		src := failingSource{DirSource: sde.DirSource{Dir: "../../testdata/sde"}, failOn: "types"}
 
 		result, buildErr := sde.Build(ctx, pool, src)
 		require.Error(t, buildErr, "an injected mid-build failure must propagate")

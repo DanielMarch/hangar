@@ -59,7 +59,17 @@ func ReadJSONL(r io.Reader, fn func(Row) error) error {
 // erroring — some SDE tables (type_dogma_attribute, type_material) carry
 // no name at all, and a handful of others occasionally omit `en`.
 func englishName(fields map[string]any) string {
-	switch v := fields["name"].(type) {
+	return localizedEnglish(fields["name"])
+}
+
+// localizedEnglish reads CCP's localized-string shape — either a plain
+// string or a language map — from an arbitrary field.
+//
+// PHASE 23: split out of englishName, which could only ever read `name`.
+// stationOperations.jsonl labels its rows `operationName`, so the whole
+// table imported an empty string into a NOT NULL column.
+func localizedEnglish(value any) string {
+	switch v := value.(type) {
 	case string:
 		return v
 	case map[string]any:
