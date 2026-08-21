@@ -9,11 +9,11 @@
 # The procedure as written CANNOT be executed by anyone today, and that is a
 # finding rather than an inconvenience. Measured at the release candidate:
 #
-#   raw.githubusercontent.com/hangar-project/hangar/main/docker-compose.yml
+#   raw.githubusercontent.com/<owner>/hangar/main/docker-compose.yml   (read from docker-compose.yml at run time)
 #       -> HTTP 404
-#   raw.githubusercontent.com/hangar-project/hangar/main/deploy/install.sh
+#   raw.githubusercontent.com/<owner>/hangar/main/deploy/install.sh
 #       -> HTTP 404
-#   ghcr.io/hangar-project/hangar:latest
+#   ghcr.io/<owner>/hangar:latest
 #       -> 403, no anonymous pull
 #
 # The repository has no git remote at all and the image has never been pushed.
@@ -74,14 +74,43 @@ log "docker:    $(docker --version)"
 log "compose:   $(docker compose version --short)"
 log ""
 
-# ── the substituted origin ─────────────────────────────────────────────────
-log "── substituted origin (see this script's header) ───────────────────────"
-for url in \
-  "https://raw.githubusercontent.com/hangar-project/hangar/main/docker-compose.yml" \
-  "https://raw.githubusercontent.com/hangar-project/hangar/main/deploy/install.sh"; do
+# ── PHASE 23 (D-2): THE IMAGE NAME IS READ, NOT TYPED ──────────────────────
+#
+# Four places in this script hard-coded ghcr.io/hangar-project/hangar. When
+# the release was published under a different name, three of them kept
+# reaching for the old one: 5.3's blank-env and callback-mismatch probes ran
+# an image that no longer exists, and 5.7's version bump tried to PULL a tag
+# nothing had built. Each failed for a reason that had nothing to do with the
+# condition it was measuring.
+#
+# It is read from docker-compose.yml now — the file an operator downloads —
+# so the gate cannot drift from the artefact it is testing.
+COMPOSE_IMAGE="$(grep -oE 'image: ghcr\.io/[^:$]+' "${REPO_ROOT}/docker-compose.yml" | head -1 | sed 's|image: ||')"
+if [ -z "$COMPOSE_IMAGE" ]; then
+  echo "gate5: docker-compose.yml names no ghcr.io image — cannot proceed" >&2
+  exit 1
+fi
+
+# ── the published origin, probed ANONYMOUSLY ───────────────────────────────
+#
+# PHASE 23 (D-2). These two URLs were HARD-CODED at hangar-project/hangar,
+# which has never existed, so the transcript said 404 twice however the
+# documented URLs actually read. They are now taken from docker-compose.yml
+# itself — the file an operator downloads — so this section reports the state
+# of what the release POINTS AT rather than of what somebody once typed here.
+log "── published origin, probed anonymously ────────────────────────────────"
+PUBLISHED_COMPOSE="$(grep -oE 'https://raw\.githubusercontent\.com/[^ ]+/docker-compose\.yml' "${REPO_ROOT}/docker-compose.yml" | head -1)"
+PUBLISHED_INSTALL="$(grep -oE 'https://raw\.githubusercontent\.com/[^ ]+/deploy/install\.sh' "${REPO_ROOT}/docker-compose.yml" | head -1)"
+for url in "$PUBLISHED_COMPOSE" "$PUBLISHED_INSTALL"; do
+  [ -z "$url" ] && continue
   code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$url" || echo "unreachable")"
   log "  $url -> $code"
 done
+log ""
+log "  NOTE: §5.1's three commands below are still run against a LOCAL origin"
+log "  (see this script's header). That substitution is about reproducibility"
+log "  — the gate must give the same answer offline and at any commit — and is"
+log "  independent of condition 5.2, which measures publication directly."
 log ""
 
 (cd "$REPO_ROOT" && python -m http.server "$ORIGIN_PORT" --bind 127.0.0.1 >/dev/null 2>&1) &
@@ -91,9 +120,9 @@ ORIGIN="http://127.0.0.1:${ORIGIN_PORT}"
 
 # The image the compose file names. A real deployment pulls this; here it is
 # the image built from this very commit, tagged with that name.
-docker tag "hangar:${VERSION}" ghcr.io/hangar-project/hangar:latest 2>/dev/null \
-  || docker tag hangar:latest ghcr.io/hangar-project/hangar:latest
-log "image under test: $(docker images --format '{{.Repository}}:{{.Tag}} {{.ID}} {{.CreatedSince}}' ghcr.io/hangar-project/hangar:latest | head -1)"
+docker tag "hangar:${VERSION}" "${COMPOSE_IMAGE}:latest" 2>/dev/null \
+  || docker tag hangar:latest "${COMPOSE_IMAGE}:latest"
+log "image under test: $(docker images --format '{{.Repository}}:{{.Tag}} {{.ID}} {{.CreatedSince}}' "${COMPOSE_IMAGE}:latest" | head -1)"
 log ""
 
 cd "$WORKDIR" || exit 1
@@ -129,9 +158,9 @@ log ""
 log "── §5.3 failure modes ──────────────────────────────────────────────────"
 
 # 1. Blank .env -> a named, actionable error, not a stack trace.
-log "\$ docker run --rm ghcr.io/hangar-project/hangar:latest serve   # with no configuration at all"
+log "\$ docker run --rm ${COMPOSE_IMAGE}:latest serve   # with no configuration at all"
 docker rm -f gate5-blank >/dev/null 2>&1 || true
-BLANK_OUT="$(MSYS_NO_PATHCONV=1 docker run --rm --name gate5-blank ghcr.io/hangar-project/hangar:latest serve 2>&1 | head -20)"
+BLANK_OUT="$(MSYS_NO_PATHCONV=1 docker run --rm --name gate5-blank "${COMPOSE_IMAGE}:latest" serve 2>&1 | head -20)"
 docker rm -f gate5-blank >/dev/null 2>&1 || true
 echo "$BLANK_OUT" >> "$TRANSCRIPT"
 if echo "$BLANK_OUT" | grep -qiE "HANGAR_(MASTER_KEY|DB_URL|SESSION_SECRET)"; then
@@ -170,7 +199,7 @@ MISMATCH_OUT="$(MSYS_NO_PATHCONV=1 timeout 25 docker run --rm --name gate5-misma
   -e HANGAR_SSO_CLIENT_ID=gate5 -e HANGAR_SSO_CLIENT_SECRET=gate5 \
   -e HANGAR_PUBLIC_URL="https://hangar.example.com" \
   -e HANGAR_SSO_CALLBACK_URL="https://SOMETHING-ELSE.example.com/auth/callback" \
-  ghcr.io/hangar-project/hangar:latest serve 2>&1 | head -20)"
+  "${COMPOSE_IMAGE}:latest" serve 2>&1 | head -20)"
 docker rm -f gate5-mismatch >/dev/null 2>&1 || true
 echo "$MISMATCH_OUT" >> "$TRANSCRIPT"
 # §5.3 requires "the expected value shown", not merely "the two disagree" —
@@ -219,10 +248,65 @@ else
   record "5.1" "FAIL" "one of the three commands failed: curl=$CMD1 install=$CMD2 up=$CMD3"
 fi
 
+# ── PHASE 23 (D-2): 5.2 IS MEASURED NOW, NOT ASSERTED ──────────────────────
+#
+# This block used to record SUBSTITUTED unconditionally, with a hard-coded
+# sentence saying ghcr.io returns 403, raw.githubusercontent 404s and
+# `git remote -v` is empty. All three were true when it was written and a
+# verdict that cannot change is not a measurement — it would have gone on
+# saying "nothing is published" the day after something was.
+#
+# So each half is now probed, ANONYMOUSLY, from outside the repository:
+#
+#   the sources  §5.1's first two commands, curl'd from the published raw
+#                URLs with no credentials
+#   the image    a HEAD against the registry's manifest for the tag the
+#                compose file actually references
+#
+# 5.2 passes only when both do. Anything else records exactly which half is
+# missing, because "not published" and "the image is not published" are
+# different amounts of work for whoever picks this up.
+COMPOSE_URL="$(grep -oE 'https://raw\.githubusercontent\.com/[^ ]+/docker-compose\.yml' docker-compose.yml | head -1)"
+INSTALL_URL="$(grep -oE 'https://raw\.githubusercontent\.com/[^ ]+/deploy/install\.sh' docker-compose.yml | head -1)"
+IMAGE_REF="$(grep -oE 'image: ghcr\.io/[^:$]+' docker-compose.yml | head -1 | sed 's|image: ||')"
+IMAGE_TAG="${HANGAR_VERSION:-latest}"
+
+SRC_OK=no
+if [ -n "$COMPOSE_URL" ] && [ -n "$INSTALL_URL" ]; then
+  c1="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$COMPOSE_URL" || true)"
+  c2="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$INSTALL_URL" || true)"
+  log "5.2 sources: ${COMPOSE_URL} -> ${c1}, ${INSTALL_URL} -> ${c2}"
+  [ "$c1" = 200 ] && [ "$c2" = 200 ] && SRC_OK=yes
+fi
+
+# An anonymous pull needs a pull token; ghcr issues one for a PUBLIC package
+# without credentials, so asking for it and then using it is the same thing
+# an operator's `docker pull` does.
+IMG_OK=no
+IMG_CODE="n/a"
+if [ -n "$IMAGE_REF" ]; then
+  REPO_PATH="${IMAGE_REF#ghcr.io/}"
+  TOKEN="$(curl -s --max-time 30 "https://ghcr.io/token?scope=repository:${REPO_PATH}:pull" | grep -oE '"token":"[^"]+"' | cut -d'"' -f4 || true)"
+  if [ -n "$TOKEN" ]; then
+    IMG_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
+      -H "Authorization: Bearer ${TOKEN}" \
+      -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json' \
+      "https://ghcr.io/v2/${REPO_PATH}/manifests/${IMAGE_TAG}" || true)"
+  else
+    IMG_CODE="no-token"
+  fi
+  log "5.2 image: ${IMAGE_REF}:${IMAGE_TAG} -> ${IMG_CODE}"
+  [ "$IMG_CODE" = 200 ] && IMG_OK=yes
+fi
+
 if grep -qE "^\s+build:" docker-compose.yml; then
   record "5.2" "FAIL" "the compose file has a build: key — the operator would compile from source"
+elif [ "$SRC_OK" = yes ] && [ "$IMG_OK" = yes ]; then
+  record "5.2" "pass" "no build: key, no compilation, and BOTH halves verified anonymously: the compose file and install.sh fetch 200 from ${COMPOSE_URL%/docker-compose.yml}, and ${IMAGE_REF}:${IMAGE_TAG} returns a manifest to an anonymous pull token"
+elif [ "$SRC_OK" = yes ]; then
+  record "5.2" "SUBSTITUTED" "the SOURCES are published and fetch anonymously (200), but the IMAGE is not: ${IMAGE_REF}:${IMAGE_TAG} answered ${IMG_CODE}. Two of §5.1's three commands are therefore real and the third is not. Pushing the image needs a write:packages credential this session does not hold; see docs/PRE_V1_OPEN_ITEMS.md B-12"
 else
-  record "5.2" "SUBSTITUTED" "no build: key and no compilation, but the image is NOT pulled from a public registry: ghcr.io/hangar-project/hangar returns 403, raw.githubusercontent.com/hangar-project/hangar 404s, and 'git remote -v' is empty. DECIDED IN PHASE 22 (defect B-12): recorded as PERMANENTLY SUBSTITUTED for this release candidate, because publishing is an operator action with credentials this session does not hold, not a code change. Verified against a locally built image of the same commit; see docs/PRE_V1_OPEN_ITEMS.md B-12 for exactly what remains"
+  record "5.2" "SUBSTITUTED" "nothing is published: the compose file answered ${c1:-n/a}, install.sh ${c2:-n/a}, and ${IMAGE_REF:-the image} ${IMG_CODE}. Verified against a locally built image of the same commit; see docs/PRE_V1_OPEN_ITEMS.md B-12"
 fi
 
 # 5.4 — migrations run automatically and the stack is healthy within 5 minutes.
@@ -270,12 +354,15 @@ fi
 # the ingest completed 40 seconds later with 225 routes from a LIVE fetch and
 # the catalogue completed at 54/4. A first-boot assertion has to wait for first
 # boot to finish.
+# PHASE 23: `2>/dev/null` on the psql exec made a BROKEN exec and a slow
+# ingest look identical — the check reported "got ? and ?" and there was no
+# way to tell which. stderr goes to the transcript now.
 ALERTS=""; THRESHOLDS=""
 for _ in $(seq 1 40); do
   ALERTS="$(docker compose -p "$PROJECT" exec -T postgres psql -U hangar -d hangar -tAc \
-    "SELECT count(*) FROM app.alert_type" 2>/dev/null | tr -d '\r ')"
+    "SELECT count(*) FROM app.alert_type" 2>>"$TRANSCRIPT" | tr -d '\r ')"
   THRESHOLDS="$(docker compose -p "$PROJECT" exec -T postgres psql -U hangar -d hangar -tAc \
-    "SELECT count(*) FROM app.alert_type WHERE category = 'threshold'" 2>/dev/null | tr -d '\r ')"
+    "SELECT count(*) FROM app.alert_type WHERE category = 'threshold'" 2>>"$TRANSCRIPT" | tr -d '\r ')"
   [ "$ALERTS" = "54" ] && [ "$THRESHOLDS" = "4" ] && break
   sleep 5
 done
@@ -296,7 +383,7 @@ docker compose -p "$PROJECT" exec -T postgres psql -U hangar -d hangar -c \
 BEFORE="$(docker compose -p "$PROJECT" exec -T postgres psql -U hangar -d hangar -tAc \
   "SELECT name FROM app.corporation WHERE corporation_id = 98999001" 2>/dev/null | tr -d '\r ')"
 
-docker tag ghcr.io/hangar-project/hangar:latest ghcr.io/hangar-project/hangar:bumped
+docker tag "${COMPOSE_IMAGE}:latest" "${COMPOSE_IMAGE}:bumped"
 sed -i "s|^HANGAR_VERSION=.*|HANGAR_VERSION=bumped|" .env
 run docker compose -p "$PROJECT" up -d
 sleep 20
@@ -340,7 +427,31 @@ if [ -f "${REPO_ROOT}/bin/hangar-linux-amd64" ]; then
   # worked was recorded as a failure. `migrate up` exits non-zero when it
   # fails; that is the signal, and it does not move when a log line does.
   if [ "$MANUAL_CODE" = 0 ]; then
-    record "5.8" "PARTIAL" "the static binary ran on a bare debian:12-slim with no toolchain and migrated an external PostgreSQL 18. systemd itself was NOT exercised — this host is Windows and has no systemd; the unit file is deploy/ material and remains unverified"
+    # ── PHASE 23 (D-3): THE OTHER HALF OF 5.8 ─────────────────────────────
+    #
+    # This recorded PARTIAL at rc1 and rc2 with the note that "systemd itself
+    # was NOT exercised — this host is Windows and has no systemd; the unit
+    # file is deploy/ material and remains unverified".
+    #
+    # Two things were wrong with that. The host having no systemd does not
+    # mean systemd cannot be run ON it — a container with systemd as PID 1
+    # does exactly that. And there WAS NO UNIT FILE: §9.2 has required one
+    # since v3.0 and the repository shipped none, so "unverified" was
+    # describing something that did not exist.
+    #
+    # deploy/hangar.service exists now and tools/gate5-deploy/systemd.sh
+    # starts it under systemd 252, so 5.8 stops being partial the moment
+    # both halves pass. The verdict is derived from that runner's own
+    # verdict file rather than restated here, so the two cannot drift.
+    log ""
+    log "── §5.2 condition 5.8, second half: the systemd unit ───────────────"
+    if bash "${REPO_ROOT}/tools/gate5-deploy/systemd.sh" "$EVIDENCE" >>"$TRANSCRIPT" 2>&1; then
+      SYSTEMD_PASSES="$(awk -F "\t" '$2 == "PASS" { n++ } END { print n + 0 }' "${EVIDENCE}/systemd-verdict.txt" 2>/dev/null)"
+      record "5.8" "pass" "the static binary ran on a bare debian:12-slim with no toolchain and migrated an external PostgreSQL 18, AND deploy/hangar.service started under real systemd (${SYSTEMD_PASSES} sub-checks: the unit parses, ExecStartPre migrates, the service reaches active (running), /healthz answers 200 from inside it, and systemctl stop leaves it inactive and not failed). See systemd-verdict.txt. It is a CONTAINER, so cgroup delegation and some sandboxing directives are enforced more weakly than on metal"
+    else
+      SYSTEMD_FAILED="$(awk -F "\t" '$2 == "FAIL" { print $1 }' "${EVIDENCE}/systemd-verdict.txt" 2>/dev/null | tr '\n' ' ')"
+      record "5.8" "PARTIAL" "the static binary migrated an external PostgreSQL 18, but the systemd unit did not pass: ${SYSTEMD_FAILED:-the runner did not complete}. See systemd-transcript.txt"
+    fi
   else
     record "5.8" "FAIL" "the static binary could not migrate an external PostgreSQL 18 (exit $MANUAL_CODE): $(echo "$MANUAL_OUT" | tail -3 | tr '\n' ' ')"
   fi

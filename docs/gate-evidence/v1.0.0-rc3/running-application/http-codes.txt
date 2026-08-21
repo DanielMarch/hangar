@@ -1,0 +1,69 @@
+# The running application, signed out and signed in — v1.0.0-rc3
+
+Commit a66312e, taken 2026-08-21T03:22:52Z, against the development
+installation with the operator's REAL EVE session (52 of 52 GET scopes granted).
+
+## Signed out — every admin surface refuses
+  /api/v1/me                                     401
+  /api/v1/admin/alerts/types                     401
+  /api/v1/admin/vocabularies                     401
+  /api/v1/admin/webhooks/dead-letter             401
+
+## Signed in — the surfaces PHASE 23 built
+  /api/v1/admin/alerts/types                     200
+  /api/v1/admin/alerts/types/by-domain           200
+  /api/v1/admin/alerts/channels                  200
+  /api/v1/admin/vocabularies                     200
+  /api/v1/admin/webhooks/dead-letter             200
+  /api/v1/admin/webhooks/outbox                  200
+  /api/v1/admin/sync/subscriptions/character/2124613505 200
+
+## What they actually return — bodies, not just codes
+
+### GET /api/v1/admin/alerts/types  (the catalogue N-4 built a screen for)
+  57 alert types; first: AllianceCapitalChanged (alliances/None)
+
+### GET /api/v1/admin/alerts/types/by-domain
+  alliances                    1
+  characters                   7
+  contracts                    1
+  corporations                 5
+  platform                     7
+  sovereignty                  4
+  structures                   23
+  unknown                      3
+  wars                         6
+
+### GET /api/v1/admin/vocabularies  (the board Gate 6 fills, unread until now)
+  cache_mode           3 pending
+  contract_status      0 pending
+  location_type        0 pending
+  notification_type    6 pending
+  ref_type             0 pending
+  required_role        7 pending
+  scope                0 pending
+
+### GET /api/v1/admin/webhooks/outbox
+  undispatched outbox events: 0
+
+### The values that board was hiding
+
+  cache_mode:
+    ttl-based                                  seen 4096 times
+    event-based                                seen 1127 times
+    not-cached                                 seen 35 times
+  notification_type:
+    CharAppAcceptMsg                           seen 7 times
+    CorpAppNewMsg                              seen 7 times
+    CorpAllBillMsg                             seen 3 times
+    FreelanceProjectCreated                    seen 2 times
+    CorporationGoalCreated                     seen 2 times
+    FreelanceProjectCompleted                  seen 1 times
+  required_role:
+    Station_Manager                            seen 175 times
+    Accountant                                 seen 245 times
+    Director                                   seen 595 times
+    Factory_Manager                            seen 70 times
+    Project_Manager                            seen 105 times
+    Trader                                     seen 70 times
+    Junior_Accountant                          seen 105 times
