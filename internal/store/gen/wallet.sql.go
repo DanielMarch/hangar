@@ -121,6 +121,77 @@ func (q *Queries) ListWalletBalances(ctx context.Context, ownerKind string, owne
 	return items, nil
 }
 
+const listWalletJournalForShim = `-- name: ListWalletJournalForShim :many
+SELECT owner_kind, owner_id, division, journal_id, ref_type, amount, balance, tax, tax_receiver_id, first_party_id, second_party_id, context_id, context_id_type, reason, description, date FROM app.wallet_journal
+ WHERE owner_kind = $1 AND owner_id = $2 AND division = $3
+ ORDER BY journal_id
+`
+
+// PHASE 23 (N-1). The /api/v2 sunset shim's read of one owner's wallet
+// journal, ordered the way LEGACY returns it.
+//
+// Legacy calls `paginate()` with NO orderBy, so MySQL returns rows in
+// clustered-index order, and character_wallet_journals' primary key is
+// (character_id, id): ascending by ESI journal id. Recorded and verified —
+// the corpus page starts at 10001 and runs up.
+//
+// That is the OPPOSITE of ListWalletJournalPage above, which is /api/v1's
+// keyset read and correctly returns newest first. Two orders for two
+// surfaces, and the shim's job is to look like the thing it replaces.
+//
+// ── WHY THIS QUERY EXISTS AT ALL, AFTER FIVE PHASES OF NOT ──────────────
+//
+// character.wallet-journal was classified NOT SHIMMABLE on
+// reasonMySQLDoubleRounding: legacy records an amount of 9007199254741000
+// where the exact value is 9007199254740993.01, and HANGAR could not
+// reproduce those bytes. Phase 23 measured WHERE the digits go — PDO binds
+// a PHP float by stringifying it at the precision ini, 14 — and
+// v2shim.phpPrecision reproduces it. The blocker dissolved, so the reason
+// became false, and a route kept unserved by a reason known to be false is
+// the defect this project keeps closing rather than one to add.
+//
+// Unbounded, like every other collection the shim serves: it fetches the
+// owner's rows and windows them in Go (v2shim.Window). A real property of
+// this surface rather than an oversight — legacy issued the same unbounded
+// SELECT — and /api/v2 is a sunset shim with a published removal date, not
+// a surface anybody should build new load against.
+func (q *Queries) ListWalletJournalForShim(ctx context.Context, ownerKind string, ownerID int64, division int16) ([]AppWalletJournal, error) {
+	rows, err := q.db.Query(ctx, listWalletJournalForShim, ownerKind, ownerID, division)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppWalletJournal
+	for rows.Next() {
+		var i AppWalletJournal
+		if err := rows.Scan(
+			&i.OwnerKind,
+			&i.OwnerID,
+			&i.Division,
+			&i.JournalID,
+			&i.RefType,
+			&i.Amount,
+			&i.Balance,
+			&i.Tax,
+			&i.TaxReceiverID,
+			&i.FirstPartyID,
+			&i.SecondPartyID,
+			&i.ContextID,
+			&i.ContextIDType,
+			&i.Reason,
+			&i.Description,
+			&i.Date,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWalletJournalPage = `-- name: ListWalletJournalPage :many
 SELECT owner_kind, owner_id, division, journal_id, ref_type, amount, balance, tax, tax_receiver_id, first_party_id, second_party_id, context_id, context_id_type, reason, description, date FROM app.wallet_journal
  WHERE owner_kind = $1 AND owner_id = $2 AND division = $3

@@ -98,9 +98,35 @@ func entityNameFirst(id *int64) *Obj {
 // Encode would otherwise have to know that a nil *int64 means null, and
 // keeping that knowledge here leaves the encoder dealing only in concrete
 // values.
+// optString is optInt for a nullable text column: SQL NULL becomes JSON
+// null, and a present value is emitted as-is. PHASE 23, for
+// character.wallet-journal's `reason` and `context_id_type`, both of which
+// are nullable in legacy and in HANGAR.
+func optString(v *string) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
 func optInt(v *int64) any {
 	if v == nil {
 		return nil
+	}
+	return Int(*v)
+}
+
+// zeroInt is optInt for a column that is NULLABLE in HANGAR and NOT NULL
+// DEFAULT 0 in legacy — a case legacy's schema cannot represent, so its
+// clients have never seen null from that field.
+//
+// PHASE 23 (N-3). One field uses it today, corporation_orders.issued_by,
+// and it exists as a named helper rather than an inline conditional so the
+// asymmetry is greppable: a reader asking "which fields does the shim
+// flatten to zero, and why" gets a list instead of a search.
+func zeroInt(v *int64) any {
+	if v == nil {
+		return Int(0)
 	}
 	return Int(*v)
 }

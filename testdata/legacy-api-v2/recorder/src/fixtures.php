@@ -33,6 +33,34 @@ function seedFixtures(): void
             'main_character_id' => 90000002, 'created_at' => $now, 'updated_at' => $now],
     ]);
 
+    // ── PHASE 23 (N-2): ONE refresh_tokens ROW ───────────────────────────
+    //
+    // `character.sheet` is recorded with "user_id": null, and Phase 22's
+    // audit established that the reason it stays pending — CharacterInfo's
+    // `user_id` has no honest value in HANGAR — is TRUE but that the
+    // recording did not evidence it. The null came from this table being
+    // empty: CharacterInfo::user() is a hasOneThrough from character_infos
+    // through refresh_tokens (character_id) to users (id = user_id), so
+    // with no token row the relation resolves to the ->withDefault() stub
+    // and $this->user->id is null for every character on any dataset.
+    //
+    // A shim emitting a constant null would therefore have been
+    // BYTE-IDENTICAL to the recording and wrong on every real installation,
+    // where every tracked character has a token. That is the
+    // corporation.structures/services trap in a new place and the third
+    // time a Gate 7 reason has been true-but-mis-evidenced (B55, B57, N-2).
+    //
+    // ONE row, for character 90000001 only. 90000002 deliberately keeps no
+    // token, so the corpus records BOTH cases — a character whose user
+    // resolves and one whose does not — and the difference between them is
+    // visible rather than inferred.
+    DB::table('refresh_tokens')->insert([
+        ['character_id' => 90000001, 'user_id' => 1, 'version' => 2, 'scopes_profile' => 0,
+            'refresh_token' => 'fixture-refresh-token', 'scopes' => json_encode(['esi-skills.read_skills.v1']),
+            'expires_on' => '2026-08-01 13:00:00', 'token' => 'fixture-access-token',
+            'created_at' => $now, 'updated_at' => $now, 'deleted_at' => null],
+    ]);
+
     DB::table('character_infos')->insert([
         ['character_id' => 90000001, 'name' => 'Pilot One', 'description' => 'A description with "quotes" and a comma, plus ünïcode.',
             'birthday' => '2015-03-04 05:06:07', 'gender' => 'male', 'race_id' => 1, 'bloodline_id' => 3,
@@ -134,6 +162,19 @@ function seedFixtures(): void
     ]);
 
     // ── industry ─────────────────────────────────────────────────────────
+    // ── PHASE 23 (N-3): TWO ROWS, HIGHER JOB ID INSERTED FIRST ───────────
+    //
+    // Eight served routes were byte-verified against recordings holding ONE
+    // row. Field names, order, types and formatting were pinned; their own
+    // multi-row ORDERING was not, and a one-row recording cannot pin row
+    // order however carefully it is read (standing trap 13).
+    //
+    // The 20.10 re-recording established the RULE — two structures inserted
+    // in descending id order and two services non-alphabetically both came
+    // back ascending by key — so every second row below is inserted with a
+    // key that sorts BEFORE the row already there. Insertion order and
+    // ascending order therefore disagree, and the recording says which one
+    // legacy actually uses instead of leaving it to be inferred.
     foreach ([['character_industry_jobs', 'character_id', 90000001, 5001, 'station_id'],
               ['corporation_industry_jobs', 'corporation_id', 98000001, 5002, 'location_id']] as [$table, $ownerCol, $ownerId, $jobId, $placeCol]) {
         DB::table($table)->insert([[
@@ -146,6 +187,17 @@ function seedFixtures(): void
             'start_date' => '2026-07-31 00:00:00', 'end_date' => '2026-07-31 01:00:00',
             'pause_date' => null, 'completed_date' => null, 'completed_character_id' => null,
             'successful_runs' => null, 'created_at' => $now, 'updated_at' => $now,
+        ], [
+            // job_id - 2, inserted second: ascending puts it first.
+            $ownerCol => $ownerId, 'job_id' => $jobId - 2, 'installer_id' => 90000002,
+            'facility_id' => 60003761, $placeCol => 60003761, 'activity_id' => 8,
+            'blueprint_id' => 1000000000004, 'blueprint_type_id' => 588,
+            'blueprint_location_id' => 60003761, 'output_location_id' => 60003761,
+            'runs' => 1, 'cost' => 0.01, 'licensed_runs' => 3, 'probability' => 0.5,
+            'product_type_id' => 35, 'status' => 'delivered', 'duration' => 60,
+            'start_date' => '2026-07-30 00:00:00', 'end_date' => '2026-07-30 00:01:00',
+            'pause_date' => null, 'completed_date' => '2026-07-30 00:01:00', 'completed_character_id' => 90000002,
+            'successful_runs' => 1, 'created_at' => $now, 'updated_at' => $now,
         ]]);
     }
 
@@ -153,6 +205,9 @@ function seedFixtures(): void
     DB::table('character_jump_clones')->insert([
         ['character_id' => 90000001, 'jump_clone_id' => 6001, 'name' => 'Home', 'location_id' => 60003760,
             'location_type' => 'station', 'implants' => '[]', 'created_at' => $now, 'updated_at' => $now],
+        // PHASE 23 (N-3): lower id, inserted second.
+        ['character_id' => 90000001, 'jump_clone_id' => 5999, 'name' => null, 'location_id' => 1000000000005,
+            'location_type' => 'structure', 'implants' => json_encode([9899, 9942]), 'created_at' => $now, 'updated_at' => $now],
     ]);
 
     // ── mail ─────────────────────────────────────────────────────────────
@@ -182,6 +237,15 @@ function seedFixtures(): void
             'volume_total' => 1000000, 'volume_remain' => 999999, 'issued' => '2026-07-27 12:00:00',
             'state' => 'open', 'min_volume' => 1, 'duration' => 90,
             'is_corporation' => 0, 'escrow' => 5550000.0, 'created_at' => $now, 'updated_at' => $now],
+        // PHASE 23 (N-3): lower order_id, inserted second. A sell order,
+        // NULL escrow, a different range and a price above 2^53 — so the
+        // second row differs in every column a reader of a one-row
+        // recording might otherwise assume constant.
+        ['character_id' => 90000001, 'order_id' => 8999, 'type_id' => 587, 'region_id' => 10000043,
+            'location_id' => 60003761, 'range' => 'solarsystem', 'is_buy_order' => 0, 'price' => 9007199254740993.01,
+            'volume_total' => 3, 'volume_remain' => 1, 'issued' => '2026-07-24 06:30:00',
+            'state' => 'open', 'min_volume' => 1, 'duration' => 30,
+            'is_corporation' => 0, 'escrow' => null, 'created_at' => $now, 'updated_at' => $now],
     ]);
     DB::table('corporation_orders')->insert([
         ['corporation_id' => 98000001, 'order_id' => 9002, 'type_id' => 587, 'region_id' => 10000002,
@@ -189,14 +253,39 @@ function seedFixtures(): void
             'volume_total' => 5, 'volume_remain' => 5, 'issued' => '2026-07-26 12:00:00',
             'state' => 'open', 'min_volume' => 1, 'wallet_division' => 1, 'duration' => 30,
             'escrow' => null, 'issued_by' => 90000001, 'created_at' => $now, 'updated_at' => $now],
+        // PHASE 23 (N-3): lower order_id, inserted second, and a NULL
+        // issued_by — the column Phase 9 added and nothing has ever
+        // recorded empty.
+        ['corporation_id' => 98000001, 'order_id' => 8998, 'type_id' => 34, 'region_id' => 10000043,
+            'location_id' => 60003761, 'range' => 'station', 'is_buy_order' => 1, 'price' => 0.01,
+            'volume_total' => 250000, 'volume_remain' => 125000, 'issued' => '2026-07-23 22:15:00',
+            'state' => 'open', 'min_volume' => 100, 'wallet_division' => 2, 'duration' => 90,
+            'escrow' => 1250.0, 'issued_by' => null, 'created_at' => $now, 'updated_at' => $now],
     ]);
 
     // ── skills ───────────────────────────────────────────────────────────
     DB::table('character_skills')->insert([
         ['character_id' => 90000001, 'skill_id' => 587, 'skillpoints_in_skill' => 256000,
             'trained_skill_level' => 5, 'active_skill_level' => 5, 'created_at' => $now, 'updated_at' => $now],
+        // PHASE 23 (N-3): lower skill_id, inserted second, and TRAINED
+        // above ACTIVE — the de-injected-implant case, which a single row
+        // where the two are equal cannot distinguish from a copy of one.
+        ['character_id' => 90000001, 'skill_id' => 34, 'skillpoints_in_skill' => 1280,
+            'trained_skill_level' => 3, 'active_skill_level' => 2, 'created_at' => $now, 'updated_at' => $now],
     ]);
     DB::table('character_skill_queues')->insert([
+        // PHASE 23 (N-3): position 1 inserted FIRST and position 0 second,
+        // so insertion order is the reverse of queue order.
+        //
+        // This is the one collection in the corpus whose order is SEMANTIC
+        // rather than incidental: position 0 is what the character is
+        // training right now. A queue read back in insertion order would be
+        // a real defect rather than a cosmetic one, and a one-row recording
+        // could not have told the difference.
+        ['character_id' => 90000001, 'skill_id' => 3300, 'finish_date' => '2026-10-15 00:00:00',
+            'start_date' => '2026-09-01 00:00:00', 'finished_level' => 5, 'queue_position' => 1,
+            'training_start_sp' => 90510, 'level_end_sp' => 512000, 'level_start_sp' => 90510,
+            'created_at' => $now, 'updated_at' => $now],
         ['character_id' => 90000001, 'skill_id' => 34, 'finish_date' => '2026-09-01 00:00:00',
             'start_date' => '2026-08-01 00:00:00', 'finished_level' => 4, 'queue_position' => 0,
             'training_start_sp' => 1000, 'level_end_sp' => 90510, 'level_start_sp' => 16000,
@@ -246,6 +335,14 @@ function seedFixtures(): void
         ['corporation_id' => 98000001, 'character_id' => 90000001, 'start_date' => '2020-01-01 00:00:00',
             'base_id' => null, 'logon_date' => '2026-07-30 08:00:00', 'logoff_date' => '2026-07-30 10:00:00',
             'location_id' => 60003760, 'ship_type_id' => 587, 'created_at' => $now, 'updated_at' => $now],
+        // PHASE 23 (N-3): the corporation's OTHER member, with every
+        // nullable column null. character_id 90000002 is HIGHER, so here
+        // insertion order and ascending order agree — deliberately, because
+        // 90000002 is the character with no refresh_tokens row (N-2), and
+        // this route is where the two seeds meet.
+        ['corporation_id' => 98000001, 'character_id' => 90000002, 'start_date' => '2021-05-06 07:08:09',
+            'base_id' => 60003761, 'logon_date' => null, 'logoff_date' => null,
+            'location_id' => null, 'ship_type_id' => null, 'created_at' => $now, 'updated_at' => $now],
     ]);
 
     // ── contracts ────────────────────────────────────────────────────────

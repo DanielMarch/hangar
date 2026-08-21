@@ -60,6 +60,39 @@ SELECT * FROM app.wallet_journal
  ORDER BY date DESC, journal_id DESC
  LIMIT sqlc.arg(page_size);
 
+-- name: ListWalletJournalForShim :many
+-- PHASE 23 (N-1). The /api/v2 sunset shim's read of one owner's wallet
+-- journal, ordered the way LEGACY returns it.
+--
+-- Legacy calls `paginate()` with NO orderBy, so MySQL returns rows in
+-- clustered-index order, and character_wallet_journals' primary key is
+-- (character_id, id): ascending by ESI journal id. Recorded and verified —
+-- the corpus page starts at 10001 and runs up.
+--
+-- That is the OPPOSITE of ListWalletJournalPage above, which is /api/v1's
+-- keyset read and correctly returns newest first. Two orders for two
+-- surfaces, and the shim's job is to look like the thing it replaces.
+--
+-- ── WHY THIS QUERY EXISTS AT ALL, AFTER FIVE PHASES OF NOT ──────────────
+--
+-- character.wallet-journal was classified NOT SHIMMABLE on
+-- reasonMySQLDoubleRounding: legacy records an amount of 9007199254741000
+-- where the exact value is 9007199254740993.01, and HANGAR could not
+-- reproduce those bytes. Phase 23 measured WHERE the digits go — PDO binds
+-- a PHP float by stringifying it at the precision ini, 14 — and
+-- v2shim.phpPrecision reproduces it. The blocker dissolved, so the reason
+-- became false, and a route kept unserved by a reason known to be false is
+-- the defect this project keeps closing rather than one to add.
+--
+-- Unbounded, like every other collection the shim serves: it fetches the
+-- owner's rows and windows them in Go (v2shim.Window). A real property of
+-- this surface rather than an oversight — legacy issued the same unbounded
+-- SELECT — and /api/v2 is a sunset shim with a published removal date, not
+-- a surface anybody should build new load against.
+SELECT * FROM app.wallet_journal
+ WHERE owner_kind = $1 AND owner_id = $2 AND division = $3
+ ORDER BY journal_id;
+
 -- name: UpsertWalletTransaction :one
 INSERT INTO app.wallet_transaction AS t (
     owner_kind, owner_id, division, transaction_id, client_id, date, is_buy,

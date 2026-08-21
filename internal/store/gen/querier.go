@@ -1414,6 +1414,35 @@ type Querier interface {
 	// linked to a user account at all.
 	ListUsersWithRoleViaSquad(ctx context.Context, roleID uuid.UUID) ([]uuid.NullUUID, error)
 	ListWalletBalances(ctx context.Context, ownerKind string, ownerID int64) ([]AppWalletBalance, error)
+	// PHASE 23 (N-1). The /api/v2 sunset shim's read of one owner's wallet
+	// journal, ordered the way LEGACY returns it.
+	//
+	// Legacy calls `paginate()` with NO orderBy, so MySQL returns rows in
+	// clustered-index order, and character_wallet_journals' primary key is
+	// (character_id, id): ascending by ESI journal id. Recorded and verified —
+	// the corpus page starts at 10001 and runs up.
+	//
+	// That is the OPPOSITE of ListWalletJournalPage above, which is /api/v1's
+	// keyset read and correctly returns newest first. Two orders for two
+	// surfaces, and the shim's job is to look like the thing it replaces.
+	//
+	// ── WHY THIS QUERY EXISTS AT ALL, AFTER FIVE PHASES OF NOT ──────────────
+	//
+	// character.wallet-journal was classified NOT SHIMMABLE on
+	// reasonMySQLDoubleRounding: legacy records an amount of 9007199254741000
+	// where the exact value is 9007199254740993.01, and HANGAR could not
+	// reproduce those bytes. Phase 23 measured WHERE the digits go — PDO binds
+	// a PHP float by stringifying it at the precision ini, 14 — and
+	// v2shim.phpPrecision reproduces it. The blocker dissolved, so the reason
+	// became false, and a route kept unserved by a reason known to be false is
+	// the defect this project keeps closing rather than one to add.
+	//
+	// Unbounded, like every other collection the shim serves: it fetches the
+	// owner's rows and windows them in Go (v2shim.Window). A real property of
+	// this surface rather than an oversight — legacy issued the same unbounded
+	// SELECT — and /api/v2 is a sunset shim with a published removal date, not
+	// a surface anybody should build new load against.
+	ListWalletJournalForShim(ctx context.Context, ownerKind string, ownerID int64, division int16) ([]AppWalletJournal, error)
 	// ── DEFECT B46 (PHASE 20.6) ──────────────────────────────────────────────
 	// The row comparison was written `(date, journal_id) < (sqlc.arg(before_date),
 	// sqlc.arg(before_journal_id))` with NO casts. sqlc types a row-comparison's

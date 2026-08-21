@@ -199,7 +199,19 @@ func corporationMarketOrderRow(order gen.AppMarketOrder) (*Obj, error) {
 		Set("volume_total", Int(order.VolumeTotal)).
 		Set("volume_remain", Int(order.VolumeRemain)).
 		Set("issued", legacyTime(order.Issued)).
-		Set("issued_by", optInt(order.IssuedBy)).
+		// PHASE 23 (N-3): ZERO, not null, when HANGAR has no issuer.
+		//
+		// Legacy's corporation_orders.issued_by is `bigint NOT NULL
+		// DEFAULT 0`, so a legacy installation cannot hold a null there and
+		// an order with no recorded issuer reads back as 0. HANGAR's column
+		// IS nullable — ESI omits issued_by on older orders — so this is a
+		// case legacy's schema does not have, and emitting null would put a
+		// value on the wire that no legacy client has ever seen from this
+		// field.
+		//
+		// Found by N-3's second row: the one recorded order had an issuer,
+		// so a one-row recording could not distinguish `optInt` from this.
+		Set("issued_by", zeroInt(order.IssuedBy)).
 		Set("min_volume", optInt(order.MinVolume)).
 		Set("wallet_division", division).
 		Set("duration", Int(int64(order.Duration))).

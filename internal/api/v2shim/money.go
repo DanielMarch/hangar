@@ -2,6 +2,7 @@ package v2shim
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 
 	"github.com/shopspring/decimal"
@@ -55,8 +56,78 @@ func Money(d decimal.Decimal) (Num, error) {
 	if err != nil {
 		return 0, fmt.Errorf("v2shim: %q is not a number: %w", text, err)
 	}
-	return Num(value), nil
+	return Num(phpPrecision(value)), nil
 }
+
+// phpPrecision applies the rounding legacy's WRITE path applied, so the
+// shim emits the number legacy's database actually holds.
+//
+// ── PHASE 23 (N-3): MEASURED, AT LAST ───────────────────────────────────
+//
+// The comment above says a balance of 9007199254740993.01 ISK "was already
+// 9007199254741000 in legacy's own database". That was right, and for five
+// phases nobody knew WHY — the reachability allowlist recorded it as
+// "MySQL's/PHP's 14-significant-digit rounding, not IEEE-754 nearest" and
+// said closing it "needs the PHP recorder re-run with serialize_precision
+// measured". Phase 23 ran that measurement, and the answer was neither of
+// the two things that had been guessed:
+//
+//	PHP 8.2.33   precision=14, serialize_precision=-1
+//	             json_encode(9007199254740993.01) = 9007199254740994
+//	MySQL 8.4.11 SELECT CAST(9007199254740993.01 AS DOUBLE)
+//	             = 9.007199254740994e15
+//
+// Neither the encoder nor the database loses those digits. Both render the
+// nearest double exactly. But the value SITTING IN THE FIXTURE TABLE is
+//
+//	SELECT price FROM character_orders WHERE order_id = 8999
+//	= 9.007199254741e15
+//
+// — thirteen significant digits. The loss happened at INSERT: PDO binds a
+// PHP float by STRINGIFYING it with the `precision` ini, which is 14, so
+// MySQL received the text "9.007199254741E+15" and stored the double
+// nearest to that. Legacy's write path, not its read path, and not MySQL.
+//
+// It is therefore reproducible, deterministically, from the exact decimal:
+// render to 14 significant digits, parse back. That is the whole function.
+//
+// ── WHY THIS IS THE SHIM'S JOB AND NOT A CORRUPTION ─────────────────────
+//
+// A byte-compatibility shim exists to emit what legacy emits. Legacy's
+// stored value IS 9007199254741000 — a client reading /api/v2 today gets
+// that number, and giving them 9007199254740994 instead would be a silent
+// change in the data they have been reconciling against. The exact value
+// is on /api/v1, as a string, and always has been.
+//
+// This is v2shim-only. Principle 9 forbids float64 on any money path and
+// /api/v1 has none; the conversion has exactly one call site, Money above,
+// which is why that function's doc says there is one thing to audit.
+//
+// Values below 2^53 with two decimal places — every real ISK amount — pass
+// through unchanged: 5.55 stays 5.55, 10000000.5 stays 10000000.5, 0.01
+// stays 0.01. TestPHPPrecisionMatchesTheRecordedCorpus is the guard.
+func phpPrecision(value float64) float64 {
+	if value == 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return value
+	}
+	// %.14G is PHP's own stringification under precision=14 — the same
+	// conversion PDO performs when binding a float parameter.
+	rounded, err := strconv.ParseFloat(strconv.FormatFloat(value, 'G', phpIniPrecision, 64), 64)
+	if err != nil {
+		// Unreachable for a finite float64: FormatFloat's output always
+		// parses. Returning the input keeps the failure a no-op rather
+		// than a zero.
+		return value
+	}
+	return rounded
+}
+
+// phpIniPrecision is PHP's `precision` ini setting, MEASURED at 14 against
+// the pinned recorder image (php 8.2.33) rather than assumed. It is PHP's
+// compiled-in default and has been for the language's whole history; an
+// installation that has changed it stores different bytes, which is a
+// property of that installation and not of this shim.
+const phpIniPrecision = 14
 
 // MoneyOrNull is Money for a nullable column: a SQL NULL becomes JSON
 // null, which is what legacy emitted for one.

@@ -213,6 +213,46 @@ func corpusListFixture(t testing.TB, s *store.Store, corpID, charID int64) {
 	})
 	require.NoError(t, err)
 
+	// ── PHASE 23 (N-3): THE SECOND ROW ───────────────────────────────────
+	//
+	// Eight served routes were byte-verified against recordings holding ONE
+	// row. Field names, order, types and formatting were pinned; their own
+	// multi-row ORDERING was not, because a one-row recording cannot pin row
+	// order however carefully it is read (standing trap 13).
+	//
+	// Every second row below is seeded in the same order fixtures.php
+	// inserts it — HIGHER key first, lower key second — so insertion order
+	// and ascending key order disagree. That is the same construction the
+	// 20.10 structures re-recording used, and it is what makes the byte
+	// comparison able to tell the two apart at all.
+	_, err = s.UpsertMarketOrder(ctx, gen.UpsertMarketOrderParams{
+		OwnerKind: "character", OwnerID: charID, OrderID: 8999, TypeID: 587,
+		RegionID: 10000043, LocationID: 60003761, Range: "solarsystem",
+		IsBuyOrder: false, IsCorporation: false,
+		// Above 2^53, so this row also carries the money path a one-row
+		// recording could only exercise on the buy side.
+		Price:       decimal.RequireFromString("9007199254740993.01"),
+		VolumeTotal: 3, VolumeRemain: 1, MinVolume: &minVolume,
+		Duration: 30, Issued: at("2026-07-24T06:30:00Z"),
+	})
+	require.NoError(t, err)
+
+	minVolumeHundred := int64(100)
+	divisionTwo := int16(2)
+	_, err = s.UpsertMarketOrder(ctx, gen.UpsertMarketOrderParams{
+		OwnerKind: "corporation", OwnerID: corpID, OrderID: 8998, TypeID: 34,
+		RegionID: 10000043, LocationID: 60003761, Range: "station",
+		IsBuyOrder: true, IsCorporation: false,
+		Escrow:      decimal.NewNullDecimal(decimal.RequireFromString("1250.00")),
+		Price:       decimal.RequireFromString("0.01"),
+		VolumeTotal: 250000, VolumeRemain: 125000, MinVolume: &minVolumeHundred,
+		Duration: 90, Issued: at("2026-07-23T22:15:00Z"),
+		// IssuedBy deliberately nil: the column Phase 9 added, and nothing
+		// had ever recorded it empty.
+		WalletDivision: &divisionTwo,
+	})
+	require.NoError(t, err)
+
 	// ── industry jobs ────────────────────────────────────────────────────
 	productType := int32(34)
 	for _, job := range []struct {
@@ -230,6 +270,30 @@ func corpusListFixture(t testing.TB, s *store.Store, corpID, charID int64) {
 			StartDate: at("2026-07-31T00:00:00Z"), EndDate: at("2026-07-31T01:00:00Z"),
 		})
 		require.NoError(t, err)
+
+		// PHASE 23 (N-3): job_id - 2, seeded second — ascending puts it
+		// first. Every nullable an active job leaves empty is populated
+		// here: licensed runs, probability, a completion date, a completing
+		// character and a successful-run count.
+		licensedRuns, successfulRuns := int32(3), int32(1)
+		probability := 0.5
+		productTypeTwo := int32(35)
+		installerTwo := int64(90000002)
+		completedAt := at("2026-07-30T00:01:00Z")
+		_, err = s.UpsertIndustryJob(ctx, gen.UpsertIndustryJobParams{
+			OwnerKind: job.ownerKind, OwnerID: job.ownerID, JobID: job.jobID - 2,
+			InstallerID: installerTwo, FacilityID: 60003761, StationID: 60003761,
+			ActivityID: 8, BlueprintID: 1000000000004, BlueprintTypeID: 588,
+			BlueprintLocationID: 60003761, OutputLocationID: 60003761, Runs: 1,
+			Cost:          decimal.NewNullDecimal(decimal.RequireFromString("0.01")),
+			LicensedRuns:  &licensedRuns,
+			Probability:   &probability,
+			ProductTypeID: &productTypeTwo, Status: "delivered", Duration: 60,
+			StartDate: at("2026-07-30T00:00:00Z"), EndDate: completedAt,
+			CompletedDate: &completedAt, CompletedCharacterID: &installerTwo,
+			SuccessfulRuns: &successfulRuns,
+		})
+		require.NoError(t, err)
 	}
 
 	// ── jump clones ──────────────────────────────────────────────────────
@@ -242,9 +306,41 @@ func corpusListFixture(t testing.TB, s *store.Store, corpID, charID int64) {
 	})
 	require.NoError(t, err)
 
+	// PHASE 23 (N-3): lower id, seeded second, an UNNAMED clone in a
+	// structure with two implants — so `[]` and a populated array are both
+	// recorded, and `null` and a name are both recorded.
+	_, err = s.UpsertCharacterClone(ctx, gen.UpsertCharacterCloneParams{
+		CharacterID: charID, JumpCloneID: 5999, LocationID: 1000000000005,
+		LocationType: "structure", Implants: []int64{9899, 9942},
+	})
+	require.NoError(t, err)
+
 	// ── skills and the skill queue ───────────────────────────────────────
 	_, err = s.UpsertCharacterSkill(ctx, gen.UpsertCharacterSkillParams{
 		CharacterID: charID, SkillID: 587, ActiveLevel: 5, TrainedLevel: 5, Skillpoints: 256000,
+	})
+	require.NoError(t, err)
+
+	// PHASE 23 (N-3): lower skill_id, seeded second, and TRAINED above
+	// ACTIVE — the de-injected-implant case, which a single row where the
+	// two are equal cannot distinguish from a copy of one field into both.
+	_, err = s.UpsertCharacterSkill(ctx, gen.UpsertCharacterSkillParams{
+		CharacterID: charID, SkillID: 34, ActiveLevel: 2, TrainedLevel: 3, Skillpoints: 1280,
+	})
+	require.NoError(t, err)
+
+	// PHASE 23 (N-3): position 1 seeded FIRST and position 0 second, matching
+	// fixtures.php, so insertion order is the reverse of queue order.
+	//
+	// This is the one collection in the corpus whose order is SEMANTIC
+	// rather than incidental: position 0 is what the character is training
+	// right now. A queue served in insertion order would be a real defect,
+	// and a one-row recording could not have told the difference.
+	nextStart, nextEnd := int64(90510), int64(512000)
+	_, err = s.ReplaceCharacterSkillqueue(ctx, gen.ReplaceCharacterSkillqueueParams{
+		CharacterID: charID, QueuePosition: 1, SkillID: 3300, FinishedLevel: 5,
+		TrainingStartSp: &nextStart, LevelStartSp: &nextStart, LevelEndSp: &nextEnd,
+		StartDate: ptr(at("2026-09-01T00:00:00Z")), FinishDate: ptr(at("2026-10-15T00:00:00Z")),
 	})
 	require.NoError(t, err)
 
@@ -255,6 +351,38 @@ func corpusListFixture(t testing.TB, s *store.Store, corpID, charID int64) {
 		StartDate: ptr(at("2026-08-01T00:00:00Z")), FinishDate: ptr(at("2026-09-01T00:00:00Z")),
 	})
 	require.NoError(t, err)
+
+	// ── wallet journal ───────────────────────────────────────────────────
+	//
+	// PHASE 23 (N-1). Twenty rows against a page size of 15, mirroring
+	// fixtures.php, because character.wallet-journal is the FIRST served
+	// route with a real second page: every other recording fits on page one,
+	// so Laravel's prev/next links have never been exercised against
+	// anything but the degenerate single-page shape.
+	//
+	// The amounts are above 2^53 deliberately. 9007199254740993.01 is what
+	// legacy's PDO stringified at precision=14 into 9.007199254741e15, and
+	// reproducing that is what made this route servable at all — see
+	// v2shim.phpPrecision.
+	journalFirstParty, journalSecondParty := int64(90000002), charID
+	journalDescription := "A donation"
+	for i := 1; i <= 20; i++ {
+		var reason *string
+		if i != 1 {
+			text := fmt.Sprintf("reason %d", i)
+			reason = &text
+		}
+		_, err = s.UpsertWalletJournalEntry(ctx, gen.UpsertWalletJournalEntryParams{
+			OwnerKind: "character", OwnerID: charID, Division: 1,
+			JournalID: int64(10000 + i), RefType: "player_donation",
+			Amount:       decimal.NewNullDecimal(decimal.RequireFromString("9007199254740993.01")),
+			Balance:      decimal.NewNullDecimal(decimal.RequireFromString(fmt.Sprintf("%d.01", 9007199254740993+i))),
+			FirstPartyID: &journalFirstParty, SecondPartyID: &journalSecondParty,
+			Reason: reason, Description: journalDescription,
+			Date: at(fmt.Sprintf("2026-07-%02dT00:00:00Z", i)),
+		})
+		require.NoError(t, err)
+	}
 
 	// ── mail ─────────────────────────────────────────────────────────────
 	// HANGAR's app.mail_header is CHARACTER-SCOPED and legacy's mail_headers
@@ -331,6 +459,17 @@ func corpusListFixture(t testing.TB, s *store.Store, corpID, charID int64) {
 		CorporationID: corpID, CharacterID: charID, LocationID: &location,
 		LogoffDate: ptr(at("2026-07-30T10:00:00Z")), LogonDate: ptr(at("2026-07-30T08:00:00Z")),
 		ShipTypeID: &shipType, StartDate: ptr(at("2020-01-01T00:00:00Z")),
+	})
+	require.NoError(t, err)
+
+	// PHASE 23 (N-3): the corporation's OTHER member, with every nullable
+	// null. 90000002 is HIGHER, so here insertion order and ascending order
+	// agree — deliberately, because 90000002 is the character with no
+	// refresh_tokens row (N-2) and this route is where the two seeds meet.
+	base := int64(60003761)
+	_, err = s.UpsertCorporationMemberTracking(ctx, gen.UpsertCorporationMemberTrackingParams{
+		CorporationID: corpID, CharacterID: 90000002, BaseID: &base,
+		StartDate: ptr(at("2021-05-06T07:08:09Z")),
 	})
 	require.NoError(t, err)
 }

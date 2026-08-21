@@ -44,13 +44,62 @@ const (
 	// StatusPending is shimmable but not yet shimmed. Answers 501 with a
 	// message that says "not yet". This is unfinished work recorded as
 	// unfinished; it is not a design decision.
+	//
+	// PHASE 23 (N-1): TWELVE ROUTES HELD THIS AND NOBODY HAD DECIDED.
+	//
+	// "Not yet" is a promise, and a release cannot ship a compatibility
+	// shim making twelve of them. Each of the twelve already carried a
+	// reason DERIVED against legacy's source in Phase 22's audit — the
+	// derivations were sound and the STATUS contradicted them, because a
+	// route whose reason is "legacy puts a MySQL auto-increment on the
+	// wire" is not waiting on work anybody intends to do.
+	//
+	// Eleven moved to StatusUnshimmable. A client reading "not shimmed
+	// yet" waits for a release that is never coming, and telling the two
+	// apart wrongly wastes somebody's quarter — which is the argument this
+	// file already made for keeping the statuses separate, applied to the
+	// routes rather than only to the type.
+	//
+	// The twelfth is character.sheet, and it was settled by a MEASUREMENT
+	// rather than a judgement (N-2): fixtures.php now seeds one
+	// refresh_tokens row, and the re-recorded corpus emits
+	// "user_id": 1 where it used to emit null. That 1 is a MySQL
+	// auto-increment against HANGAR's uuid, so it joined the other eleven.
+	//
+	// NO ROUTE HOLDS THIS STATUS. It is kept because a status that exists
+	// only while something is unfinished is exactly what a future route
+	// will need on the day it is half-built, and deleting it would make
+	// "unshimmable" the only word available for "not done yet" —
+	// which is how the twelve got mislabelled in the first place, from the
+	// other direction.
 	StatusPending RouteStatus = "pending"
 
 	// StatusUnshimmable cannot be made byte-compatible, ever, because
-	// HANGAR's identifier space differs from legacy's. Answers 501 rather
-	// than 410: the identifier mismatch could in principle be addressed by a
-	// future release exposing a stable legacy-id mapping, so "Gone" would
-	// overstate it.
+	// something legacy puts ON THE WIRE has no honest source in HANGAR.
+	// Answers 501 rather than 410: a future release could in principle
+	// expose a compatibility mapping, so "Gone" would overstate it.
+	//
+	// PHASE 23 (N-1): WHAT THIS STATUS MEANS WAS TOO NARROW.
+	//
+	// It used to read "because HANGAR's identifier space differs from
+	// legacy's", which described four of the routes holding it and none of
+	// the eleven moved here this phase. Their reasons are not identifier
+	// space:
+	//
+	//   reasonSurrogateID          a MySQL auto-increment PK on the wire
+	//   reasonContractDoublePrice  a MySQL `double` money column
+	//   reasonAssetMapColumns      persisted columns HANGAR does not have
+	//   reasonKillmailHash         a legacy-computed attacker hash
+	//
+	// What they share with the identifier ones is the only thing that
+	// matters here: the bytes come from legacy's own storage, and HANGAR's
+	// storage is CORRECT rather than merely different — a decimal money
+	// column cannot reproduce a double's rounding error, a uuid cannot
+	// reproduce an auto-increment. Serving these would mean storing
+	// legacy's mistakes.
+	//
+	// So the definition is now the shared property rather than the first
+	// example anybody wrote down.
 	StatusUnshimmable RouteStatus = "unshimmable"
 
 	// StatusBreaking is a route whose underlying model changed so the
@@ -143,8 +192,11 @@ const (
 	//   character_wallet_journals.amount, and the recording carries the SAME
 	//   divergent value: the fixture seeds 9007199254740993.01, which parses
 	//   to the float64 9007199254740994, and the recording says
-	//   9007199254741000 — three ulps away. That is reasonMySQLDoubleRounding
-	//   exactly, settled in 20.7 and equally unfixable here.
+	//   9007199254741000 — three ulps away. That was reasonMySQLDoubleRounding
+	//   exactly, and Phase 23 DISSOLVED it: see the note below on where the
+	//   digits actually go. character.wallet-journal is served as a result;
+	//   this route is not, because its own blocker is the surrogate id and
+	//   that one is unchanged.
 	//
 	// The cost of getting this wrong is not cosmetic. StatusPending's 501
 	// body says "not yet"; four routes were telling integrators to wait for a
@@ -271,55 +323,62 @@ const (
 		"CLOSED in Phase 20.7 (B48) — app.killmail now has a writer — but the surrogate is not " +
 		"recoverable from upstream data at any level of effort."
 
-	// reasonMySQLDoubleRounding is a MEASURED conflict between the corpus and
-	// this package's own double formatter, found in Phase 20.6 by writing the
-	// route and running it against the recording rather than by reading either.
+	// ── PHASE 23 (N-1): reasonMySQLDoubleRounding IS GONE, AND WHY ──────────
 	//
-	// The corpus seeds amount = 9007199254740993.01 and records
-	// `"amount": 9007199254741000`. Those are two DIFFERENT float64 values:
+	// It blocked character.wallet-journal for five phases and it was WRONG,
+	// in the specific way a reason can be wrong while every fact in it is
+	// true. It is deleted rather than kept as an unused constant, and the
+	// derivation is kept here because the correction is worth more than the
+	// constant was.
 	//
-	//	strconv.ParseFloat("9007199254740993.01", 64) == 9007199254740994
-	//	9007199254741000                              != 9007199254740994   (3 ulps apart)
+	// WHAT 20.6 MEASURED. The corpus seeds amount = 9007199254740993.01 and
+	// records `"amount": 9007199254741000`. Those are different float64s —
+	// ParseFloat gives 9007199254740994, three ulps away.
 	//
-	// ── SETTLED IN PHASE 20.7, AND THE 14-DIGIT READING WAS WRONG ────────
-	// The measurement 20.6 asked for was taken: the recorder's own pinned
-	// interpreter (php:8.2-cli, resolving to 8.2.33) run with
-	// serialize_precision instrumented. It reports
+	// WHAT 20.7 MEASURED. The recorder's own PHP 8.2.33 reports
+	// serialize_precision = -1 and precision = 14, and
+	// json_encode(9007199254740993.01) = 9007199254740994. So json_encode
+	// uses shortest round-trip, exactly as formatPHPDouble already assumed,
+	// and the 14-digit hypothesis was refuted: forcing
+	// serialize_precision=14 gives "9.007199254741e+15", exponent form, which
+	// is not the corpus value either.
 	//
-	//	serialize_precision = -1        (the default since PHP 7.1)
-	//	precision           = 14
-	//	json_encode(9007199254740993.01) = 9007199254740994
+	// 20.7 concluded — correctly — that "the divergence is in what legacy's
+	// MySQL DOUBLE column came to hold, upstream of any encoder", and stopped
+	// there, reading that as unreproducible.
 	//
-	// so json_encode uses SHORTEST ROUND-TRIP, exactly as formatPHPDouble
-	// already assumed. The 14-significant-digit hypothesis is refuted twice
-	// over: forcing serialize_precision=14 produces "9.007199254741e+15",
-	// EXPONENT form, which is not the corpus's "9007199254741000" either.
+	// WHAT 23 MEASURED, WHICH NOBODY HAD ASKED. What is actually IN the
+	// column:
 	//
-	// What the corpus records is therefore not a rounded rendering of
-	// ...993.01 at all — 9007199254741000.0 is an exactly representable
-	// double three ulps away, and PHP prints it as those digits because that
-	// IS its shortest round-trip form. The divergence is in what legacy's
-	// MySQL DOUBLE column came to hold, upstream of any encoder.
+	//	SELECT price FROM character_orders WHERE order_id = 8999
+	//	= 9.007199254741e15
 	//
-	// formatPHPDouble is consequently UNCHANGED and now pinned against the
-	// transcript, including the exponent-form boundary
-	// (encode_php_precision_test.go). The shim can reproduce money above
-	// 2^53; what it cannot do is reproduce a value legacy stored as a
-	// different double from the one it was given, which is a corpus fact and
-	// not an encoder defect.
+	// Thirteen significant digits, in the table. MySQL 8.4 renders a double
+	// to full shortest-round-trip on read (CAST(9007199254740993.01 AS
+	// DOUBLE) = 9.007199254740994e15), so the loss is not the read either. It
+	// is the WRITE: PDO binds a PHP float by STRINGIFYING it at the
+	// `precision` ini — 14 — so MySQL received the text "9.007199254741E+15"
+	// and stored the double nearest to that.
 	//
-	// Seeding HANGAR with 9007199254741000 to force a match was considered and
-	// REJECTED: legacy was GIVEN ...993.01 and stored ...741000; HANGAR is
-	// given ...993.01 and stores it exactly, because NUMERIC(30,2) is exact.
-	// The two systems genuinely hold different numbers, and changing the
-	// fixture would be making the test agree with itself.
-	reasonMySQLDoubleRounding = "blocked on a MEASURED corpus conflict, not on missing code. The " +
-		"recording's `amount` (9007199254741000) is a different float64 from the value the fixture " +
-		"seeds (9007199254740993.01 parses to 9007199254740994, 3 ulps away). MEASURED in 20.7 against " +
-		"PHP 8.2.33: serialize_precision is -1 (shortest round-trip), NOT 14-significant-digit rounding, " +
-		"so the encoder is correct and unchanged — the two systems genuinely hold different doubles, " +
-		"and no formatting rule can make HANGAR's exact NUMERIC(30,2) emit legacy's lossy DOUBLE."
-
+	// Both earlier phases looked at the encoder because the divergence
+	// appeared at encoding time. It was introduced three layers earlier, on a
+	// path neither phase had reason to think about, and finding it took
+	// asking the database what it held rather than asking PHP what it
+	// printed.
+	//
+	// Reproducible, therefore. v2shim.phpPrecision applies the same
+	// stringification to the exact decimal before the float64 conversion, and
+	// character.wallet-journal is SERVED — the shim's seventeenth route and
+	// its first wallet route. The exponent form never reaches the wire:
+	// phpPrecision rounds THROUGH it and re-parses, and formatPHPDouble then
+	// renders 9007199254741000 in shortest form, which is the corpus value.
+	//
+	// 20.7's closing paragraph still stands and is why the fixture was not
+	// touched: "seeding HANGAR with 9007199254741000 to force a match was
+	// considered and REJECTED — the two systems genuinely hold different
+	// numbers, and changing the fixture would be making the test agree with
+	// itself." The fix reproduces legacy's rounding at the BOUNDARY, where a
+	// compatibility shim belongs, and HANGAR still stores the exact value.
 	// reasonSurrogateID is the blocker three of the four wallet routes hit
 	// and the fourth does not, which is why byte-verification is the test
 	// and "it returns plausible JSON" is not.
@@ -388,9 +447,31 @@ const (
 	// with what legacy EMITS, not with what this particular fixture happened
 	// to leave null. Recorded here rather than quietly served.
 	//
-	// ACTIONABLE, and cheaper than it looks: seeding one refresh_tokens row
-	// in fixtures.php and re-recording would pin the populated case and
-	// settle this permanently — in whichever direction it falls.
+	// ── PHASE 23 (N-2): SEEDED, RE-RECORDED, AND SETTLED ────────────────
+	//
+	// One refresh_tokens row for character 90000001 (user_id 1), and the
+	// corpus re-recorded from it. The populated case is now pinned:
+	//
+	//	character.sheet.json records "user_id": 1
+	//
+	// It fell the way the reason predicted, and the reason is now EVIDENCED
+	// rather than merely true. The 1 is legacy's `users.id`, a MySQL
+	// auto-increment; HANGAR's app.user.user_id is a uuid. There is no
+	// function from one to the other that two installations holding
+	// identical data would agree on, which is the same blocker
+	// users.index and users.show already carry.
+	//
+	// The old recording could not have shown this. A shim emitting a
+	// constant null was byte-identical to it and wrong on every real
+	// installation — the corporation.structures/`services` trap, and the
+	// third time a Gate 7 reason had been true-but-mis-evidenced (B55, B57,
+	// this). 90000002 deliberately keeps NO token, so the corpus now
+	// records both the populated and the unpopulated case and the
+	// difference between them is visible rather than inferred.
+	//
+	// So character.sheet is StatusUnshimmable, not StatusPending. It was
+	// never waiting on work; it was waiting on a fixture row that would
+	// tell anybody so.
 	reasonCharacterSheetFields = "NOT shimmable, blocked on `user_id`: legacy's is a MySQL " +
 		"auto-increment integer and HANGAR's app.character.user_id is a uuid, so no translation " +
 		"produces the integer a legacy client stored — the same identifier-space break that makes " +
@@ -413,10 +494,20 @@ func Classification() []LegacyRoute {
 			Status: StatusServed, Permission: permission, Appends: true, Handle: handle,
 		}
 	}
-	pending := func(controller, pattern, corpus, migration, reason string) LegacyRoute {
+	// PHASE 23 (N-1): the pending() constructor is GONE, because no route
+	// is pending any more. The STATUS stays — see its doc comment — but a
+	// constructor for it would be an invitation, and the twelve routes that
+	// held it were held there by nothing more than a convenient helper and
+	// nobody deciding.
+	// PHASE 23 (N-1). Eleven routes moved from pending() to this, and the
+	// only thing that changed is the status: every reason below was already
+	// derived against legacy's source, and every one says the bytes come
+	// from legacy's own storage rather than from work HANGAR has not got
+	// round to.
+	unshimmable := func(controller, pattern, corpus, migration, reason string) LegacyRoute {
 		return LegacyRoute{
 			Controller: controller, Method: http.MethodGet, Pattern: pattern, Corpus: corpus,
-			Status: StatusPending, Reason: reason, Migration: migration,
+			Status: StatusUnshimmable, Reason: reason, Migration: migration,
 		}
 	}
 
@@ -430,15 +521,20 @@ func Classification() []LegacyRoute {
 			"characters.view", listContacts("character")),
 		served("CharacterController", Prefix+"/character/corporation-history/{id}", "character.corporation-history",
 			"characters.view", characterCorporationHistory),
-		pending("CharacterController", Prefix+"/character/wallet-journal/{id}", "character.wallet-journal",
-			migrationCharacters+"/wallet/journal", reasonMySQLDoubleRounding),
-		pending("CharacterController", Prefix+"/character/wallet-transactions/{id}", "character.wallet-transactions",
+		// PHASE 23 (N-1): SERVED. See translate_wallet.go — the reason this
+		// carried, reasonMySQLDoubleRounding, was measured and dissolved
+		// rather than re-asserted, and `id` is ESI's journal-entry id
+		// ($incrementing = false) rather than the auto-increment surrogate
+		// that keeps the other three wallet routes unshimmable.
+		served("CharacterController", Prefix+"/character/wallet-journal/{id}", "character.wallet-journal",
+			"characters.view", characterWalletJournal),
+		unshimmable("CharacterController", Prefix+"/character/wallet-transactions/{id}", "character.wallet-transactions",
 			migrationCharacters+"/wallet/transactions", reasonSurrogateID),
-		pending("CharacterController", Prefix+"/character/sheet/{id}", "character.sheet",
+		unshimmable("CharacterController", Prefix+"/character/sheet/{id}", "character.sheet",
 			migrationCharacters, reasonCharacterSheetFields),
-		pending("CharacterController", Prefix+"/character/assets/{id}", "character.assets",
+		unshimmable("CharacterController", Prefix+"/character/assets/{id}", "character.assets",
 			migrationCharacters+"/assets", reasonAssetMapColumns),
-		pending("CharacterController", Prefix+"/character/contracts/{id}", "character.contracts",
+		unshimmable("CharacterController", Prefix+"/character/contracts/{id}", "character.contracts",
 			migrationCharacters+"/contracts", reasonContractDoublePrice),
 		served("CharacterController", Prefix+"/character/industry/{id}", "character.industry",
 			"characters.view", characterIndustry),
@@ -454,7 +550,7 @@ func Classification() []LegacyRoute {
 			"characters.view", characterSkills),
 		served("CharacterController", Prefix+"/character/skill-queue/{id}", "character.skill-queue",
 			"characters.view", characterSkillQueue),
-		pending("CharacterController", Prefix+"/character/killmails/{id}", "killmails.character",
+		unshimmable("CharacterController", Prefix+"/character/killmails/{id}", "killmails.character",
 			migrationKillmails, reasonKillmailHash),
 
 		// ── CorporationController (11 routes) ────────────────────────────
@@ -462,14 +558,14 @@ func Classification() []LegacyRoute {
 			"corporations.view", listContacts("corporation")),
 		served("CorporationController", Prefix+"/corporation/sheet/{id}", "corporation.sheet",
 			"corporations.view", corporationSheet),
-		pending("CorporationController", Prefix+"/corporation/wallet-journal/{id}", "corporation.wallet-journal",
+		unshimmable("CorporationController", Prefix+"/corporation/wallet-journal/{id}", "corporation.wallet-journal",
 			migrationCorporations+"/wallets/{division}/journal", reasonSurrogateID),
-		pending("CorporationController", Prefix+"/corporation/wallet-transactions/{id}", "corporation.wallet-transactions",
+		unshimmable("CorporationController", Prefix+"/corporation/wallet-transactions/{id}", "corporation.wallet-transactions",
 			migrationCorporations+"/wallets/{division}/transactions", reasonSurrogateID),
 
-		pending("CorporationController", Prefix+"/corporation/assets/{id}", "corporation.assets",
+		unshimmable("CorporationController", Prefix+"/corporation/assets/{id}", "corporation.assets",
 			migrationCorporations+"/assets", reasonAssetMapColumns),
-		pending("CorporationController", Prefix+"/corporation/contracts/{id}", "corporation.contracts",
+		unshimmable("CorporationController", Prefix+"/corporation/contracts/{id}", "corporation.contracts",
 			migrationCorporations+"/contracts", reasonContractDoublePrice),
 		served("CorporationController", Prefix+"/corporation/industry/{id}", "corporation.industry",
 			"corporations.view", corporationIndustry),
@@ -479,11 +575,11 @@ func Classification() []LegacyRoute {
 			"corporations.view", corporationMemberTracking),
 		served("CorporationController", Prefix+"/corporation/structures/{id}", "corporation.structures",
 			"corporations.view", corporationStructures),
-		pending("CorporationController", Prefix+"/corporation/killmails/{id}", "killmails.corporation",
+		unshimmable("CorporationController", Prefix+"/corporation/killmails/{id}", "killmails.corporation",
 			migrationKillmails, reasonKillmailHash),
 
 		// ── KillmailsController (1 route) ────────────────────────────────
-		pending("KillmailsController", Prefix+"/killmails/{id}", "killmails.detail",
+		unshimmable("KillmailsController", Prefix+"/killmails/{id}", "killmails.detail",
 			migrationKillmails, reasonKillmailHash),
 
 		// ── UserController (2 routes) — identifier space ─────────────────

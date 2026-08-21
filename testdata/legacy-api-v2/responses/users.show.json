@@ -1,1 +1,1 @@
-{"data":{"id":1,"name":"Pilot One","email":"","active":true,"last_login":"2026-07-30 08:15:00","last_login_source":"198.51.100.7","associated_character_ids":[],"main_character_id":90000001}}
+{"data":{"id":1,"name":"Pilot One","email":"","active":true,"last_login":"2026-07-30 08:15:00","last_login_source":"198.51.100.7","associated_character_ids":[90000001],"main_character_id":90000001}}
