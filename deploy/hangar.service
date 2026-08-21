@@ -1,0 +1,107 @@
+### HANGAR — systemd unit for the manual deployment (SRS §9.2)
+###
+### §9.2 has required since v3.0 that HANGAR "boots via a standard systemd
+### unit given a valid .env and a manually provisioned PostgreSQL 18
+### instance", and until PHASE 23 the repository shipped no such unit at
+### all. Gate 5.8 was recorded as PARTIAL on the reasoning that "the unit
+### file is deploy/ material and remains unverified"; there was nothing to
+### verify. This is that file, and it is executed by
+### tools/gate5-deploy/systemd.sh against a real systemd inside a container,
+### because a unit nobody has ever started is a documentation artefact
+### rather than a deployment.
+###
+### INSTALL
+###   install -D -m 0755 hangar-linux-amd64   /opt/hangar/bin/hangar
+###   install -D -m 0640 .env                 /etc/hangar/hangar.env
+###   install -D -m 0644 hangar.service       /etc/systemd/system/hangar.service
+###   useradd --system --home-dir /opt/hangar --shell /usr/sbin/nologin hangar
+###   systemctl daemon-reload && systemctl enable --now hangar
+###
+### The binary lives in /opt/hangar/BIN, not /opt/hangar, and that detail is
+### load-bearing rather than tidy. Defect B-7 (Gate 5, §6.3) was viper
+### treating an extensionless file named `hangar` in the working directory
+### as a config file — and in §9.2's own documented layout, the file with
+### that name in that directory IS THE BINARY. It booted into "yaml: control
+### characters are not allowed", naming neither the file nor the reason. The
+### parse was fixed in Phase 22; keeping the binary out of WorkingDirectory
+### means this unit does not depend on that fix having been made.
+
+[Unit]
+Description=HANGAR — EVE Online corporation management
+Documentation=https://github.com/hangar-project/hangar
+# PostgreSQL is a hard dependency and is usually on another host, so this is
+# ordering only: After= without Requires=. Requires= on a remote database
+# would be a lie, and on a local one it would stop HANGAR from starting at
+# all if postgresql.service is named something else on this distribution.
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=hangar
+Group=hangar
+
+# `serve` and nothing else. 01_ARCHITECTURE.md §2: "Single-process default.
+# `serve` does everything; `work`/`schedule` exist for administrators who
+# have outgrown one box." Since Phase 22 it runs the River worker pool and
+# the sync planner, and since PHASE 23 §4.4's alert producers and pump — so
+# a second unit is a scale-out choice, never a prerequisite.
+WorkingDirectory=/opt/hangar
+EnvironmentFile=/etc/hangar/hangar.env
+ExecStart=/opt/hangar/bin/hangar serve
+
+# Migrations run BEFORE the server, in the same unit, as an ordered
+# ExecStartPre. Doing it here rather than in a separate one-shot unit means
+# an operator cannot start a HANGAR whose schema is older than its binary by
+# forgetting a second systemctl command — and `migrate up` verifies the
+# objects the migrations create still EXIST (db/schemadrift.go), so a
+# database that has drifted out of band fails the start with a named error
+# instead of serving quietly against a broken schema.
+ExecStartPre=/opt/hangar/bin/hangar migrate up
+
+Restart=on-failure
+RestartSec=5s
+# Long enough for the compatibility-date catalogue ingest to finish on a
+# first boot, which is a network call to ESI.
+TimeoutStartSec=180
+
+# SIGTERM, then time to finish in-flight work: the alert pump settles what
+# it claimed, and River lets running jobs complete. A delivery interrupted
+# mid-send is not lost — the claim is a lease and expires — but finishing is
+# cheaper than waiting one out.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# ── HARDENING ───────────────────────────────────────────────────────────
+# HANGAR needs no write access anywhere outside its own state directory: the
+# SPA is embedded in the binary, the SDE streams into PostgreSQL, and
+# nothing else is written to disk. NoNewPrivileges and a private /tmp are
+# free; the rest is stated per-directive because a hardening block copied
+# without understanding is one somebody disables wholesale at the first
+# unexplained failure.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# The SDE download stages a compressed archive on disk before reading it
+# (archive/zip needs random access) — PrivateTmp above gives it a private
+# /tmp to stage into. Build 3475087 is 99 MB compressed.
+ReadWritePaths=/opt/hangar
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+# Not MemoryDenyWriteExecute: the Go runtime is fine with it, but a future
+# optional cgo component would not be, and an operator who hits that has no
+# way to know why.
+
+# The listener defaults to :8080, above 1024, so no capability is needed.
+# If HANGAR_HTTP_ADDR is moved to :80 or :443, add
+#   AmbientCapabilities=CAP_NET_BIND_SERVICE
+# rather than running as root.
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target
