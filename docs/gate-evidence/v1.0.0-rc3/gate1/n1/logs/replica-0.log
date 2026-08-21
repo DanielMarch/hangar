@@ -1,0 +1,11 @@
+time=2026-08-21T06:00:11.346-05:00 level=INFO msg="hangar work: starting" version=v1.0.0-rc2-24-gce88bb4 commit=ce88bb4
+time=2026-08-21T06:00:11.363-05:00 level=INFO msg="hangar: metrics listening" addr=127.0.0.1:9400
+time=2026-08-21T06:00:11.479-05:00 level=INFO msg="alerting: threshold evaluator disabled (HANGAR_ALERT_THRESHOLD_INTERVAL is empty or zero) — §4.4's four threshold alerts will never fire on this installation"
+time=2026-08-21T06:00:13.007-05:00 level=WARN msg="governor2: proactive pause" component=esi.ratelimit.governor2 remaining=20 threshold=20
+time=2026-08-21T06:00:13.010-05:00 level=WARN msg="governor2: proactive pause" component=esi.ratelimit.governor2 remaining=19 threshold=20
+time=2026-08-21T06:01:13.283-05:00 level=INFO msg="governor2: resume" component=esi.ratelimit.governor2 remaining=100 threshold=60 note="the error budget window elapsed or recovered while paused; no request was needed to notice"
+time=2026-08-21T06:43:57.902-05:00 level=ERROR msg="maintenance.JobScheduler: Error scheduling jobs" error="error scheduling jobs: ERROR: deadlock detected (SQLSTATE 40P01)"
+time=2026-08-21T08:01:42.014-05:00 level=INFO msg="hangar work: starting" version=v1.0.0-rc2-24-gce88bb4 commit=ce88bb4
+time=2026-08-21T08:01:42.029-05:00 level=INFO msg="hangar: metrics listening" addr=127.0.0.1:9400
+time=2026-08-21T08:01:42.152-05:00 level=INFO msg="alerting: threshold evaluator disabled (HANGAR_ALERT_THRESHOLD_INTERVAL is empty or zero) — §4.4's four threshold alerts will never fire on this installation"
+time=2026-08-21T08:25:14.572-05:00 level=ERROR msg="maintenance.JobScheduler: Error scheduling jobs" error="error scheduling jobs: ERROR: deadlock detected (SQLSTATE 40P01)"
