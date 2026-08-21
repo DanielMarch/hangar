@@ -983,14 +983,19 @@ The gates re-run at rc3, and what each one's subject was:
 | 3 Alert Delivery Integrity | 2 | **PASS**, identical | N-10 changed the claim protocol and N-9 changed which process runs the pump |
 | 4 Feature Parity | 2 | **PASS**, byte-identical | N-4 built new surface |
 | 5 Deployment Usability | 2 | **PASS**, identical | N-6 is in `migrate up`, and D-2 published the artefacts 5.2 measures |
-| 6 Spec-Drift Resilience | 2, at the tag | *runs at the tag — see the note below* | §6.2 must see the finished tree |
+| 6 Spec-Drift Resilience | 2, at the tag | **PASS**, identical | §6.2 must see the finished tree |
 | 7 Third-Party Migration | 2 | **PASS**, identical | N-1, N-2 and N-3 changed the corpus and the served set |
 
-**Gate 6 cannot be in this table when this table is tagged.** §6.2's proof is that the ingest
-required no source change — `git status --porcelain` empty at a commit equal to the release
-tag — so it must run AFTER the tag exists, and its own artefacts are then the one commit that
-follows the tag. `docs/gate-evidence/README.md` explains why that is unavoidable rather than
-untidy. This row is filled in by that commit.
+**Gate 6's row was filled in by the commit that follows the tag, and could not have been filled
+in earlier.** §6.2 requires `git status --porcelain` empty *and* `HEAD` equal to the release
+tag, so the gate can only run after the tag exists — and its own artefacts then make the tree
+dirty, which is why exactly one commit follows `v1.0.0-rc3`.
+
+Running it TWICE at one tag turned out to be tighter than the evidence README claimed. Run 2
+failed `6.2-clean` on run 1's own untracked output, and committing that output does not fix it —
+that moves `HEAD` past the tag and fails `6.2-at-tag` instead. The two conditions pull against
+each other, so the only way to run it twice is to delete run 1's artefacts and run it again.
+Done, with identical verdicts, and the README now says so.
 
 **Gate 2 is the one deliberately not re-run, and saying so is the point.** Its subject —
 `provisioning_revocation_seconds`, the urgent queue, and the entitlement-reducing triggers — was

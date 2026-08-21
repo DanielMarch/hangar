@@ -52,7 +52,25 @@ failed" in a way that reads like a code failure and is not.
 change: `git status --porcelain` empty and `git rev-parse HEAD` equal to the release tag. Every
 other gate writes untracked files into this directory, so running one of them first makes Gate 6's
 own check fail on evidence rather than on source. Gate 6 performs its git check *before* writing
-its own artefacts, so it is clean-tree-safe on a re-run.
+its own artefacts, so a re-run is possible — **but only after its previous artefacts are
+removed.**
+
+### Gate 6 can pass ONCE per tag, and running it twice means deleting run 1 first **[Phase 23]**
+
+The sentence above used to end "so it is clean-tree-safe on a re-run", which is not true, and
+Phase 23 found out by doing it: run 2 failed `6.2-clean` with *1 modified paths:
+?? docs/gate-evidence/v1.0.0-rc3/gate6/* — its own output from run 1.
+
+The constraint is tighter than "clean-tree-safe" and worth stating exactly, because its two
+conditions pull against each other:
+
+* `6.2-clean` needs `git status --porcelain` empty, so run 1's untracked artefacts must be gone;
+* `6.2-at-tag` needs `HEAD` to equal the tag, so **committing** those artefacts does not help —
+  it moves HEAD past the tag and fails the other condition instead.
+
+So the only way to run Gate 6 twice at one tag is to **delete its output and run it again**, which
+is what Phase 23 did (identical verdicts). And it is why the commit holding Gate 6's evidence is
+necessarily the one commit that FOLLOWS the tag: there is no ordering in which it precedes it.
 
 **Gate 1 wants a quiet machine.** It measures a rate-limit ledger under contention. Anything else
 heavy on the box — another gate, a test suite, a build — is measuring the apparatus. Its two
