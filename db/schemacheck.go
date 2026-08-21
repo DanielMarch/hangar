@@ -192,20 +192,16 @@ func expectedSchemas(expected []TableRef) []string {
 	return out
 }
 
-// FormatMissing renders a missing-table list for an operator, with the
-// remediation that actually works. `migrate up` is deliberately NOT the
-// advice: goose has recorded the migration as applied, so re-running it does
-// nothing, and telling an operator to run the command that already lies to
-// them is worse than saying nothing.
-func FormatMissing(missing []TableRef) string {
-	names := make([]string, 0, len(missing))
-	for _, ref := range missing {
-		names = append(names, ref.String())
-	}
-	return fmt.Sprintf(
-		"%d table(s) the migrations create are absent: %s. "+
-			"`hangar migrate up` will NOT restore them — goose records those migrations as applied, "+
-			"so re-running is a no-op. Restore from a backup, or re-create the objects from the "+
-			"migration that declares them (db/migrations/) and verify with this check.",
-		len(missing), strings.Join(names, ", "))
-}
+// ── PHASE 23 (N-6): FormatMissing WAS HERE ───────────────────────────────
+//
+// It rendered a missing-TABLE list. db/schemadrift.go's FormatDrift renders
+// tables, columns and indexes, and both callers moved to it in the same
+// commit, which left this with no production caller at all.
+//
+// Deleted rather than allowlisted. Phase 20.2 set that precedent with
+// IncrementErrorBudget — a symbol kept alive by its own test is a symbol
+// nobody can tell is dead — and docs/PRE_V1_OPEN_ITEMS.md N-4 exists
+// precisely because "leave it for another phase" was the answer four times
+// running. Its test moved to FormatDrift, where the claim it made (never
+// recommend `migrate up`, because goose has recorded the migration as
+// applied and re-running it is a no-op) is still the claim that matters.

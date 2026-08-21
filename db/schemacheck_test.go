@@ -151,15 +151,29 @@ func TestGooseUpSectionRejectsAMigrationWithNoMarker(t *testing.T) {
 	require.Contains(t, err.Error(), "00099_broken.sql")
 }
 
-// TestFormatMissingDoesNotRecommendMigrateUp — the remediation has to be one
+// TestFormatDriftDoesNotRecommendMigrateUp — the remediation has to be one
 // that works. goose has the migration recorded as applied, so `migrate up`
 // is a no-op, and pointing an operator at the command that already told them
 // the schema was current is worse than saying nothing.
-func TestFormatMissingDoesNotRecommendMigrateUp(t *testing.T) {
-	message := FormatMissing([]TableRef{{Schema: "app", Name: "esi_replica"}})
+//
+// PHASE 23 (N-6): was TestFormatMissingDoesNotRecommendMigrateUp. The
+// message now covers columns and indexes as well, and each kind is named
+// separately because each has a different consequence — a missing index in
+// particular costs performance rather than correctness, which is why nobody
+// attributes it to the schema.
+func TestFormatDriftDoesNotRecommendMigrateUp(t *testing.T) {
+	message := FormatDrift(Drift{
+		Tables:  []TableRef{{Schema: "app", Name: "esi_replica"}},
+		Columns: []ColumnRef{{Schema: "app", Table: "character", Name: "corporation_id"}},
+		Indexes: []IndexRef{{Schema: "app", Table: "character", Method: "btree", Columns: []string{"user_id"}}},
+	})
 	require.Contains(t, message, "app.esi_replica")
+	require.Contains(t, message, "app.character.corporation_id")
+	require.Contains(t, message, "app.character USING btree (user_id)")
+	require.Contains(t, message, "3 object(s)")
 	require.Contains(t, message, "will NOT restore them")
 	require.Contains(t, message, "db/migrations/")
+	require.NotContains(t, message, "run `hangar migrate up`")
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────

@@ -44,20 +44,32 @@ import (
 //
 // ERROR rather than WARN because, unlike the SDE report next door, this is
 // not a supported state. There is no schema without these tables.
+//
+// PHASE 23 (N-6): this now covers COLUMNS and INDEXES as well as tables.
+// The severity argument above is unchanged and applies to all three; what
+// changes is that a dropped index — the drift whose only symptom is a query
+// getting slower, which nobody attributes to the schema — is now stated
+// rather than inferred.
 func reportSchemaIntegrity(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) {
-	missing, err := hangardb.MissingTables(ctx, pool)
+	drift, err := hangardb.MissingObjects(ctx, pool)
 	if err != nil {
 		logger.WarnContext(ctx, "hangar: could not verify the schema against the migrations", "error", err)
 		return
 	}
-	if len(missing) == 0 {
+	if drift.Empty() {
 		return
 	}
 
-	names := make([]string, 0, len(missing))
-	for _, ref := range missing {
-		names = append(names, ref.String())
+	names := func(n int, render func(int) string) []string {
+		out := make([]string, 0, n)
+		for i := 0; i < n; i++ {
+			out = append(out, render(i))
+		}
+		return out
 	}
-	logger.ErrorContext(ctx, "hangar: SCHEMA DRIFT — "+hangardb.FormatMissing(missing),
-		"missing_tables", names, "missing_count", len(missing))
+	logger.ErrorContext(ctx, "hangar: SCHEMA DRIFT — "+hangardb.FormatDrift(drift),
+		"missing_tables", names(len(drift.Tables), func(i int) string { return drift.Tables[i].String() }),
+		"missing_columns", names(len(drift.Columns), func(i int) string { return drift.Columns[i].String() }),
+		"missing_indexes", names(len(drift.Indexes), func(i int) string { return drift.Indexes[i].String() }),
+		"missing_count", drift.Count())
 }

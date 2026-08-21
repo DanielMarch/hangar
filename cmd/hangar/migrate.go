@@ -101,15 +101,21 @@ func runMigrateUp(ctx context.Context) error {
 	//
 	// This FAILS rather than warns. Leaving the schema correct is precisely
 	// this command's contract; a `migrate up` that exits 0 over a missing
-	// table is the defect, not a nicety.
-	missing, err := hangardb.MissingTables(ctx, pool)
+	// object is the defect, not a nicety.
+	//
+	// PHASE 23 (N-6): tables, COLUMNS and INDEXES. Until this phase it
+	// verified tables only, so a dropped index passed — and a dropped index
+	// is the drift an operator is least likely to attribute to the schema,
+	// because it costs performance rather than correctness and nothing says
+	// why. See db/schemadrift.go.
+	drift, err := hangardb.MissingObjects(ctx, pool)
 	if err != nil {
 		return fmt.Errorf("migrate: verifying schema: %w", err)
 	}
-	if len(missing) > 0 {
-		return fmt.Errorf("migrate: schema is NOT current — %s", hangardb.FormatMissing(missing))
+	if !drift.Empty() {
+		return fmt.Errorf("migrate: schema is NOT current — %s", hangardb.FormatDrift(drift))
 	}
-	fmt.Println("migrate up: app/sde schema current (verified against the migrations, not just goose's log)")
+	fmt.Println("migrate up: app/sde schema current — tables, columns and indexes verified against the migrations, not just goose's log")
 
 	// Phase 10 fix: db/seed/*.sql existed since Phase 1a with nothing
 	// applying it — harmless until app.role_grant's FK to app.permission
