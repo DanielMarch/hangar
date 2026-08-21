@@ -81,6 +81,56 @@ Two extra directories exist at rc2 and are deliberate:
   minutes** at N=1 (rc1: 18) and 241 at N=3 (rc1: 32), because the installation no longer stops
   serving sixteen minutes in.
 
+## `v1.0.0-rc3`: what the third run added, and what it cost
+
+**Gate 5 is unqualified for the first time.** Both conditions that had never passed do:
+
+* **5.2** — HANGAR is published, and the condition stopped asserting its own answer. It used to
+  `record "5.2" "SUBSTITUTED"` unconditionally with the 404/403 sentence written into the script,
+  which would have gone on saying "nothing is published" the day after something was. It probes
+  both halves anonymously at run time now.
+* **5.8** — was PARTIAL on the note that "the unit file … remains unverified", and **there was no
+  unit file**. §9.2 has required one since v3.0. It exists and starts under systemd 252.
+
+Two directories exist at rc3 that no previous candidate has:
+
+* **`bench/`, `bench-second/`, `bench-third/`** — eleven runs of the Phase 4 exit criterion off
+  Docker Desktop's Windows port forwarding, **nine of which pass**, plus a transport-floor
+  benchmark that measures what the same 32 workers cost doing nothing. It is the first committed
+  measurement showing that criterion met.
+* **`b4/`** — the granted and derived ESI scope sets, after the operator's re-authorisation took
+  them from 50 to 52.
+
+### The runner defects this run found
+
+Three more, all the same shape as Phase 22's six, and all in Gate 5:
+
+* **Four hard-coded image names.** The runner tagged `ghcr.io/hangar-project/hangar` while the
+  compose file named a different registry, so `docker compose up` could not pull, 5.3's probes ran
+  an image that does not exist, and 5.7 tried to *pull* a `:bumped` tag nothing had built. Three
+  conditions failed for reasons unrelated to what they measure.
+* **A hard-coded origin.** The "substituted origin" section probed URLs that had been typed into
+  the script, so it reported 404 twice however the documented URLs actually read.
+* **`2>/dev/null` on the first-boot poll's psql exec**, which made a broken exec and a slow
+  catalogue ingest indistinguishable: it reported "got ? and ?" and there was no way to tell which.
+
+**The correction was the same in every case: derive the value from the artefact under test rather
+than typing it into the checker.** Gate 5 reads its image name, its origin URLs and 5.2's whole
+verdict out of `docker-compose.yml` now — the file an operator downloads.
+
+Counting rc2's six and rc3's three, **the measuring apparatus has failed nine times and the
+product three**, across the two phases that ran the gates repeatedly. That ratio is the argument
+for the section below.
+
+### One gate was deliberately run fewer times
+
+Gate 1 was run **once at each replica count** rather than twice, on the operator's explicit
+decision, to save roughly eight hours of wall clock. It is a documented deviation from the rule
+below rather than an oversight. The specific risk that rule guards — a verdict that depends on
+whether the gate has been run before — is the one Phase 22 closed for Gate 1 by making it
+`TRUNCATE` what it owns (defect 10.5), so of the seven gates it is the one where a second run
+would have added least. Every other gate ran twice with its verdicts diffed.
+
 ## RUN EACH GATE TWICE BEFORE YOU TRUST IT
 
 This is the lesson of Phase 22 and it is worth more than any single fix in it. Running the gates a
