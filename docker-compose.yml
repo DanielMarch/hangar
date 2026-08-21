@@ -3,8 +3,8 @@
 # Gate 5 (Deployment Usability) requires a blank environment to reach a running
 # installation in THREE commands with NO source compilation:
 #
-#   1) curl -fsSLO https://raw.githubusercontent.com/hangar-project/hangar/main/docker-compose.yml
-#   2) curl -fsSL  https://raw.githubusercontent.com/hangar-project/hangar/main/deploy/install.sh | sh
+#   1) curl -fsSLO https://raw.githubusercontent.com/DanielMarch/hangar/main/docker-compose.yml
+#   2) curl -fsSL  https://raw.githubusercontent.com/DanielMarch/hangar/main/deploy/install.sh | sh
 #   3) docker compose up -d
 #
 # The `hangar` service therefore PULLS a pre-built image. There is deliberately
@@ -79,7 +79,7 @@ services:
   # `app`/`sde`, then exits. `hangar` waits on completed_successfully.
   # ───────────────────────────────────────────────────────────────────────────
   migrate:
-    image: ghcr.io/hangar-project/hangar:${HANGAR_VERSION:-latest}
+    image: ghcr.io/danielmarch/hangar:${HANGAR_VERSION:-latest}
     container_name: hangar-migrate
     restart: "no"
     command: ["migrate", "up"]
@@ -109,7 +109,7 @@ services:
   # metric live. .env.example says so where an operator will read it.
   # ───────────────────────────────────────────────────────────────────────────
   hangar:
-    image: ghcr.io/hangar-project/hangar:${HANGAR_VERSION:-latest}
+    image: ghcr.io/danielmarch/hangar:${HANGAR_VERSION:-latest}
     container_name: hangar
     restart: unless-stopped
     command: ["serve"]

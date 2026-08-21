@@ -1,0 +1,7 @@
+n9-serve	PASS	one container, command serve, healthy
+n9-catalogue	PASS	54 alert types with 4 thresholds resolved by serve's own startup ingest
+n9-default-channel	PASS	serve provisioned app.alert_channel 'default-slack' from HANGAR_SLACK_DEFAULT_WEBHOOK
+n9-event	PASS	app.alert_event holds 1 row(s), written by serve's own threshold evaluator — before this phase it held none on any default installation
+n9-delivered	PASS	1 delivery(ies) reached state 'sent' through serve's own pump
+n9-received	PASS	the webhook sink recorded 206 bytes of delivered message — see n9-compose-transcript.txt
+n9-metrics	PASS	serve's /metrics exports alert_delivery_total (12 series) and alert_dead_letter_depth (1) — both were literal nils on serve's registry before this phase

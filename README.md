@@ -9,9 +9,12 @@ delivering full feature parity across **58 verified capabilities** against a mea
 footprint of 106 distinct ESI routes, 72 UI controllers, 54 alert types, 70 ESI scopes and
 9 locales.
 
-> **Status: architecture and planning complete. No application code has been written yet.**
-> This repository currently contains the directory scaffold, dependency definitions,
-> configuration shells and the four design documents that drive implementation.
+> **Status: release candidate.** The application is built and running. Every release gate that
+> has been run has its evidence committed under `docs/gate-evidence/<version>/`, one directory
+> per candidate, each carrying the blocking artefact the gate is defined by rather than a
+> summary of it — so a reader can disagree with the verdict by reading the measurement.
+> `docs/PRE_V1_OPEN_ITEMS.md` is the honest register of what is not finished, and of what has
+> been decided rather than built.
 
 ---
 

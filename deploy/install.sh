@@ -4,8 +4,8 @@
 # Gate 5 requires a blank environment to reach a running installation in
 # three commands with NO source compilation:
 #
-#   1) curl -fsSLO https://raw.githubusercontent.com/hangar-project/hangar/main/docker-compose.yml
-#   2) curl -fsSL  https://raw.githubusercontent.com/hangar-project/hangar/main/deploy/install.sh | sh
+#   1) curl -fsSLO https://raw.githubusercontent.com/DanielMarch/hangar/main/docker-compose.yml
+#   2) curl -fsSL  https://raw.githubusercontent.com/DanielMarch/hangar/main/deploy/install.sh | sh
 #   3) docker compose up -d
 #
 # This script only ever writes .env in the current directory; it never talks
@@ -29,7 +29,7 @@ ENV_FILE="${HANGAR_ENV_FILE:-.env}"
 #
 # The default is unchanged, so the documented three-command deployment is
 # exactly what it was.
-EXAMPLE_URL="${HANGAR_ENV_EXAMPLE_URL:-https://raw.githubusercontent.com/hangar-project/hangar/main/.env.example}"
+EXAMPLE_URL="${HANGAR_ENV_EXAMPLE_URL:-https://raw.githubusercontent.com/DanielMarch/hangar/main/.env.example}"
 
 if [ -f "$ENV_FILE" ]; then
   echo "install.sh: $ENV_FILE already exists — leaving it untouched." >&2

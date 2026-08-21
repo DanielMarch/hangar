@@ -1,0 +1,5 @@
+5.8-verify	PASS	systemd-analyze verify reported no unknown lvalue, unknown section, or parse failure. It exits 1 on this image for an unrelated missing alias directory (see systemd-transcript.txt); the verdict is the absence of a parse complaint, not the exit code
+5.8-start	PASS	systemctl start hangar reached active (running), with ExecStartPre 'hangar migrate up' completing first
+5.8-migrate	PASS	ExecStartPre migrated the external PostgreSQL 18 and verified the schema (tables, columns and indexes) in the unit's own journal
+5.8-healthz	PASS	GET /healthz answered 200 from the systemd-managed process
+5.8-stop	PASS	SIGTERM inside TimeoutStopSec: the unit is inactive (dead) and not failed

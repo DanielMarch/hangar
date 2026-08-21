@@ -2,15 +2,15 @@
 setlocal enabledelayedexpansion
 rem Project HANGAR -- turnkey installer for Windows (SRS Section 9.1, Gate 5).
 rem
-rem   1) curl -fsSLO https://raw.githubusercontent.com/hangar-project/hangar/main/docker-compose.yml
-rem   2) curl -fsSL  https://raw.githubusercontent.com/hangar-project/hangar/main/deploy/install.bat -o install.bat ^&^& install.bat
+rem   1) curl -fsSLO https://raw.githubusercontent.com/DanielMarch/hangar/main/docker-compose.yml
+rem   2) curl -fsSL  https://raw.githubusercontent.com/DanielMarch/hangar/main/deploy/install.bat -o install.bat ^&^& install.bat
 rem   3) docker compose up -d
 rem
 rem Only ever writes .env in the current directory. Never generates a
 rem fallback key inside the binary itself -- see internal/config/validate.go.
 
 set "ENV_FILE=.env"
-set "EXAMPLE_URL=https://raw.githubusercontent.com/hangar-project/hangar/main/.env.example"
+set "EXAMPLE_URL=https://raw.githubusercontent.com/DanielMarch/hangar/main/.env.example"
 
 if exist "%ENV_FILE%" (
   echo install.bat: %ENV_FILE% already exists -- leaving it untouched.

@@ -28,7 +28,7 @@
 
 [Unit]
 Description=HANGAR — EVE Online corporation management
-Documentation=https://github.com/hangar-project/hangar
+Documentation=https://github.com/DanielMarch/hangar
 # PostgreSQL is a hard dependency and is usually on another host, so this is
 # ordering only: After= without Requires=. Requires= on a remote database
 # would be a lie, and on a local one it would stop HANGAR from starting at

@@ -1,0 +1,197 @@
+
+### cleaning up anything a previous run left behind
+
+### pulling a systemd-capable image
+latest: Pulling from ubi9/ubi-init
+Digest: sha256:13c2be5e70e2cbfbf862e998e57438d6651fc7f6d5750c0a9e8968d4c8e6c6f1
+Status: Image is up to date for registry.access.redhat.com/ubi9/ubi-init:latest
+registry.access.redhat.com/ubi9/ubi-init:latest
+
+### starting an external PostgreSQL 18 — §9.2's 'manually provisioned' database
+c0da39f69947559d41550e653fbbdb90593224ef20a19f34e2a8da575287fb7e
+5d9a83f6ec077cd05e978a2613de44d108392e575cedf3dc320fcf1150272a4f
+
+### booting systemd as PID 1
+e2e6562e802b91958a331f41c860b7812ce0430b198709f4232965130377bc40
+systemd version: systemd 252 (252-67.el9_8.4)
+
+### installing HANGAR the way deploy/hangar.service's header says to
+
+### systemd-analyze verify — does the unit PARSE
+Couldn't process aliases: No such file or directory
+[PASS] 5.8-verify — systemd-analyze verify reported no unknown lvalue, unknown section, or parse failure. It exits 1 on this image for an unrelated missing alias directory (see systemd-transcript.txt); the verdict is the absence of a parse complaint, not the exit code
+
+### systemctl start hangar
+● hangar.service - HANGAR — EVE Online corporation management
+     Loaded: loaded (/etc/systemd/system/hangar.service; disabled; preset: disabled)
+     Active: active (running) since Fri 2026-08-21 01:53:28 UTC; 669ms ago
+       Docs: https://github.com/hangar-project/hangar
+    Process: 100 ExecStartPre=/opt/hangar/bin/hangar migrate up (code=exited, status=0/SUCCESS)
+   Main PID: 109 (hangar)
+      Tasks: 11 (limit: 101957)
+     Memory: 14.5M (peak: 14.6M)
+        CPU: 323ms
+     CGroup: /docker/e2e6562e802b91958a331f41c860b7812ce0430b198709f4232965130377bc40/system.slice/hangar.service
+             └─109 /opt/hangar/bin/hangar serve
+
+Aug 21 01:53:28 e2e6562e802b hangar[100]: migrate up: catalogue is ingested. They complete automatically on the first ingest —
+Aug 21 01:53:28 e2e6562e802b hangar[100]: migrate up: `serve` does one at startup, or run `hangar admin ingest-catalogue`.
+Aug 21 01:53:28 e2e6562e802b hangar[100]: migrate up: Until then no routing rule can be created for them and they cannot fire.
+Aug 21 01:53:28 e2e6562e802b systemd[1]: Started HANGAR — EVE Online corporation management.
+Aug 21 01:53:28 e2e6562e802b hangar[109]: {"time":"2026-08-21T01:53:28.335156302Z","level":"INFO","msg":"hangar serve: starting","version":"v1.0.0-rc2-11-g92f20e2","commit":"92f20e2"}
+Aug 21 01:53:28 e2e6562e802b hangar[109]: {"time":"2026-08-21T01:53:28.406025645Z","level":"INFO","msg":"hangar: startup catalogue ingest disabled (HANGAR_ESI_STARTUP_CATALOGUE_INGEST=false) — app.esi_route and esi.d_max are whatever is already in the database; run 'hangar admin ingest-catalogue' to refresh them"}
+Aug 21 01:53:28 e2e6562e802b hangar[109]: {"time":"2026-08-21T01:53:28.41288848Z","level":"INFO","msg":"acquired planner leadership","component":"sync.planner"}
+Aug 21 01:53:28 e2e6562e802b hangar[109]: {"time":"2026-08-21T01:53:28.416390086Z","level":"INFO","msg":"hangar: metrics listening","addr":"0.0.0.0:9090"}
+Aug 21 01:53:28 e2e6562e802b hangar[109]: {"time":"2026-08-21T01:53:28.417867897Z","level":"WARN","msg":"hangar: NO Static Data Export has been imported — item, station and system NAMES are unavailable, so EFT fitting exports render [<type_id>] placeholders and the skyhook / sovereignty-hub type and system backfills leave their columns NULL. Nothing is broken and nothing renders blank; run 'hangar admin import-sde' to resolve ids to names","sde_types":0}
+Aug 21 01:53:28 e2e6562e802b hangar[109]: {"time":"2026-08-21T01:53:28.562306987Z","level":"INFO","msg":"hangar serve: listening","addr":"0.0.0.0:8080"}
+Aug 21 01:53:27 e2e6562e802b systemd[1]: Starting HANGAR — EVE Online corporation management...
+Aug 21 01:53:27 e2e6562e802b hangar[100]: migrate up: river schema current
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00001_schemas.sql (2.89ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00002_platform_vocabulary.sql (11.05ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00003_platform_reference.sql (24ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00004_platform_identity.sql (64.63ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00005_platform_rbac.sql (58.66ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00006_platform_esi_gateway.sql (60.92ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00007_platform_provisioning.sql (36.18ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00008_platform_alerting.sql (38.29ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00009_platform_events.sql (20.04ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00010_domain_corporation_structure.sql (77.92ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00011_domain_corporation_projects.sql (14.76ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00012_domain_history.sql (11.32ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00013_domain_assets.sql (14.17ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00014_domain_wallets.sql (29.25ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00015_domain_contracts.sql (20.81ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00016_domain_industry_mining.sql (28.53ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00017_domain_market.sql (25.07ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00018_domain_killmails.sql (25.76ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00019_domain_social.sql (23.12ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00020_domain_character_sheet.sql (45.91ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00021_domain_fittings.sql (11.65ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00022_domain_mail.sql (25.07ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00023_domain_notifications.sql (16.65ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00024_domain_calendar.sql (15.84ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00025_domain_planetary.sql (11.71ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00026_domain_sovereignty.sql (34.97ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00027_domain_tools.sql (17.53ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00028_domain_intel.sql (8.02ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00029_domain_fixups.sql (4.82ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00030_phase7_character_fixups.sql (36ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00031_phase8_acting_character_history.sql (7.59ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00032_phase8_mining_extraction_structure_id.sql (4.16ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00033_phase8_1_skyhook_reagent_fixup.sql (7.17ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00034_phase9_market_issued_by.sql (3.34ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00035_phase9_notification_payload.sql (5.69ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00036_phase9_sde_core_tables.sql (92.6ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00037_phase11_entitlement_source_fixup.sql (2.8ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00038_phase12_discord_invalid_budget.sql (5.15ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00039_phase13_teamspeak_challenge.sql (8.51ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00040_phase15_1_defect_closure.sql (6.21ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00041_phase19_outbox_dispatch.sql (7.58ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00042_phase20_4_ledger_divergence_pair.sql (3.58ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00043_phase20_4_1_reconcile_residual.sql (2.92ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00044_phase20_5_webhook_secret_rotation.sql (5ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00045_phase20_6_keyset_covering_indexes.sql (15.69ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00046_phase20_9_character_skill_summary.sql (5.78ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 goose: successfully migrated database to version: 46
+Aug 21 01:53:28 e2e6562e802b hangar[100]: migrate up: app/sde schema current — tables, columns and indexes verified against the migrations, not just goose's log
+Aug 21 01:53:28 e2e6562e802b hangar[100]: migrate up: seed data applied
+Aug 21 01:53:28 e2e6562e802b hangar[100]: migrate up: 50 alert types seeded, and 4 THRESHOLD types are DEFERRED.
+Aug 21 01:53:28 e2e6562e802b hangar[100]: migrate up:   corporation.structure.fuel_low, corporation.starbase.fuel_low,
+Aug 21 01:53:28 e2e6562e802b hangar[100]: migrate up:   corporation.member.inactive, corporation.contract.expiring
+Aug 21 01:53:28 e2e6562e802b hangar[100]: migrate up: each declares an ESI source route, and app.esi_route is empty until the
+Aug 21 01:53:28 e2e6562e802b hangar[100]: migrate up: catalogue is ingested. They complete automatically on the first ingest —
+Aug 21 01:53:28 e2e6562e802b hangar[100]: migrate up: `serve` does one at startup, or run `hangar admin ingest-catalogue`.
+Aug 21 01:53:28 e2e6562e802b hangar[100]: migrate up: Until then no routing rule can be created for them and they cannot fire.
+Aug 21 01:53:28 e2e6562e802b systemd[1]: Started HANGAR — EVE Online corporation management.
+Aug 21 01:53:28 e2e6562e802b hangar[109]: {"time":"2026-08-21T01:53:28.335156302Z","level":"INFO","msg":"hangar serve: starting","version":"v1.0.0-rc2-11-g92f20e2","commit":"92f20e2"}
+Aug 21 01:53:28 e2e6562e802b hangar[109]: {"time":"2026-08-21T01:53:28.406025645Z","level":"INFO","msg":"hangar: startup catalogue ingest disabled (HANGAR_ESI_STARTUP_CATALOGUE_INGEST=false) — app.esi_route and esi.d_max are whatever is already in the database; run 'hangar admin ingest-catalogue' to refresh them"}
+Aug 21 01:53:28 e2e6562e802b hangar[109]: {"time":"2026-08-21T01:53:28.41288848Z","level":"INFO","msg":"acquired planner leadership","component":"sync.planner"}
+Aug 21 01:53:28 e2e6562e802b hangar[109]: {"time":"2026-08-21T01:53:28.416390086Z","level":"INFO","msg":"hangar: metrics listening","addr":"0.0.0.0:9090"}
+Aug 21 01:53:28 e2e6562e802b hangar[109]: {"time":"2026-08-21T01:53:28.417867897Z","level":"WARN","msg":"hangar: NO Static Data Export has been imported — item, station and system NAMES are unavailable, so EFT fitting exports render [<type_id>] placeholders and the skyhook / sovereignty-hub type and system backfills leave their columns NULL. Nothing is broken and nothing renders blank; run 'hangar admin import-sde' to resolve ids to names","sde_types":0}
+Aug 21 01:53:28 e2e6562e802b hangar[109]: {"time":"2026-08-21T01:53:28.562306987Z","level":"INFO","msg":"hangar serve: listening","addr":"0.0.0.0:8080"}
+[PASS] 5.8-start — systemctl start hangar reached active (running), with ExecStartPre 'hangar migrate up' completing first
+
+### the migration ran as part of the unit, not as a separate step
+[PASS] 5.8-migrate — ExecStartPre migrated the external PostgreSQL 18 and verified the schema (tables, columns and indexes) in the unit's own journal
+
+### /healthz, from inside the unit's own network namespace
+[PASS] 5.8-healthz — GET /healthz answered 200 from the systemd-managed process
+
+### systemctl stop — a clean shutdown, not a kill
+Aug 21 01:53:27 e2e6562e802b systemd[1]: Starting HANGAR — EVE Online corporation management...
+Aug 21 01:53:27 e2e6562e802b hangar[100]: migrate up: river schema current
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00001_schemas.sql (2.89ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00002_platform_vocabulary.sql (11.05ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00003_platform_reference.sql (24ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00004_platform_identity.sql (64.63ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00005_platform_rbac.sql (58.66ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00006_platform_esi_gateway.sql (60.92ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00007_platform_provisioning.sql (36.18ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00008_platform_alerting.sql (38.29ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00009_platform_events.sql (20.04ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00010_domain_corporation_structure.sql (77.92ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00011_domain_corporation_projects.sql (14.76ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00012_domain_history.sql (11.32ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00013_domain_assets.sql (14.17ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00014_domain_wallets.sql (29.25ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00015_domain_contracts.sql (20.81ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00016_domain_industry_mining.sql (28.53ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00017_domain_market.sql (25.07ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00018_domain_killmails.sql (25.76ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00019_domain_social.sql (23.12ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00020_domain_character_sheet.sql (45.91ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00021_domain_fittings.sql (11.65ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00022_domain_mail.sql (25.07ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00023_domain_notifications.sql (16.65ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00024_domain_calendar.sql (15.84ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00025_domain_planetary.sql (11.71ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00026_domain_sovereignty.sql (34.97ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00027_domain_tools.sql (17.53ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00028_domain_intel.sql (8.02ms)
+Aug 21 01:53:27 e2e6562e802b hangar[100]: 2026/08/21 01:53:27 OK   00029_domain_fixups.sql (4.82ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00030_phase7_character_fixups.sql (36ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00031_phase8_acting_character_history.sql (7.59ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00032_phase8_mining_extraction_structure_id.sql (4.16ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00033_phase8_1_skyhook_reagent_fixup.sql (7.17ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00034_phase9_market_issued_by.sql (3.34ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00035_phase9_notification_payload.sql (5.69ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00036_phase9_sde_core_tables.sql (92.6ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00037_phase11_entitlement_source_fixup.sql (2.8ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00038_phase12_discord_invalid_budget.sql (5.15ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00039_phase13_teamspeak_challenge.sql (8.51ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00040_phase15_1_defect_closure.sql (6.21ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00041_phase19_outbox_dispatch.sql (7.58ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00042_phase20_4_ledger_divergence_pair.sql (3.58ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00043_phase20_4_1_reconcile_residual.sql (2.92ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00044_phase20_5_webhook_secret_rotation.sql (5ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00045_phase20_6_keyset_covering_indexes.sql (15.69ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 OK   00046_phase20_9_character_skill_summary.sql (5.78ms)
+Aug 21 01:53:28 e2e6562e802b hangar[100]: 2026/08/21 01:53:28 goose: successfully migrated database to version: 46
+Aug 21 01:53:28 e2e6562e802b hangar[100]: migrate up: app/sde schema current — tables, columns and indexes verified against the migrations, not just goose's log
+Aug 21 01:53:28 e2e6562e802b hangar[100]: migrate up: seed data applied
+Aug 21 01:53:28 e2e6562e802b hangar[100]: migrate up: 50 alert types seeded, and 4 THRESHOLD types are DEFERRED.
+Aug 21 01:53:28 e2e6562e802b hangar[100]: migrate up:   corporation.structure.fuel_low, corporation.starbase.fuel_low,
+Aug 21 01:53:28 e2e6562e802b hangar[100]: migrate up:   corporation.member.inactive, corporation.contract.expiring
+Aug 21 01:53:28 e2e6562e802b hangar[100]: migrate up: each declares an ESI source route, and app.esi_route is empty until the
+Aug 21 01:53:28 e2e6562e802b hangar[100]: migrate up: catalogue is ingested. They complete automatically on the first ingest —
+Aug 21 01:53:28 e2e6562e802b hangar[100]: migrate up: `serve` does one at startup, or run `hangar admin ingest-catalogue`.
+Aug 21 01:53:28 e2e6562e802b hangar[100]: migrate up: Until then no routing rule can be created for them and they cannot fire.
+Aug 21 01:53:28 e2e6562e802b systemd[1]: Started HANGAR — EVE Online corporation management.
+Aug 21 01:53:28 e2e6562e802b hangar[109]: {"time":"2026-08-21T01:53:28.335156302Z","level":"INFO","msg":"hangar serve: starting","version":"v1.0.0-rc2-11-g92f20e2","commit":"92f20e2"}
+Aug 21 01:53:28 e2e6562e802b hangar[109]: {"time":"2026-08-21T01:53:28.406025645Z","level":"INFO","msg":"hangar: startup catalogue ingest disabled (HANGAR_ESI_STARTUP_CATALOGUE_INGEST=false) — app.esi_route and esi.d_max are whatever is already in the database; run 'hangar admin ingest-catalogue' to refresh them"}
+Aug 21 01:53:28 e2e6562e802b hangar[109]: {"time":"2026-08-21T01:53:28.41288848Z","level":"INFO","msg":"acquired planner leadership","component":"sync.planner"}
+Aug 21 01:53:28 e2e6562e802b hangar[109]: {"time":"2026-08-21T01:53:28.416390086Z","level":"INFO","msg":"hangar: metrics listening","addr":"0.0.0.0:9090"}
+Aug 21 01:53:28 e2e6562e802b hangar[109]: {"time":"2026-08-21T01:53:28.417867897Z","level":"WARN","msg":"hangar: NO Static Data Export has been imported — item, station and system NAMES are unavailable, so EFT fitting exports render [<type_id>] placeholders and the skyhook / sovereignty-hub type and system backfills leave their columns NULL. Nothing is broken and nothing renders blank; run 'hangar admin import-sde' to resolve ids to names","sde_types":0}
+Aug 21 01:53:28 e2e6562e802b hangar[109]: {"time":"2026-08-21T01:53:28.562306987Z","level":"INFO","msg":"hangar serve: listening","addr":"0.0.0.0:8080"}
+Aug 21 01:53:30 e2e6562e802b hangar[109]: {"time":"2026-08-21T01:53:30.723100017Z","level":"INFO","msg":"hangar serve: shutting down"}
+Aug 21 01:53:30 e2e6562e802b systemd[1]: Stopping HANGAR — EVE Online corporation management...
+Aug 21 01:53:30 e2e6562e802b systemd[1]: hangar.service: Deactivated successfully.
+Aug 21 01:53:30 e2e6562e802b systemd[1]: Stopped HANGAR — EVE Online corporation management.
+[PASS] 5.8-stop — SIGTERM inside TimeoutStopSec: the unit is inactive (dead) and not failed
+
+### verdicts
+5.8-verify	PASS	systemd-analyze verify reported no unknown lvalue, unknown section, or parse failure. It exits 1 on this image for an unrelated missing alias directory (see systemd-transcript.txt); the verdict is the absence of a parse complaint, not the exit code
+5.8-start	PASS	systemctl start hangar reached active (running), with ExecStartPre 'hangar migrate up' completing first
+5.8-migrate	PASS	ExecStartPre migrated the external PostgreSQL 18 and verified the schema (tables, columns and indexes) in the unit's own journal
+5.8-healthz	PASS	GET /healthz answered 200 from the systemd-managed process
+5.8-stop	PASS	SIGTERM inside TimeoutStopSec: the unit is inactive (dead) and not failed

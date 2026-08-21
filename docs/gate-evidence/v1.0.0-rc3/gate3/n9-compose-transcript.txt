@@ -1,0 +1,176 @@
+
+### a fresh PostgreSQL 18, as compose's  service
+ffe48575529dac3a633b6eafba9de21247aa2edd999eb51275a1373cb48c70d7
+c54d637ae27be0e2504c452741b72c8f793329ee96f4e737322afe6aa9c88d1d
+Error response from daemon: No such container: n9-proof-pg
+
+### a webhook sink — the receiver, so 'delivered' is not the pump's own opinion
+031d5cdfa57a6eb090f2a50dcd51fa8fdf6c52a41ef7756849b618daad180cac
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+
+### migrate up — compose's one-shot  service
+migrate up: river schema current
+2026/08/21 02:50:36 OK   00001_schemas.sql (3.09ms)
+2026/08/21 02:50:36 OK   00002_platform_vocabulary.sql (9.98ms)
+2026/08/21 02:50:36 OK   00003_platform_reference.sql (22.57ms)
+2026/08/21 02:50:36 OK   00004_platform_identity.sql (55.91ms)
+2026/08/21 02:50:37 OK   00005_platform_rbac.sql (53.11ms)
+2026/08/21 02:50:37 OK   00006_platform_esi_gateway.sql (54.62ms)
+2026/08/21 02:50:37 OK   00007_platform_provisioning.sql (30.68ms)
+2026/08/21 02:50:37 OK   00008_platform_alerting.sql (35.26ms)
+2026/08/21 02:50:37 OK   00009_platform_events.sql (17.93ms)
+2026/08/21 02:50:37 OK   00010_domain_corporation_structure.sql (72.62ms)
+2026/08/21 02:50:37 OK   00011_domain_corporation_projects.sql (12.94ms)
+2026/08/21 02:50:37 OK   00012_domain_history.sql (10.18ms)
+2026/08/21 02:50:37 OK   00013_domain_assets.sql (13.18ms)
+2026/08/21 02:50:37 OK   00014_domain_wallets.sql (26.53ms)
+2026/08/21 02:50:37 OK   00015_domain_contracts.sql (18.54ms)
+2026/08/21 02:50:37 OK   00016_domain_industry_mining.sql (26.32ms)
+2026/08/21 02:50:37 OK   00017_domain_market.sql (22.91ms)
+2026/08/21 02:50:37 OK   00018_domain_killmails.sql (22.33ms)
+2026/08/21 02:50:37 OK   00019_domain_social.sql (20.34ms)
+2026/08/21 02:50:37 OK   00020_domain_character_sheet.sql (41.83ms)
+2026/08/21 02:50:37 OK   00021_domain_fittings.sql (9.86ms)
+2026/08/21 02:50:37 OK   00022_domain_mail.sql (21.36ms)
+2026/08/21 02:50:37 OK   00023_domain_notifications.sql (15.07ms)
+2026/08/21 02:50:37 OK   00024_domain_calendar.sql (14.84ms)
+2026/08/21 02:50:37 OK   00025_domain_planetary.sql (10.68ms)
+2026/08/21 02:50:37 OK   00026_domain_sovereignty.sql (33.11ms)
+2026/08/21 02:50:37 OK   00027_domain_tools.sql (15.7ms)
+2026/08/21 02:50:37 OK   00028_domain_intel.sql (7.85ms)
+2026/08/21 02:50:37 OK   00029_domain_fixups.sql (4.43ms)
+2026/08/21 02:50:37 OK   00030_phase7_character_fixups.sql (30.89ms)
+2026/08/21 02:50:37 OK   00031_phase8_acting_character_history.sql (7.1ms)
+2026/08/21 02:50:37 OK   00032_phase8_mining_extraction_structure_id.sql (3.81ms)
+2026/08/21 02:50:37 OK   00033_phase8_1_skyhook_reagent_fixup.sql (6.78ms)
+2026/08/21 02:50:37 OK   00034_phase9_market_issued_by.sql (3.29ms)
+2026/08/21 02:50:37 OK   00035_phase9_notification_payload.sql (5.87ms)
+2026/08/21 02:50:37 OK   00036_phase9_sde_core_tables.sql (80.57ms)
+2026/08/21 02:50:37 OK   00037_phase11_entitlement_source_fixup.sql (2.77ms)
+2026/08/21 02:50:37 OK   00038_phase12_discord_invalid_budget.sql (4.86ms)
+2026/08/21 02:50:37 OK   00039_phase13_teamspeak_challenge.sql (7.67ms)
+2026/08/21 02:50:37 OK   00040_phase15_1_defect_closure.sql (5.96ms)
+2026/08/21 02:50:37 OK   00041_phase19_outbox_dispatch.sql (7.11ms)
+2026/08/21 02:50:37 OK   00042_phase20_4_ledger_divergence_pair.sql (3.5ms)
+2026/08/21 02:50:37 OK   00043_phase20_4_1_reconcile_residual.sql (3ms)
+2026/08/21 02:50:37 OK   00044_phase20_5_webhook_secret_rotation.sql (5ms)
+2026/08/21 02:50:37 OK   00045_phase20_6_keyset_covering_indexes.sql (13.05ms)
+2026/08/21 02:50:37 OK   00046_phase20_9_character_skill_summary.sql (5.96ms)
+2026/08/21 02:50:37 goose: successfully migrated database to version: 46
+migrate up: app/sde schema current — tables, columns and indexes verified against the migrations, not just goose's log
+migrate up: seed data applied
+migrate up: 50 alert types seeded, and 4 THRESHOLD types are DEFERRED.
+migrate up:   corporation.structure.fuel_low, corporation.starbase.fuel_low,
+migrate up:   corporation.member.inactive, corporation.contract.expiring
+migrate up: each declares an ESI source route, and app.esi_route is empty until the
+migrate up: catalogue is ingested. They complete automatically on the first ingest —
+migrate up: `serve` does one at startup, or run `hangar admin ingest-catalogue`.
+migrate up: Until then no routing rule can be created for them and they cannot fire.
+
+### ONE hangar service, command: ["serve"] — exactly what compose runs
+1167aafb7fc25484bacb73c1b04a0d8b89146206730543d1149ac4c392570ac1
+[PASS] n9-serve — one container, command serve, healthy
+
+### wait for the alert catalogue — 54 types with the 4 thresholds resolved (trap 22)
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+[PASS] n9-catalogue — 54 alert types with 4 thresholds resolved by serve's own startup ingest
+
+### the default channel — provisioned by ensureDefaultAlertChannels, which only ran under `work` before
+[PASS] n9-default-channel — serve provisioned app.alert_channel 'default-slack' from HANGAR_SLACK_DEFAULT_WEBHOOK
+
+### route one alert type to it — the operator action §4.4 requires
+INSERT 0 1
+
+### produce an alert event through the EMITTER, not by inserting a row
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+
+### wait for the threshold evaluator and the pump — both of which used to run only under `work`
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+{"time":"2026-08-21T02:50:38.764685312Z","level":"INFO","msg":"hangar serve: starting","version":"dev","commit":"unknown"}
+{"time":"2026-08-21T02:50:38.840357859Z","level":"INFO","msg":"acquired planner leadership","component":"sync.planner"}
+{"time":"2026-08-21T02:50:38.848071147Z","level":"INFO","msg":"alerting: provisioned default channel from configuration","name":"default-slack","kind":"slack_webhook"}
+{"time":"2026-08-21T02:50:38.848432397Z","level":"INFO","msg":"hangar: metrics listening","addr":"0.0.0.0:9090"}
+{"time":"2026-08-21T02:50:38.849582216Z","level":"WARN","msg":"hangar: NO Static Data Export has been imported — item, station and system NAMES are unavailable, so EFT fitting exports render [<type_id>] placeholders and the skyhook / sovereignty-hub type and system backfills leave their columns NULL. Nothing is broken and nothing renders blank; run 'hangar admin import-sde' to resolve ids to names","sde_types":0}
+{"time":"2026-08-21T02:50:38.97972288Z","level":"INFO","msg":"hangar serve: listening","addr":"0.0.0.0:8080"}
+{"time":"2026-08-21T02:50:42.508713693Z","level":"INFO","msg":"hangar: esi catalogue ingested","routes":233,"blocked_by_pin":8,"retired":0,"source":"live","stale_snapshot":false,"d_max":"2026-08-18","pin":"2026-08-04","d_max_recorded":true}
+{"time":"2026-08-21T02:50:42.519545219Z","level":"INFO","msg":"hangar: alert type catalogue complete","alert_types":54,"threshold_types":4}
+{"time":"2026-08-21T02:50:53.974771443Z","level":"WARN","msg":"alerting: a threshold alert's source route is not being polled on this installation — it will generate zero alerts, which is indistinguishable from nothing being wrong","component":"alerting.thresholds","upstream_path":"/corporations/{corporation_id}/contracts","alert_types":["corporation.contract.expiring"],"reason":"no enabled sync subscription — no character has granted the scope this route needs"}
+{"time":"2026-08-21T02:50:53.974887526Z","level":"WARN","msg":"alerting: a threshold alert's source route is not being polled on this installation — it will generate zero alerts, which is indistinguishable from nothing being wrong","component":"alerting.thresholds","upstream_path":"/corporations/{corporation_id}/membertracking","alert_types":["corporation.member.inactive"],"reason":"no enabled sync subscription — no character has granted the scope this route needs"}
+{"time":"2026-08-21T02:50:53.974904439Z","level":"WARN","msg":"alerting: a threshold alert's source route is not being polled on this installation — it will generate zero alerts, which is indistinguishable from nothing being wrong","component":"alerting.thresholds","upstream_path":"/corporations/{corporation_id}/starbases/{starbase_id}","alert_types":["corporation.starbase.fuel_low"],"reason":"no enabled sync subscription — no character has granted the scope this route needs"}
+{"time":"2026-08-21T02:50:53.97491525Z","level":"WARN","msg":"alerting: a threshold alert's source route is not being polled on this installation — it will generate zero alerts, which is indistinguishable from nothing being wrong","component":"alerting.thresholds","upstream_path":"/corporations/{corporation_id}/structures","alert_types":["corporation.structure.fuel_low"],"reason":"no enabled sync subscription — no character has granted the scope this route needs"}
+{"time":"2026-08-21T02:50:53.982570591Z","level":"INFO","msg":"alerting: threshold evaluation pass","subjects":1,"emitted":1,"deduplicated":0,"unrouted_types":3,"by_type":{"corporation.structure.fuel_low":1}}
+{"time":"2026-08-21T02:51:08.974344333Z","level":"INFO","msg":"alerting: threshold evaluation pass","subjects":1,"emitted":0,"deduplicated":1,"unrouted_types":3,"by_type":{"corporation.structure.fuel_low":1}}
+{"time":"2026-08-21T02:51:08.981822041Z","level":"INFO","msg":"alerting: dispatch tick","claimed":1,"groups":1,"sent":1,"retried":0,"dead_lettered":0}
+[PASS] n9-event — app.alert_event holds 1 row(s), written by serve's own threshold evaluator — before this phase it held none on any default installation
+[PASS] n9-delivered — 1 delivery(ies) reached state 'sent' through serve's own pump
+
+### the RECEIVER's transcript — not the pump's opinion
+/hook {"text":"Structure fuel below threshold","blocks":[{"type":"section","text":{"type":"mrkdwn","text":"Structure fuel below threshold\nstructure 1035000000001 — fuel expires 2026-08-21T08:50:48Z"}}]}
+[PASS] n9-received — the webhook sink recorded 206 bytes of delivered message — see n9-compose-transcript.txt
+
+### Gate 3's two metrics, which serve exported as nil before this phase
+[PASS] n9-metrics — serve's /metrics exports alert_delivery_total (12 series) and alert_dead_letter_depth (1) — both were literal nils on serve's registry before this phase
+
+### verdicts
+n9-serve	PASS	one container, command serve, healthy
+n9-catalogue	PASS	54 alert types with 4 thresholds resolved by serve's own startup ingest
+n9-default-channel	PASS	serve provisioned app.alert_channel 'default-slack' from HANGAR_SLACK_DEFAULT_WEBHOOK
+n9-event	PASS	app.alert_event holds 1 row(s), written by serve's own threshold evaluator — before this phase it held none on any default installation
+n9-delivered	PASS	1 delivery(ies) reached state 'sent' through serve's own pump
+n9-received	PASS	the webhook sink recorded 206 bytes of delivered message — see n9-compose-transcript.txt
+n9-metrics	PASS	serve's /metrics exports alert_delivery_total (12 series) and alert_dead_letter_depth (1) — both were literal nils on serve's registry before this phase
+
+every verdict PASSED
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
+Error response from daemon: No such container: n9-proof-pg
