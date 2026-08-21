@@ -169,3 +169,104 @@ func TestNoPinKeysUnderTheEmptyString(t *testing.T) {
 	require.True(t, replayed.FromCache, "a Client with no pin source must still cache and replay")
 	require.Equal(t, first.Body, replayed.Body)
 }
+
+// ── PHASE 23 (N-5): THE FAN-OUT CACHE-KEY COLLISION ──────────────────────
+//
+// cacheKey hashed the TEMPLATED upstream path and never PathParams, so
+// every item of a detail fan-out shared one cache key. This test is written
+// the way the defect would actually surface: two characters' skills, each
+// with its own ETag, and the assertion that a 304 for one never replays the
+// other's body.
+//
+// It fails against the pre-fix key — character 2's conditional request
+// finds character 1's body under the shared key and replays it, so the
+// caller receives one character's data labelled as another's.
+func TestFanOutItemsDoNotShareACacheKey(t *testing.T) {
+	// A faithful per-item conditional server: each character has its own
+	// body and its own ETag, which is exactly the shape that makes the
+	// collision reachable.
+	bodies := map[string]string{
+		"/characters/1/skills": `{"character":1}`,
+		"/characters/2/skills": `{"character":2}`,
+	}
+	etags := map[string]string{
+		"/characters/1/skills": `"etag-character-1"`,
+		"/characters/2/skills": `"etag-character-2"`,
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		etag := etags[r.URL.Path]
+		w.Header().Set("ETag", etag)
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(bodies[r.URL.Path]))
+	}))
+	defer srv.Close()
+
+	client, l1 := pinnedClient(t, srv.URL, nil)
+	ctx := context.Background()
+
+	itemRequest := func(id string, validators *cache.Validators) esi.Request {
+		return esi.Request{
+			Method: http.MethodGet, UpstreamPath: "/characters/{character_id}/skills",
+			PathParams: map[string]string{"character_id": id},
+			CacheMode:  "cacheable",
+			Validators: validators,
+		}
+	}
+
+	// Fan out over both items, storing each body under its own key.
+	first, err := client.Do(ctx, itemRequest("1", nil))
+	require.NoError(t, err)
+	require.Equal(t, `{"character":1}`, string(first.Body))
+	second, err := client.Do(ctx, itemRequest("2", nil))
+	require.NoError(t, err)
+	require.Equal(t, `{"character":2}`, string(second.Body))
+	l1.Wait()
+
+	// Now condition each item on ITS OWN ETag — the per-item revalidation
+	// that makes this defect live. Each must replay its own body.
+	for _, id := range []string{"1", "2"} {
+		replayed, err := client.Do(ctx, itemRequest(id, &cache.Validators{ETag: etags["/characters/"+id+"/skills"]}))
+		require.NoError(t, err)
+		require.True(t, replayed.FromCache, "character %s's 304 must find character %s's stored body", id, id)
+		require.Equal(t, bodies["/characters/"+id+"/skills"], string(replayed.Body),
+			"a 304 for character %s replayed another character's body — the fan-out shares one cache key", id)
+	}
+}
+
+// TestTheCacheKeyDistinguishesEveryPathParam is the narrower statement, and
+// the one that would catch a partial fix: it asserts the key changes when
+// ANY path parameter changes, not merely when the first one does.
+func TestTheCacheKeyDistinguishesEveryPathParam(t *testing.T) {
+	srv := pinServer(t)
+	defer srv.Close()
+
+	client, l1 := pinnedClient(t, srv.URL, nil)
+	ctx := context.Background()
+
+	multi := func(corp, division string) esi.Request {
+		return esi.Request{
+			Method:       http.MethodGet,
+			UpstreamPath: "/corporations/{corporation_id}/wallets/{division}/journal",
+			PathParams:   map[string]string{"corporation_id": corp, "division": division},
+			CacheMode:    "cacheable",
+		}
+	}
+
+	// Store a body for one (corporation, division) pair.
+	_, err := client.Do(ctx, multi("98000001", "1"))
+	require.NoError(t, err)
+	l1.Wait()
+
+	// A different DIVISION of the same corporation is a different resource
+	// and must not find that entry. Its 304 has nothing to replay.
+	other := multi("98000001", "2")
+	other.Validators = &cache.Validators{ETag: cachedETag}
+	resp, err := client.Do(ctx, other)
+	require.NoError(t, err)
+	require.False(t, resp.FromCache,
+		"division 2 replayed division 1's body — the key ignores a path parameter that is not the first")
+}

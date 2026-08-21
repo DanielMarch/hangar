@@ -264,10 +264,18 @@ type Response struct {
 	Is429Headerless bool
 }
 
-// buildURL substitutes {name} placeholders in path with PathParams,
-// URL-escaping each value, and appends Query. upstream_path is used
-// verbatim otherwise — Principle 5.
-func (c *Client) buildURL(req Request) (string, error) {
+// resolvePath substitutes {name} placeholders in upstream_path with
+// PathParams, URL-escaping each value. upstream_path is used verbatim
+// otherwise — Principle 5.
+//
+// It does NOT reject a leftover placeholder, because it has two callers
+// that want different things from one. buildURL treats an unresolved
+// placeholder as a fatal request error, which it is. cacheKey cannot: a
+// key function that fails has nowhere to fail to, and falling back to the
+// TEMPLATED path is precisely the collision N-5 describes. Leaving the
+// placeholder in place keeps the key a function of whatever WAS resolved,
+// so two items of a fan-out still differ.
+func resolvePath(req Request) string {
 	path := req.UpstreamPath
 	for name, value := range req.PathParams {
 		placeholder := "{" + name + "}"
@@ -276,6 +284,12 @@ func (c *Client) buildURL(req Request) (string, error) {
 		}
 		path = strings.ReplaceAll(path, placeholder, url.PathEscape(value))
 	}
+	return path
+}
+
+// buildURL resolves the path and appends Query.
+func (c *Client) buildURL(req Request) (string, error) {
+	path := resolvePath(req)
 	if strings.Contains(path, "{") {
 		return "", fmt.Errorf("esi: unresolved path placeholder in %q after substitution", req.UpstreamPath)
 	}
@@ -547,9 +561,30 @@ func parsePages(raw string) int {
 	return n
 }
 
+// cacheKey computes §5.3's key for one request.
+//
+// ── PHASE 23 (N-5): THE PATH IS THE RESOLVED ONE, NOT THE TEMPLATE ───────
+//
+// This hashed req.UpstreamPath — the TEMPLATED `/characters/{character_id}
+// /skills` — and never PathParams, so every item of a detail fan-out shared
+// one cache key. cache.KeyInput.Path has said "the resolved request path"
+// since Phase 3 and §5.3's formula names the resolved path; the code simply
+// did not match it.
+//
+// It was not live and it was not harmless. HANGAR's cache is read only on a
+// 304 the caller conditioned, and no fan-out sends validators today, so
+// nothing ever collided. It becomes real the moment anyone adds per-item
+// ETags to a fan-out — a natural optimisation, since that is what ETags are
+// FOR — and the failure mode is serving one character's detail body as
+// another's. That is a data-disclosure bug wearing a performance
+// improvement's clothes, and it would be attributed to the optimisation
+// rather than to this function.
+//
+// Fixed while it is two lines and a test, rather than left as a landmine
+// under a future change. TestFanOutItemsDoNotShareACacheKey is the guard.
 func (c *Client) cacheKey(req Request) string {
 	return cache.Key(cache.KeyInput{
-		Method: req.Method, Path: req.UpstreamPath, Query: req.Query,
+		Method: req.Method, Path: resolvePath(req), Query: req.Query,
 		CompatibilityDate: c.compatibilityDate(),
 		Tenant:            c.Tenant, ResolvedLanguage: c.Language,
 		TokenSubject: tokenSubject(req.AccessToken),
