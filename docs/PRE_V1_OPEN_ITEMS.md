@@ -1107,6 +1107,14 @@ the transcript, in front of a reader, and the reader was me. The measurement was
 read. That is a different failure from not measuring, and a worse one, because the fix for not
 measuring is a new check and the fix for this is only attention.
 
+The push was then verified by round trip rather than by the push command's own say-so. Both tags
+were pushed, every local copy of the image was **deleted**, and the image was pulled back from
+`ghcr.io` as a stranger would receive it — same digest
+(`sha256:0da18ad3...`), correct self-identification, and `release-verify` run again against the
+pulled copy with verdicts identical to the built one. That third run is in
+`release-verify-from-registry/`. It is the only run of the six-check suite that measures what an
+operator actually installs; the other two measure what this machine happened to have.
+
 **Two commits follow the tag, not one.** The brief expected exactly one — Gate 6's. The second is
 this evidence, and the ordering is forced rather than sloppy: `release-verify` writes into
 `docs/gate-evidence/v1.0.0-rc3/`, so had it run before Gate 6 its untracked output would have
