@@ -15,6 +15,12 @@ coverage.html
 *.prof
 /hangar
 /hangar.exe
+# PHASE 23. A stray 71 MB dev build, `hangar.exe~`, was committed in Phase
+# 20.7 and survived to the first public push, where GitHub flagged it. The
+# pattern above is anchored and exact, so the editor-backup spelling slipped
+# past it. Both are covered now.
+hangar.exe*
+*.exe~
 
 # ── SPA ──────────────────────────────────────────────────────────────────────
 web/node_modules/
