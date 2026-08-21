@@ -1379,7 +1379,7 @@ bypassing the endpoint registry; a health check against a route CCP has deleted.
 | `AllianceController` | `/api/v1/alliances/*` | Direct |
 | `CharacterController` | `/api/v1/characters/*` | Direct; `_sync` envelope added, stripped by the shim |
 | `CorporationController` | `/api/v1/corporations/*` | Direct; `_sync` envelope added, stripped by the shim |
-| `KillmailsController` | `/api/v1/characters/{id}/killmails`, `/corporations/{id}/killmails` | Split by owner |
+| `KillmailsController` | `/api/v1/characters/{id}/killmails`, `/corporations/{id}/killmails` | Split by owner. **No shim** (`501`) — `attacker_hash` leads every attacker object in legacy's `killmails.detail` and is a SeAT-internal value with no source in HANGAR **[Phase 23]** |
 | `RoleController` | `/api/v1/admin/*` (RBAC) | Reshaped — grant model differs; **breaking, no shim** (`410`) |
 | `RoleLookupController` | `/api/v1/admin/users/{id}` | Folded into user administration; **breaking, no shim** (`410`) |
 | `SquadController` | `/api/v1/squads/*` | Expanded (members, moderators, roles). **Breaking in its identity fields, no shim** (`501`) — see below |

@@ -105,16 +105,16 @@ cannot fix this for you.
 | Legacy controller | Status | HANGAR equivalent |
 | :-- | :-- | :-- |
 | `AllianceController` | **shimmed** | `/api/v1/alliances/*` |
-| `CharacterController` | **partly shimmed** — 9 of 15 routes | `/api/v1/characters/*` |
+| `CharacterController` | **partly shimmed** — 10 of 15 routes | `/api/v1/characters/*` |
 | `CorporationController` | **partly shimmed** — 6 of 11 routes | `/api/v1/corporations/*` |
-| `KillmailsController` | **not yet shimmed** | `/api/v1/{characters,corporations}/{id}/killmails` |
+| `KillmailsController` | **501 — not translatable** | `/api/v1/{characters,corporations}/{id}/killmails` |
 | `RoleController` | **410 Gone — breaking** | `/api/v1/admin/roles`, `/api/v1/admin/scopes` |
 | `RoleLookupController` | **410 Gone — breaking** | `/api/v1/admin/users/{id}`, `/api/v1/me` |
 | `SquadController` | **501 — not translatable** | `/api/v1/squads/*` |
 | `UserController` | **501 — not translatable** | `/api/v1/admin/users`, `/api/v1/me` |
 | `ApiController` | n/a | framework base class, no routes |
 
-Shimmed today, byte-identical to recorded legacy responses — **16 of 34**:
+Shimmed today, byte-identical to recorded legacy responses — **17 of 34**:
 
 ```
 GET /api/v2/alliance/contacts/{alliance_id}
@@ -133,7 +133,24 @@ GET /api/v2/corporation/member-tracking/{corporation_id} [added in Phase 20.9]
 GET /api/v2/character/mail/{character_id}                [added in Phase 20.10]
 GET /api/v2/character/notifications/{character_id}       [added in Phase 20.10]
 GET /api/v2/corporation/structures/{corporation_id}      [added in Phase 20.10]
+GET /api/v2/character/wallet-journal/{character_id}      [added in Phase 23]
 ```
+
+**Phase 23 added the first WALLET route, and it took a measurement rather than code.**
+`character.wallet-journal` was blocked for five phases on `reasonMySQLDoubleRounding` — the
+corpus records `"amount": 9007199254741000` where the exact value is `9007199254740993.01`, and
+the shim produced `9007199254740994`. Phase 20.7 measured PHP, refuted the obvious explanation,
+and concluded the divergence was "in what legacy's MySQL DOUBLE column came to hold, upstream of
+any encoder", which was right and was read as unreproducible.
+
+Nobody had asked the database what it held: `SELECT price FROM character_orders` returns
+`9.007199254741e15` — thirteen significant digits, **in the table**. The loss is at INSERT, where
+PDO stringifies a bound PHP float at the `precision` ini (14). It is therefore reproducible from
+the exact decimal, and `v2shim.phpPrecision` reproduces it.
+
+It is also the first served route with a **real second page** — 20 rows against a page size of
+15 — so Laravel's `prev`/`next` links are exercised against something other than a single-page
+collection for the first time.
 
 ### The per-route classification is the authority **[Phase 20.6]**
 
@@ -144,13 +161,39 @@ from it — there is no second list, and no path falls through to a generic answ
 | Status | HTTP | Meaning |
 | :-- | :-- | :-- |
 | `served` | 200 | Shimmed **and** byte-identical to its recording. A route that returns plausible JSON but does not match those bytes is not served. |
-| `pending` | 501 | Shimmable, not yet shimmed. Unfinished work, recorded as unfinished. |
-| `unshimmable` | 501 | Cannot ever be byte-compatible — HANGAR's identifier space differs from legacy's. |
+| `served` | 200 | (above) |
+| `pending` | 501 | Shimmable, not yet shimmed. Unfinished work, recorded as unfinished. **No route holds this status.** |
+| `unshimmable` | 501 | Cannot ever be byte-compatible: something legacy puts on the wire has no honest source in HANGAR. |
 | `breaking` | 410 | The underlying model changed; the concept no longer exists. |
 
 `pending` and `unshimmable` share a status code and carry **different bodies** on purpose: "wait
 for a release" and "rewrite your integration" are different instructions, and before 20.6 both
 answered the same generic sentence.
+
+### Nothing is `pending` any more **[Phase 23]**
+
+At v1.0.0-rc2 **twelve** routes held `pending`, which means "unfinished work recorded as
+unfinished; it is not a design decision". A release cannot ship a compatibility shim making
+twelve promises, and a client reading "not shimmed yet" waits for a release that is never coming.
+
+Every one of the twelve already carried a reason **derived against legacy's own source** in
+Phase 22's audit. The derivations were sound and the status contradicted them. So:
+
+* **eleven** moved to `unshimmable` — the status changed, the reasons did not;
+* **`character.sheet`** was settled by measurement (one `refresh_tokens` row seeded, corpus
+  re-recorded, `"user_id"` came back as `1` — legacy's auto-increment against HANGAR's uuid) and
+  joined them;
+* **`character.wallet-journal`** became `served`, above.
+
+`unshimmable`'s definition widened to hold them. It said "HANGAR's identifier space differs from
+legacy's", which described four routes and none of the eleven. What all fifteen share is that
+**the bytes come from legacy's own storage, and HANGAR's storage is correct rather than merely
+different** — a decimal money column cannot reproduce a double's rounding error, a uuid cannot
+reproduce an auto-increment. Serving them would mean storing legacy's mistakes.
+
+The status is kept with no routes in it, deliberately: a future half-built route will need it,
+and deleting it would make `unshimmable` the only available word for "not done yet" — which is
+how the twelve came to be mislabelled, from the other direction.
 
 **The route count was wrong.** This document and the shim's own comments said legacy `/api/v2`
 has 33 read routes. Measured from `testdata/legacy-api-v2/MANIFEST.json`, it is **34**: 32
