@@ -21,9 +21,12 @@ import { Route as AuthedAdminPlatformsRouteImport } from './routes/_authed/admin
 import { Route as AuthedAdminRatelimitsRouteImport } from './routes/_authed/admin/ratelimits'
 import { Route as AuthedAdminReplicasRouteImport } from './routes/_authed/admin/replicas'
 import { Route as AuthedAdminRoutesRouteImport } from './routes/_authed/admin/routes'
+import { Route as AuthedAdminRoutingRouteImport } from './routes/_authed/admin/routing'
 import { Route as AuthedAdminScopesRouteImport } from './routes/_authed/admin/scopes'
 import { Route as AuthedAdminSecurityRouteImport } from './routes/_authed/admin/security'
 import { Route as AuthedAdminUsersRouteImport } from './routes/_authed/admin/users'
+import { Route as AuthedAdminVocabulariesRouteImport } from './routes/_authed/admin/vocabularies'
+import { Route as AuthedAdminWebhooksRouteImport } from './routes/_authed/admin/webhooks'
 import { Route as AuthedCharactersIndexRouteImport } from './routes/_authed/characters/index'
 import { Route as AuthedCharactersCharacterIdRouteImport } from './routes/_authed/characters/$characterId'
 import { Route as AuthedCorporationsIndexRouteImport } from './routes/_authed/corporations/index'
@@ -116,6 +119,11 @@ const AuthedAdminRoutesRoute = AuthedAdminRoutesRouteImport.update({
   path: '/routes',
   getParentRoute: () => AuthedAdminRoute,
 } as any)
+const AuthedAdminRoutingRoute = AuthedAdminRoutingRouteImport.update({
+  id: '/routing',
+  path: '/routing',
+  getParentRoute: () => AuthedAdminRoute,
+} as any)
 const AuthedAdminScopesRoute = AuthedAdminScopesRouteImport.update({
   id: '/scopes',
   path: '/scopes',
@@ -129,6 +137,16 @@ const AuthedAdminSecurityRoute = AuthedAdminSecurityRouteImport.update({
 const AuthedAdminUsersRoute = AuthedAdminUsersRouteImport.update({
   id: '/users',
   path: '/users',
+  getParentRoute: () => AuthedAdminRoute,
+} as any)
+const AuthedAdminVocabulariesRoute = AuthedAdminVocabulariesRouteImport.update({
+  id: '/vocabularies',
+  path: '/vocabularies',
+  getParentRoute: () => AuthedAdminRoute,
+} as any)
+const AuthedAdminWebhooksRoute = AuthedAdminWebhooksRouteImport.update({
+  id: '/webhooks',
+  path: '/webhooks',
   getParentRoute: () => AuthedAdminRoute,
 } as any)
 const AuthedCharactersIndexRoute = AuthedCharactersIndexRouteImport.update({
@@ -331,9 +349,12 @@ export interface FileRoutesByFullPath {
   '/admin/ratelimits': typeof AuthedAdminRatelimitsRoute
   '/admin/replicas': typeof AuthedAdminReplicasRoute
   '/admin/routes': typeof AuthedAdminRoutesRoute
+  '/admin/routing': typeof AuthedAdminRoutingRoute
   '/admin/scopes': typeof AuthedAdminScopesRoute
   '/admin/security': typeof AuthedAdminSecurityRoute
   '/admin/users': typeof AuthedAdminUsersRoute
+  '/admin/vocabularies': typeof AuthedAdminVocabulariesRoute
+  '/admin/webhooks': typeof AuthedAdminWebhooksRoute
   '/characters/$characterId': typeof AuthedCharactersCharacterIdRouteWithChildren
   '/corporations/$corporationId': typeof AuthedCorporationsCorporationIdRouteWithChildren
   '/squads/$squadId': typeof AuthedSquadsSquadIdRouteWithChildren
@@ -378,9 +399,12 @@ export interface FileRoutesByTo {
   '/admin/ratelimits': typeof AuthedAdminRatelimitsRoute
   '/admin/replicas': typeof AuthedAdminReplicasRoute
   '/admin/routes': typeof AuthedAdminRoutesRoute
+  '/admin/routing': typeof AuthedAdminRoutingRoute
   '/admin/scopes': typeof AuthedAdminScopesRoute
   '/admin/security': typeof AuthedAdminSecurityRoute
   '/admin/users': typeof AuthedAdminUsersRoute
+  '/admin/vocabularies': typeof AuthedAdminVocabulariesRoute
+  '/admin/webhooks': typeof AuthedAdminWebhooksRoute
   '/admin': typeof AuthedAdminIndexRoute
   '/characters': typeof AuthedCharactersIndexRoute
   '/corporations': typeof AuthedCorporationsIndexRoute
@@ -425,9 +449,12 @@ export interface FileRoutesById {
   '/_authed/admin/ratelimits': typeof AuthedAdminRatelimitsRoute
   '/_authed/admin/replicas': typeof AuthedAdminReplicasRoute
   '/_authed/admin/routes': typeof AuthedAdminRoutesRoute
+  '/_authed/admin/routing': typeof AuthedAdminRoutingRoute
   '/_authed/admin/scopes': typeof AuthedAdminScopesRoute
   '/_authed/admin/security': typeof AuthedAdminSecurityRoute
   '/_authed/admin/users': typeof AuthedAdminUsersRoute
+  '/_authed/admin/vocabularies': typeof AuthedAdminVocabulariesRoute
+  '/_authed/admin/webhooks': typeof AuthedAdminWebhooksRoute
   '/_authed/characters/$characterId': typeof AuthedCharactersCharacterIdRouteWithChildren
   '/_authed/corporations/$corporationId': typeof AuthedCorporationsCorporationIdRouteWithChildren
   '/_authed/squads/$squadId': typeof AuthedSquadsSquadIdRouteWithChildren
@@ -475,9 +502,12 @@ export interface FileRouteTypes {
     | '/admin/ratelimits'
     | '/admin/replicas'
     | '/admin/routes'
+    | '/admin/routing'
     | '/admin/scopes'
     | '/admin/security'
     | '/admin/users'
+    | '/admin/vocabularies'
+    | '/admin/webhooks'
     | '/characters/$characterId'
     | '/corporations/$corporationId'
     | '/squads/$squadId'
@@ -522,9 +552,12 @@ export interface FileRouteTypes {
     | '/admin/ratelimits'
     | '/admin/replicas'
     | '/admin/routes'
+    | '/admin/routing'
     | '/admin/scopes'
     | '/admin/security'
     | '/admin/users'
+    | '/admin/vocabularies'
+    | '/admin/webhooks'
     | '/admin'
     | '/characters'
     | '/corporations'
@@ -568,9 +601,12 @@ export interface FileRouteTypes {
     | '/_authed/admin/ratelimits'
     | '/_authed/admin/replicas'
     | '/_authed/admin/routes'
+    | '/_authed/admin/routing'
     | '/_authed/admin/scopes'
     | '/_authed/admin/security'
     | '/_authed/admin/users'
+    | '/_authed/admin/vocabularies'
+    | '/_authed/admin/webhooks'
     | '/_authed/characters/$characterId'
     | '/_authed/corporations/$corporationId'
     | '/_authed/squads/$squadId'
@@ -698,6 +734,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAdminRoutesRouteImport
       parentRoute: typeof AuthedAdminRoute
     }
+    '/_authed/admin/routing': {
+      id: '/_authed/admin/routing'
+      path: '/routing'
+      fullPath: '/admin/routing'
+      preLoaderRoute: typeof AuthedAdminRoutingRouteImport
+      parentRoute: typeof AuthedAdminRoute
+    }
     '/_authed/admin/scopes': {
       id: '/_authed/admin/scopes'
       path: '/scopes'
@@ -717,6 +760,20 @@ declare module '@tanstack/react-router' {
       path: '/users'
       fullPath: '/admin/users'
       preLoaderRoute: typeof AuthedAdminUsersRouteImport
+      parentRoute: typeof AuthedAdminRoute
+    }
+    '/_authed/admin/vocabularies': {
+      id: '/_authed/admin/vocabularies'
+      path: '/vocabularies'
+      fullPath: '/admin/vocabularies'
+      preLoaderRoute: typeof AuthedAdminVocabulariesRouteImport
+      parentRoute: typeof AuthedAdminRoute
+    }
+    '/_authed/admin/webhooks': {
+      id: '/_authed/admin/webhooks'
+      path: '/webhooks'
+      fullPath: '/admin/webhooks'
+      preLoaderRoute: typeof AuthedAdminWebhooksRouteImport
       parentRoute: typeof AuthedAdminRoute
     }
     '/_authed/characters/': {
@@ -953,9 +1010,12 @@ interface AuthedAdminRouteChildren {
   AuthedAdminRatelimitsRoute: typeof AuthedAdminRatelimitsRoute
   AuthedAdminReplicasRoute: typeof AuthedAdminReplicasRoute
   AuthedAdminRoutesRoute: typeof AuthedAdminRoutesRoute
+  AuthedAdminRoutingRoute: typeof AuthedAdminRoutingRoute
   AuthedAdminScopesRoute: typeof AuthedAdminScopesRoute
   AuthedAdminSecurityRoute: typeof AuthedAdminSecurityRoute
   AuthedAdminUsersRoute: typeof AuthedAdminUsersRoute
+  AuthedAdminVocabulariesRoute: typeof AuthedAdminVocabulariesRoute
+  AuthedAdminWebhooksRoute: typeof AuthedAdminWebhooksRoute
   AuthedAdminIndexRoute: typeof AuthedAdminIndexRoute
 }
 
@@ -966,9 +1026,12 @@ const AuthedAdminRouteChildren: AuthedAdminRouteChildren = {
   AuthedAdminRatelimitsRoute: AuthedAdminRatelimitsRoute,
   AuthedAdminReplicasRoute: AuthedAdminReplicasRoute,
   AuthedAdminRoutesRoute: AuthedAdminRoutesRoute,
+  AuthedAdminRoutingRoute: AuthedAdminRoutingRoute,
   AuthedAdminScopesRoute: AuthedAdminScopesRoute,
   AuthedAdminSecurityRoute: AuthedAdminSecurityRoute,
   AuthedAdminUsersRoute: AuthedAdminUsersRoute,
+  AuthedAdminVocabulariesRoute: AuthedAdminVocabulariesRoute,
+  AuthedAdminWebhooksRoute: AuthedAdminWebhooksRoute,
   AuthedAdminIndexRoute: AuthedAdminIndexRoute,
 }
 

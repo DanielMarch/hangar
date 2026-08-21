@@ -54,6 +54,11 @@ func RegisterAll(hapi huma.API, deps api.Deps) {
 	registerAdmin(hapi, deps)
 	registerAdminRoles(hapi, deps)
 	registerAdminRules(hapi, deps)
+	// PHASE 23 (N-4). §4.4's configuration surface and the three admin
+	// boards that had queries and no endpoint. See admin_alerting.go and
+	// admin_boards.go.
+	registerAdminAlerting(hapi, deps)
+	registerAdminBoards(hapi, deps)
 	registerTeamspeakLink(hapi, deps)
 	registerWebhooks(hapi, deps)
 }

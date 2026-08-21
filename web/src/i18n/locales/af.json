@@ -230,7 +230,10 @@
       "platforms": "Platforms",
       "alerts": "Waarskuwings",
       "users": "Gebruikers",
-      "security": "Sekuriteitslog"
+      "security": "Sekuriteitslog",
+      "routing": "Waarskuwingroetering",
+      "vocabularies": "Woordeskatte",
+      "webhooks": "Webhooks"
     },
     "sync": {
       "totalRoutes": "Roetes ingeneem",
@@ -352,7 +355,26 @@
       "occurrences": "Voorkomste",
       "sample": "Loonvrag",
       "viewSample": "Bekyk",
-      "noSample": "Geen voorbeeldloonvrag is aangeteken nie."
+      "noSample": "Geen voorbeeldloonvrag is aangeteken nie.",
+      "enabled": "Geaktiveer",
+      "enable": "Aktiveer",
+      "disable": "Deaktiveer",
+      "channelsHeading": "Afleweringskanale",
+      "newChannel": "Nuwe kanaal",
+      "channelConfig": "Konfigurasie (JSON)",
+      "configNotJson": "Konfigurasie is nie geldige JSON nie.",
+      "create": "Skep",
+      "catalogueHeading": "Waarskuwingkatalogus",
+      "domain": "Domein",
+      "severity": "Erns",
+      "routing": "Roetering",
+      "unrouted": "Geen roeteringsreël teiken hierdie waarskuwingtipe nie. Sy gebeurtenisse word opgeteken en aan niemand afgelewer nie. 'n Nuwe installasie begin so: verstekkanale kom uit die omgewing, en wie wat ontvang word doelbewus aan jou oorgelaat.",
+      "currentRules": "Huidige reëls",
+      "noRules": "Nog geen roeteringsreëls nie.",
+      "addRule": "Voeg 'n reël by",
+      "targetKind": "Gehoor",
+      "targetRef": "Gehoor-ID",
+      "mention": "Vermelding"
     },
     "platforms": {
       "heading": "Voorsieningsplatforms",
@@ -364,7 +386,12 @@
       "live": "Aktief",
       "lock": "Vries voorsiening",
       "unlock": "Hervat voorsiening",
-      "reasonPlaceholder": "Rede vir die vries"
+      "reasonPlaceholder": "Rede vir die vries",
+      "create": "Skep",
+      "restartNote": "'n Drywer bind aan platformrye by prosesbegin, so 'n platform wat nou geskep word, word vanaf die volgende herbegin voorsien.",
+      "groupsHeading": "Afgeleë groepe",
+      "noGroups": "Nog geen groepe geregistreer nie. 'n Aansprakereël het een nodig om te teiken.",
+      "remoteRef": "Afgeleë ID"
     },
     "rules": {
       "heading": "Regte-reëls",
@@ -414,6 +441,40 @@
       "actor": "Akteur",
       "target": "Teiken",
       "ip": "IP"
+    },
+    "vocabularies": {
+      "heading": "Waardes wat op erkenning wag",
+      "value": "Waarde",
+      "intro": "Waardes wat HANGAR waargeneem en nie herken het nie. Niks hier is verwerp nie: 'n oop woordeskat word woordeliks opgeteken, hoe nuut ook al, en hier lees 'n mens wat dit was."
+    },
+    "webhooks": {
+      "deadLetterHeading": "Dooiebrief-afleweringe",
+      "outboxHeading": "Uitkassie-agterstand",
+      "outboxHelp": "Gebeurtenisse in die uitkassie wat nog geen versender uitgestuur het nie. 'n Getal wat aanhou styg beteken die pomp loop nie.",
+      "failedAt": "Dooiebrief op",
+      "endpoint": "Eindpunt",
+      "status": "Laaste status"
+    },
+    "subscriptions": {
+      "heading": "Intekeningbestuur",
+      "prompt": "Kies 'n entiteit om te sien wat dit sinkroniseer.",
+      "entityKind": "Entiteitsoort",
+      "entityId": "Entiteit-ID",
+      "route": "Roete",
+      "enabled": "Geaktiveer",
+      "noCache": "Kas omseil",
+      "lastStatus": "Laaste status",
+      "lastSuccess": "Laaste sukses",
+      "nextDue": "Volgende keer",
+      "group": "Tempolimietgroep",
+      "enable": "Aktiveer",
+      "disable": "Deaktiveer",
+      "useCache": "Gebruik kas",
+      "bypassCache": "Omseil kas"
     }
+  },
+  "common": {
+    "yes": "Ja",
+    "no": "Nee"
   }
 }

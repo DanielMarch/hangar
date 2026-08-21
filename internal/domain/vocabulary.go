@@ -23,6 +23,44 @@ const (
 	VocabRequiredRole     OpenVocabulary = "required_role"
 )
 
+// OpenVocabularies is every category above, in stable order.
+//
+// PHASE 23 (N-4). It exists because the admin board that reads
+// app.open_vocabulary has to enumerate the categories to count them, and a
+// second list of the same seven strings written in the API layer is a
+// second list that can drift from this one. The CATEGORIES are closed —
+// adding one is a code change, as the type comment says — while the values
+// inside each never are, which is what makes enumerating the categories
+// legitimate and enumerating the values a Principle 14 violation.
+func OpenVocabularies() []OpenVocabulary {
+	return []OpenVocabulary{
+		VocabRefType, VocabLocationType, VocabNotificationType, VocabScope,
+		VocabCacheMode, VocabContractStatus, VocabRequiredRole,
+	}
+}
+
+// IsKnownVocabulary reports whether a string names one of the categories.
+// A request for a category that does not exist is a 404, not an empty
+// board: an empty board says "nothing pending", and telling an operator
+// that about a misspelled vocabulary is a lie they would act on.
+func IsKnownVocabulary(name string) bool {
+	for _, vocabulary := range OpenVocabularies() {
+		if string(vocabulary) == name {
+			return true
+		}
+	}
+	return false
+}
+
+// PlatformKinds is app.platform.kind's CHECK constraint — HANGAR's three
+// supported provisioning drivers (02_DATABASE_SCHEMA.md §4.4 #33).
+//
+// A CLOSED vocabulary, and legitimately so under Principle 14: it names
+// HANGAR's own drivers, not anything an external system reports. A fourth
+// value would need a driver implementation, a migration and an entry here,
+// in that order.
+func PlatformKinds() []string { return []string{"discord", "teamspeak", "mumble"} }
+
 // SuperuserPermission is the one permission internal/rbac.Resolve treats
 // specially: holding it (without an explicit deny on it) implicitly
 // allows every other permission that is not itself explicitly denied.
@@ -122,6 +160,33 @@ var Permissions = []Permission{
 	// assertion that a human has looked at a novel scope grammar and
 	// decided what it means.
 	{"admin.scopes.acknowledge", "admin", "Acknowledge a newly observed ESI scope string"},
+
+	// ── PHASE 23 (N-4): FOUR PERMISSIONS FOR FOUR SURFACES THAT NOW EXIST ──
+	//
+	// Every one of these guards an endpoint added in the same commit. A
+	// permission added ahead of its endpoint is the mirror of what N-4 is
+	// about — `alerting.channels.manage` and `alerting.routing.manage` have
+	// sat in this list since Phase 10 with nothing behind either, which is
+	// exactly as much evidence of a working feature as a query with no
+	// caller.
+	//
+	// admin.sync.manage is deliberately SEPARATE from admin.sync.view. The
+	// view permission is already granted widely enough to read a route
+	// catalogue; disabling a subscription stops an entity synchronising,
+	// and an operator who can look at the sync board should not thereby be
+	// able to switch it off.
+	{"admin.sync.manage", "admin", "Enable, disable or change caching on individual sync subscriptions"},
+	{"admin.vocabularies.view", "admin", "View observed open-vocabulary values pending acknowledgement"},
+	// Acknowledging is separated from viewing for the same reason it is on
+	// the scope and notification-type boards: it is an assertion that a
+	// human has looked at a value HANGAR did not recognise and decided what
+	// it means.
+	{"admin.vocabularies.acknowledge", "admin", "Acknowledge an observed open-vocabulary value"},
+	// Distinct from `webhooks.manage`, which is USER-scoped — it lets a
+	// user create and revoke their own endpoints. This is the
+	// installation-wide dead-letter board and outbox backlog, which show
+	// every subscriber's deliveries.
+	{"admin.webhooks.view", "admin", "View the webhook dead-letter board and outbox backlog"},
 
 	// -- provisioning --
 	{"provisioning.platforms.manage", "provisioning", "Configure Discord/TeamSpeak/Mumble platform connections"},

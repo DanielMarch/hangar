@@ -13,6 +13,30 @@ SELECT * FROM app.sync_subscription WHERE subscription_id = $1;
 -- name: SetSyncSubscriptionEnabled :exec
 UPDATE app.sync_subscription SET enabled = $2 WHERE subscription_id = $1;
 
+-- name: ListSyncSubscriptionsForEntity :many
+-- PHASE 23 (N-4). The list an operator manages subscriptions FROM.
+--
+-- SetSyncSubscriptionEnabled and SetSyncNoCacheOptIn had no production
+-- caller since Phase 6 — an operator could not snooze, disable or opt a
+-- subscription out of caching except by writing SQL — and neither could
+-- have one without this, because nothing anywhere returned a
+-- subscription_id. `/api/v1/admin/sync/subscriptions` lists schedulable
+-- ROUTES, which is a different thing wearing the same name.
+--
+-- Scoped to ONE entity rather than listing the table. A real installation
+-- holds hundreds of thousands of subscriptions (Gate 1 measured 225,000),
+-- so a flat list is not a screen anybody can use; "what is this character
+-- subscribed to, and is any of it unhealthy" is the question an operator
+-- actually arrives with.
+--
+-- The join is what makes the row readable: a subscription carries a
+-- route_id, and an operator needs the path.
+SELECT s.*, r.upstream_path, r.rate_limit_group, r.cache_mode
+  FROM app.sync_subscription s
+  JOIN app.esi_route r USING (route_id)
+ WHERE s.entity_kind = $1 AND s.entity_id = $2
+ ORDER BY r.upstream_path;
+
 -- name: ClaimDueSubscriptions :many
 -- The 5-second planner claim loop (Phase 6, internal/sync/planner/claim.go).
 -- §4.3's illustrative index predicate couldn't include `now()` (not

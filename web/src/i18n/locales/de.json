@@ -230,7 +230,10 @@
       "platforms": "Plattformen",
       "alerts": "Alarme",
       "users": "Benutzer",
-      "security": "Sicherheitsprotokoll"
+      "security": "Sicherheitsprotokoll",
+      "routing": "Alarm-Routing",
+      "vocabularies": "Vokabulare",
+      "webhooks": "Webhooks"
     },
     "sync": {
       "totalRoutes": "Erfasste Routen",
@@ -352,7 +355,26 @@
       "occurrences": "Vorkommen",
       "sample": "Nutzdaten",
       "viewSample": "Ansehen",
-      "noSample": "Es wurden keine Beispiel-Nutzdaten erfasst."
+      "noSample": "Es wurden keine Beispiel-Nutzdaten erfasst.",
+      "enabled": "Aktiviert",
+      "enable": "Aktivieren",
+      "disable": "Deaktivieren",
+      "channelsHeading": "Zustellkanäle",
+      "newChannel": "Neuer Kanal",
+      "channelConfig": "Konfiguration (JSON)",
+      "configNotJson": "Die Konfiguration ist kein gültiges JSON.",
+      "create": "Erstellen",
+      "catalogueHeading": "Alarmkatalog",
+      "domain": "Domäne",
+      "severity": "Schweregrad",
+      "routing": "Routing",
+      "unrouted": "Keine Routing-Regel adressiert diesen Alarmtyp. Seine Ereignisse werden aufgezeichnet und an niemanden zugestellt. Eine neue Installation beginnt so: Standardkanäle werden aus der Umgebung bereitgestellt, wer was empfängt, bleibt bewusst Ihnen überlassen.",
+      "currentRules": "Aktuelle Regeln",
+      "noRules": "Noch keine Routing-Regeln.",
+      "addRule": "Regel hinzufügen",
+      "targetKind": "Zielgruppe",
+      "targetRef": "Zielgruppen-ID",
+      "mention": "Erwähnung"
     },
     "platforms": {
       "heading": "Provisionierungsplattformen",
@@ -364,7 +386,12 @@
       "live": "Läuft",
       "lock": "Provisionierung einfrieren",
       "unlock": "Provisionierung fortsetzen",
-      "reasonPlaceholder": "Grund für das Einfrieren"
+      "reasonPlaceholder": "Grund für das Einfrieren",
+      "create": "Erstellen",
+      "restartNote": "Ein Treiber bindet sich beim Prozessstart an Plattformzeilen; eine jetzt erstellte Plattform wird ab dem nächsten Neustart bereitgestellt.",
+      "groupsHeading": "Entfernte Gruppen",
+      "noGroups": "Noch keine Gruppen registriert. Eine Berechtigungsregel benötigt eine als Ziel.",
+      "remoteRef": "Entfernte ID"
     },
     "rules": {
       "heading": "Berechtigungsregeln",
@@ -414,6 +441,40 @@
       "actor": "Akteur",
       "target": "Ziel",
       "ip": "IP"
+    },
+    "vocabularies": {
+      "heading": "Werte, die auf Bestätigung warten",
+      "value": "Wert",
+      "intro": "Werte, die HANGAR beobachtet und nicht erkannt hat. Nichts davon wurde abgelehnt: ein offenes Vokabular wird wortgetreu aufgezeichnet, wie neuartig es auch sei, und hier liest ein Mensch nach, was es war."
+    },
+    "webhooks": {
+      "deadLetterHeading": "Unzustellbare Zustellungen",
+      "outboxHeading": "Ausgangs-Rückstand",
+      "outboxHelp": "Ereignisse im Ausgang, die noch kein Dispatcher verteilt hat. Eine stetig steigende Zahl bedeutet, dass die Pumpe nicht läuft.",
+      "failedAt": "Unzustellbar seit",
+      "endpoint": "Endpunkt",
+      "status": "Letzter Status"
+    },
+    "subscriptions": {
+      "heading": "Abonnementverwaltung",
+      "prompt": "Wählen Sie eine Entität, um zu sehen, was sie synchronisiert.",
+      "entityKind": "Entitätstyp",
+      "entityId": "Entitäts-ID",
+      "route": "Route",
+      "enabled": "Aktiviert",
+      "noCache": "Cache umgangen",
+      "lastStatus": "Letzter Status",
+      "lastSuccess": "Letzter Erfolg",
+      "nextDue": "Nächste Fälligkeit",
+      "group": "Ratenbegrenzungsgruppe",
+      "enable": "Aktivieren",
+      "disable": "Deaktivieren",
+      "useCache": "Cache verwenden",
+      "bypassCache": "Cache umgehen"
     }
+  },
+  "common": {
+    "yes": "Ja",
+    "no": "Nein"
   }
 }

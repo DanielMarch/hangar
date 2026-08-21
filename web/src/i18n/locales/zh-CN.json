@@ -230,7 +230,10 @@
       "platforms": "平台",
       "alerts": "告警",
       "users": "用户",
-      "security": "安全日志"
+      "security": "安全日志",
+      "routing": "警报路由",
+      "vocabularies": "词汇表",
+      "webhooks": "Webhook"
     },
     "sync": {
       "totalRoutes": "已导入路由",
@@ -352,7 +355,26 @@
       "occurrences": "出现次数",
       "sample": "负载",
       "viewSample": "查看",
-      "noSample": "未记录示例负载。"
+      "noSample": "未记录示例负载。",
+      "enabled": "已启用",
+      "enable": "启用",
+      "disable": "停用",
+      "channelsHeading": "投递通道",
+      "newChannel": "新建通道",
+      "channelConfig": "配置 (JSON)",
+      "configNotJson": "配置不是有效的 JSON。",
+      "create": "创建",
+      "catalogueHeading": "警报目录",
+      "domain": "领域",
+      "severity": "严重性",
+      "routing": "路由",
+      "unrouted": "没有路由规则指向此警报类型。它的事件会被记录，但不会送达任何人。全新安装即是如此：默认通道来自环境变量，而由谁接收则有意留给你决定。",
+      "currentRules": "当前规则",
+      "noRules": "尚无路由规则。",
+      "addRule": "添加规则",
+      "targetKind": "受众",
+      "targetRef": "受众 ID",
+      "mention": "提及"
     },
     "platforms": {
       "heading": "配给平台",
@@ -364,7 +386,12 @@
       "live": "运行中",
       "lock": "冻结配给",
       "unlock": "恢复配给",
-      "reasonPlaceholder": "冻结原因"
+      "reasonPlaceholder": "冻结原因",
+      "create": "创建",
+      "restartNote": "驱动在进程启动时绑定平台记录，因此现在创建的平台会在下次重启后开始供给。",
+      "groupsHeading": "远端分组",
+      "noGroups": "尚未注册任何分组。授权规则需要一个目标。",
+      "remoteRef": "远端 ID"
     },
     "rules": {
       "heading": "授权规则",
@@ -414,6 +441,40 @@
       "actor": "操作者",
       "target": "目标",
       "ip": "IP"
+    },
+    "vocabularies": {
+      "heading": "待确认的值",
+      "value": "值",
+      "intro": "HANGAR 观测到但无法识别的值。这里没有任何内容被拒绝——开放词汇表会原样记录，无论多么陌生，而这里就是由人来阅读它们的地方。"
+    },
+    "webhooks": {
+      "deadLetterHeading": "死信投递",
+      "outboxHeading": "发件箱积压",
+      "outboxHelp": "已写入发件箱但尚无分发器扇出的事件。数字持续上升说明泵没有在运行。",
+      "failedAt": "死信时间",
+      "endpoint": "端点",
+      "status": "最后状态"
+    },
+    "subscriptions": {
+      "heading": "订阅管理",
+      "prompt": "选择一个实体以查看它同步了什么。",
+      "entityKind": "实体类型",
+      "entityId": "实体 ID",
+      "route": "路由",
+      "enabled": "已启用",
+      "noCache": "绕过缓存",
+      "lastStatus": "最后状态",
+      "lastSuccess": "最后成功",
+      "nextDue": "下次到期",
+      "group": "限流分组",
+      "enable": "启用",
+      "disable": "停用",
+      "useCache": "使用缓存",
+      "bypassCache": "绕过缓存"
     }
+  },
+  "common": {
+    "yes": "是",
+    "no": "否"
   }
 }

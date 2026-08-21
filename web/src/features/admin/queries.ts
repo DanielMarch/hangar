@@ -275,3 +275,199 @@ export function useLockdown(platformId: string) {
     },
   });
 }
+
+// ── PHASE 23 (N-4): THE SURFACES THAT HAD QUERIES AND NO SCREEN ──────────
+//
+// Each hook below reaches an endpoint added in the same phase, behind a
+// generated store query that had no production caller at all. The register
+// in test/reachability/generated_allowlist.txt is what said so; these are
+// the other end of it.
+
+export const alertTypesPath = "/api/v1/admin/alerts/types" as const;
+export const alertChannelsPath = "/api/v1/admin/alerts/channels" as const;
+export const webhookDeadLetterPath = "/api/v1/admin/webhooks/dead-letter" as const;
+
+/** One alert type with every routing rule that targets it. */
+export function useAlertType(alertType: string) {
+  return useQuery({
+    ...itemQueryOptions(
+      "/api/v1/admin/alerts/types/{type}",
+      { params: { path: { type: alertType } } },
+      ["admin", "alerts", "types", alertType],
+    ),
+    enabled: alertType !== "",
+  });
+}
+
+export function useCreateAlertChannel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { kind: string; name: string; config: unknown }) => {
+      const result = await apiClient.POST("/api/v1/admin/alerts/channels", {
+        body: { kind: input.kind, name: input.name, config: input.config },
+      });
+      return unwrap(result);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin", "alerts"] });
+    },
+  });
+}
+
+export function useSetAlertChannelEnabled() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { id: string; enabled: boolean }) => {
+      const result = await apiClient.PATCH("/api/v1/admin/alerts/channels/{id}", {
+        params: { path: { id: input.id } },
+        body: { enabled: input.enabled },
+      });
+      return unwrap(result);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin", "alerts"] });
+    },
+  });
+}
+
+export interface RoutingRuleDraft {
+  target_kind: string;
+  target_ref: string;
+  channel_id: string;
+  mention: string;
+}
+
+export function useCreateRoutingRule(alertType: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (draft: RoutingRuleDraft) => {
+      const result = await apiClient.POST("/api/v1/admin/alerts/types/{type}/rules", {
+        params: { path: { type: alertType } },
+        body: draft,
+      });
+      return unwrap(result);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin", "alerts"] });
+    },
+  });
+}
+
+// ---- open-vocabulary board ----
+
+/**
+ * The per-vocabulary pending counts. One request rather than one per
+ * board, because the badge numbers are what decides which board is worth
+ * opening — asking seven times to render seven numbers is how a nav
+ * becomes slower than the page it leads to.
+ */
+export const vocabularyCountsQueryOptions = () =>
+  itemQueryOptions("/api/v1/admin/vocabularies", {}, ["admin", "vocabularies"]);
+
+export function useVocabularyBoard(vocabulary: string) {
+  return useQuery(
+    collectionQueryOptions(
+      "/api/v1/admin/vocabularies/{vocabulary}",
+      { params: { path: { vocabulary } } },
+      ["admin", "vocabularies", vocabulary],
+    ),
+  );
+}
+
+export function useAcknowledgeVocabularyValue(vocabulary: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (value: string) => {
+      const result = await apiClient.POST(
+        "/api/v1/admin/vocabularies/{vocabulary}/acknowledge",
+        { params: { path: { vocabulary } }, body: { value } },
+      );
+      return unwrap(result);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin", "vocabularies"] });
+    },
+  });
+}
+
+// ---- webhook outbox ----
+
+export const webhookOutboxQueryOptions = () =>
+  itemQueryOptions("/api/v1/admin/webhooks/outbox", {}, ["admin", "webhooks", "outbox"]);
+
+// ---- subscription management ----
+
+export function useEntitySubscriptions(entityKind: string, entityId: string) {
+  return useQuery({
+    ...collectionQueryOptions(
+      "/api/v1/admin/sync/subscriptions/{entity_kind}/{entity_id}",
+      { params: { path: { entity_kind: entityKind, entity_id: Number(entityId) } } },
+      ["admin", "sync", "subscriptions", entityKind, entityId],
+    ),
+    enabled: entityId !== "" && Number.isFinite(Number(entityId)),
+  });
+}
+
+/**
+ * Both fields are optional and are sent only when set, which mirrors the
+ * server's pointer-typed body: "leave this alone" and "set this to false"
+ * are different requests, and a screen that always sent both would disable
+ * a subscription every time somebody changed its caching.
+ */
+export function usePatchSubscription() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      id: string;
+      enabled?: boolean;
+      optInNoCache?: boolean;
+    }) => {
+      const body: { enabled?: boolean; opt_in_no_cache?: boolean } = {};
+      if (input.enabled !== undefined) body.enabled = input.enabled;
+      if (input.optInNoCache !== undefined) body.opt_in_no_cache = input.optInNoCache;
+      const result = await apiClient.PATCH("/api/v1/admin/sync/subscriptions/{id}", {
+        params: { path: { id: input.id } },
+        body,
+      });
+      return unwrap(result);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin", "sync"] });
+    },
+  });
+}
+
+// ---- platform creation ----
+
+export function useCreatePlatform() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { kind: string; name: string }) => {
+      const result = await apiClient.POST("/api/v1/admin/platforms", {
+        body: { kind: input.kind, name: input.name, config: {} },
+      });
+      return unwrap(result);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin", "platforms"] });
+    },
+  });
+}
+
+export function useCreatePlatformGroup(platformId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { remoteRef: string; name: string }) => {
+      const result = await apiClient.POST("/api/v1/admin/platforms/{id}/groups", {
+        params: { path: { id: platformId } },
+        body: { remote_ref: input.remoteRef, name: input.name },
+      });
+      return unwrap(result);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["admin", "platforms", platformId, "groups"],
+      });
+    },
+  });
+}

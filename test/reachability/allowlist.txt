@@ -150,10 +150,26 @@ internal/domain.splitFieldWords  # helper of IsMoneyFieldName
 internal/esi/cache.NormalizeEnvelope  # cache-envelope normaliser covered by unit tests; L1/L2 store pre-normalised values
 internal/esi/catalogue.SchedulingMode  # open-vocabulary accessor; the scheduling query reads the column directly
 internal/esi/ratelimit.Governor1.forceModeCheck  # test hook for deterministic mode transitions
-internal/events.DeadLetterBoard  # dead-letter query awaiting its admin endpoint
+# ── PHASE 23 (N-4): DeadLetterBoard AND PendingCount ARE GONE FROM HERE ──
+# Both are reachable. events.DeadLetterBoard backs
+# GET /api/v1/admin/webhooks/dead-letter and events.PendingCount backs
+# GET /api/v1/admin/webhooks/outbox (internal/api/v1/admin_boards.go).
+#
+# §4.9's outbox has had the same at-least-once-then-dead-letter guarantee as
+# §4.4's alert queue since Phase 19, and the alerting half has had an admin
+# board since Phase 15. So a webhook subscriber that went permanently
+# unreachable produced deliveries that were correctly dead-lettered and that
+# nobody could see — the dead-letter queue's whole purpose is that a
+# non-delivery is VISIBLE rather than lost, and half of it was neither.
+#
+# PendingCount's old entry argued a webhook-outbox backlog gauge "is named
+# by no gate", citing rule 7 (do not declare metrics ahead of their wiring).
+# That reading was too narrow: rule 7 forbids exporting a metric nothing
+# feeds, not answering a question an operator has. It is served as an
+# endpoint rather than as a Prometheus gauge, which keeps rule 7 satisfied
+# exactly as it was.
 internal/events.EventID  # helper of the Recorder double
 internal/events.ParseSignatureHeader  # as Verify — consumer-side, not called by the sender
-internal/events.PendingCount  # CORRECTED IN 20.4. It was listed as "awaiting the alert_dead_letter_depth metric (20.4)"; that attribution was wrong. This counts UNDISPATCHED §4.9 WEBHOOK OUTBOX events (app.outbox_event), not alert deliveries. alert_dead_letter_depth is a gauge over app.alert_delivery and 20.4 wired it to alerting.DeadLetterCount, which is the only source that could have been right. This remains a genuine unwired admin-surface query — a webhook-outbox backlog gauge would be a real and useful metric, but it is named by no gate, and 04_RELEASE_GATES.md rule 7 is about not declaring metrics ahead of their wiring, not about inventing ones nobody asked for.
 internal/events.Recorder.Len  # test-facing accessor on the in-memory Recorder double
 internal/events.Verify  # signature verification published for CONSUMERS of HANGAR webhooks; deploy/verify-webhook-signature.sh is the shipped equivalent
 internal/provisioning/drivers/teamspeak.Unescape  # TS3 wire decoder, symmetric with Escape; the WebQuery driver parses JSON, so only Escape is on the live path

@@ -130,6 +130,67 @@ func DeleteEntitlementRule(ctx context.Context, pool store.Pool, urgent *provisi
 	return firstErr
 }
 
+// SetEntitlementRuleEnabled flips one rule's `enabled` flag and, when the
+// flip REDUCES entitlements, enqueues the same urgent revocation a delete
+// does.
+//
+// ── PHASE 23 (N-4): WHY THIS IS NOT A ONE-LINE UPDATE ────────────────────
+//
+// internal/provisioning/entitlement evaluates only `enabled` rules
+// (ListEntitlementRulesForPlatform's predicate), so disabling a GRANT rule
+// removes exactly the same entitlements as deleting it, for exactly the
+// same users. Writing the flag and returning would leave every affected
+// user's remote groups live until the next bulk reconcile — the silent
+// deferral defect B32 exists to stop, reintroduced through a different
+// verb.
+//
+// eventAt is stamped ONCE by the caller, before any work begins, for the
+// reason deleteEntitlementRuleHandler records: §2.2 measures the SLO from
+// the originating event, and a per-user time.Now() inside the loop would
+// report the most flattering possible reading of the case the SLO exists to
+// bound.
+//
+// ENABLING is not entitlement-reducing and enqueues nothing. A user who
+// should now have a group gets it on the next reconcile; a user who should
+// no longer have one is a security question, and only one of those two is
+// urgent. Stated rather than left implicit, because "why does enabling not
+// revoke" is a fair question with an answer.
+func SetEntitlementRuleEnabled(
+	ctx context.Context, pool store.Pool, urgent *provisioning.Urgent,
+	ruleID uuid.UUID, enabled bool, eventAt time.Time, reason string,
+) error {
+	ro := store.New(pool)
+	rule, err := ro.GetEntitlementRule(ctx, ruleID)
+	if err != nil {
+		return fmt.Errorf("v1: reading entitlement rule %s: %w", ruleID, err)
+	}
+	group, err := ro.GetPlatformGroup(ctx, rule.GroupID)
+	if err != nil {
+		return fmt.Errorf("v1: resolving platform for rule %s's group %s: %w", ruleID, rule.GroupID, err)
+	}
+
+	if err := ro.SetEntitlementRuleEnabled(ctx, ruleID, enabled); err != nil {
+		return fmt.Errorf("v1: setting entitlement rule %s enabled=%t: %w", ruleID, enabled, err)
+	}
+	if enabled {
+		return nil
+	}
+
+	links, err := ro.ListAllProvisioningStatesForPlatform(ctx, group.PlatformID)
+	if err != nil {
+		return fmt.Errorf("v1: listing users linked to platform %s after disabling rule %s: %w", group.PlatformID, ruleID, err)
+	}
+	var firstErr error
+	for _, link := range links {
+		if err := urgent.HandleUserChange(ctx, pool, link.UserID, eventAt, reason); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("v1: revoking for user %s after rule %s was disabled: %w", link.UserID, ruleID, err)
+			}
+		}
+	}
+	return firstErr
+}
+
 // RuleSetPreviewToken is the mechanism that makes "saving an entitlement
 // rule set without previewing it" impossible SERVER-side, not merely
 // discouraged in the UI (Phase 18: "a rule saved without preview is how an

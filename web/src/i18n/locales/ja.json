@@ -230,7 +230,10 @@
       "platforms": "プラットフォーム",
       "alerts": "アラート",
       "users": "ユーザー",
-      "security": "セキュリティログ"
+      "security": "セキュリティログ",
+      "routing": "アラートルーティング",
+      "vocabularies": "語彙",
+      "webhooks": "Webhook"
     },
     "sync": {
       "totalRoutes": "取り込み済みルート",
@@ -352,7 +355,26 @@
       "occurrences": "発生回数",
       "sample": "ペイロード",
       "viewSample": "表示",
-      "noSample": "サンプルペイロードは記録されていません。"
+      "noSample": "サンプルペイロードは記録されていません。",
+      "enabled": "有効",
+      "enable": "有効にする",
+      "disable": "無効にする",
+      "channelsHeading": "配信チャネル",
+      "newChannel": "新しいチャネル",
+      "channelConfig": "設定 (JSON)",
+      "configNotJson": "設定が有効な JSON ではありません。",
+      "create": "作成",
+      "catalogueHeading": "アラートカタログ",
+      "domain": "ドメイン",
+      "severity": "重大度",
+      "routing": "ルーティング",
+      "unrouted": "このアラートタイプを対象とするルーティングルールがありません。イベントは記録されますが誰にも配信されません。新規インストールはこの状態から始まります。既定のチャネルは環境から作成され、誰が受け取るかは意図的に運用者に委ねられています。",
+      "currentRules": "現在のルール",
+      "noRules": "ルーティングルールはまだありません。",
+      "addRule": "ルールを追加",
+      "targetKind": "対象",
+      "targetRef": "対象 ID",
+      "mention": "メンション"
     },
     "platforms": {
       "heading": "プロビジョニング・プラットフォーム",
@@ -364,7 +386,12 @@
       "live": "稼働中",
       "lock": "プロビジョニングを凍結",
       "unlock": "プロビジョニングを再開",
-      "reasonPlaceholder": "凍結の理由"
+      "reasonPlaceholder": "凍結の理由",
+      "create": "作成",
+      "restartNote": "ドライバはプロセス起動時にプラットフォーム行へバインドします。今作成したプラットフォームは次回の再起動から適用されます。",
+      "groupsHeading": "リモートグループ",
+      "noGroups": "登録済みのグループがありません。エンタイトルメントルールには対象が必要です。",
+      "remoteRef": "リモート ID"
     },
     "rules": {
       "heading": "権限ルール",
@@ -414,6 +441,40 @@
       "actor": "実行者",
       "target": "対象",
       "ip": "IP"
+    },
+    "vocabularies": {
+      "heading": "確認待ちの値",
+      "value": "値",
+      "intro": "HANGAR が観測し認識できなかった値です。何も拒否されていません。開かれた語彙はどれほど新しくてもそのまま記録され、ここで人間がその内容を読みます。"
+    },
+    "webhooks": {
+      "deadLetterHeading": "デッドレター配信",
+      "outboxHeading": "送信箱の滞留",
+      "outboxHelp": "送信箱に書き込まれ、まだどのディスパッチャも配信していないイベントです。増え続ける場合はポンプが動いていません。",
+      "failedAt": "デッドレター日時",
+      "endpoint": "エンドポイント",
+      "status": "最終ステータス"
+    },
+    "subscriptions": {
+      "heading": "サブスクリプション管理",
+      "prompt": "エンティティを選ぶと、何を同期しているかが表示されます。",
+      "entityKind": "エンティティ種別",
+      "entityId": "エンティティ ID",
+      "route": "ルート",
+      "enabled": "有効",
+      "noCache": "キャッシュ回避",
+      "lastStatus": "最終ステータス",
+      "lastSuccess": "最終成功",
+      "nextDue": "次回予定",
+      "group": "レート制限グループ",
+      "enable": "有効にする",
+      "disable": "無効にする",
+      "useCache": "キャッシュを使う",
+      "bypassCache": "キャッシュを回避"
     }
+  },
+  "common": {
+    "yes": "はい",
+    "no": "いいえ"
   }
 }

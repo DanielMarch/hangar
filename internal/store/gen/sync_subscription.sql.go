@@ -277,6 +277,93 @@ func (q *Queries) ListRecentSyncRuns(ctx context.Context, subscriptionID uuid.UU
 	return items, nil
 }
 
+const listSyncSubscriptionsForEntity = `-- name: ListSyncSubscriptionsForEntity :many
+SELECT s.subscription_id, s.entity_kind, s.entity_id, s.route_id, s.enabled, s.acting_character_id, s.next_due_at, s.last_success_at, s.last_status, s.etag, s.last_modified, s.cursor_after, s.consecutive_304, s.consecutive_403, s.snoozed_until, s.opt_in_no_cache, r.upstream_path, r.rate_limit_group, r.cache_mode
+  FROM app.sync_subscription s
+  JOIN app.esi_route r USING (route_id)
+ WHERE s.entity_kind = $1 AND s.entity_id = $2
+ ORDER BY r.upstream_path
+`
+
+type ListSyncSubscriptionsForEntityRow struct {
+	SubscriptionID    uuid.UUID
+	EntityKind        string
+	EntityID          int64
+	RouteID           uuid.UUID
+	Enabled           bool
+	ActingCharacterID *int64
+	NextDueAt         time.Time
+	LastSuccessAt     *time.Time
+	LastStatus        *int16
+	Etag              *string
+	LastModified      *time.Time
+	CursorAfter       *string
+	Consecutive304    int32
+	Consecutive403    int32
+	SnoozedUntil      *time.Time
+	OptInNoCache      bool
+	UpstreamPath      string
+	RateLimitGroup    *string
+	CacheMode         *string
+}
+
+// PHASE 23 (N-4). The list an operator manages subscriptions FROM.
+//
+// SetSyncSubscriptionEnabled and SetSyncNoCacheOptIn had no production
+// caller since Phase 6 — an operator could not snooze, disable or opt a
+// subscription out of caching except by writing SQL — and neither could
+// have one without this, because nothing anywhere returned a
+// subscription_id. `/api/v1/admin/sync/subscriptions` lists schedulable
+// ROUTES, which is a different thing wearing the same name.
+//
+// Scoped to ONE entity rather than listing the table. A real installation
+// holds hundreds of thousands of subscriptions (Gate 1 measured 225,000),
+// so a flat list is not a screen anybody can use; "what is this character
+// subscribed to, and is any of it unhealthy" is the question an operator
+// actually arrives with.
+//
+// The join is what makes the row readable: a subscription carries a
+// route_id, and an operator needs the path.
+func (q *Queries) ListSyncSubscriptionsForEntity(ctx context.Context, entityKind string, entityID int64) ([]ListSyncSubscriptionsForEntityRow, error) {
+	rows, err := q.db.Query(ctx, listSyncSubscriptionsForEntity, entityKind, entityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSyncSubscriptionsForEntityRow
+	for rows.Next() {
+		var i ListSyncSubscriptionsForEntityRow
+		if err := rows.Scan(
+			&i.SubscriptionID,
+			&i.EntityKind,
+			&i.EntityID,
+			&i.RouteID,
+			&i.Enabled,
+			&i.ActingCharacterID,
+			&i.NextDueAt,
+			&i.LastSuccessAt,
+			&i.LastStatus,
+			&i.Etag,
+			&i.LastModified,
+			&i.CursorAfter,
+			&i.Consecutive304,
+			&i.Consecutive403,
+			&i.SnoozedUntil,
+			&i.OptInNoCache,
+			&i.UpstreamPath,
+			&i.RateLimitGroup,
+			&i.CacheMode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const reconcileAllianceSubscriptions = `-- name: ReconcileAllianceSubscriptions :execrows
 INSERT INTO app.sync_subscription (entity_kind, entity_id, route_id, acting_character_id)
 SELECT 'alliance', corp.alliance_id, r.route_id, c.character_id

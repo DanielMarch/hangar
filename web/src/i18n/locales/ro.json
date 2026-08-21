@@ -230,7 +230,10 @@
       "platforms": "Platforme",
       "alerts": "Alerte",
       "users": "Utilizatori",
-      "security": "Jurnal de securitate"
+      "security": "Jurnal de securitate",
+      "routing": "Rutare alerte",
+      "vocabularies": "Vocabulare",
+      "webhooks": "Webhook-uri"
     },
     "sync": {
       "totalRoutes": "Rute preluate",
@@ -352,7 +355,26 @@
       "occurrences": "Apariții",
       "sample": "Sarcină utilă",
       "viewSample": "Vezi",
-      "noSample": "Nu a fost înregistrată nicio mostră."
+      "noSample": "Nu a fost înregistrată nicio mostră.",
+      "enabled": "Activat",
+      "enable": "Activeaza",
+      "disable": "Dezactiveaza",
+      "channelsHeading": "Canale de livrare",
+      "newChannel": "Canal nou",
+      "channelConfig": "Configuratie (JSON)",
+      "configNotJson": "Configuratia nu este JSON valid.",
+      "create": "Creeaza",
+      "catalogueHeading": "Catalog de alerte",
+      "domain": "Domeniu",
+      "severity": "Severitate",
+      "routing": "Rutare",
+      "unrouted": "Nicio regula de rutare nu vizeaza acest tip de alerta. Evenimentele sale sunt inregistrate si nu ajung la nimeni. O instalare noua incepe asa: canalele implicite vin din mediu, iar cine primeste ce este lasat deliberat in seama ta.",
+      "currentRules": "Reguli curente",
+      "noRules": "Inca nu exista reguli de rutare.",
+      "addRule": "Adauga o regula",
+      "targetKind": "Audienta",
+      "targetRef": "ID audienta",
+      "mention": "Mentiune"
     },
     "platforms": {
       "heading": "Platforme de provizionare",
@@ -364,7 +386,12 @@
       "live": "Activă",
       "lock": "Îngheață provizionarea",
       "unlock": "Reia provizionarea",
-      "reasonPlaceholder": "Motivul înghețării"
+      "reasonPlaceholder": "Motivul înghețării",
+      "create": "Creeaza",
+      "restartNote": "Un driver se leaga de randurile platformelor la pornirea procesului, deci o platforma creata acum va fi aprovizionata de la urmatoarea repornire.",
+      "groupsHeading": "Grupuri la distanta",
+      "noGroups": "Niciun grup inregistrat inca. O regula de drepturi are nevoie de o tinta.",
+      "remoteRef": "ID la distanta"
     },
     "rules": {
       "heading": "Reguli de drepturi",
@@ -414,6 +441,40 @@
       "actor": "Autor",
       "target": "Țintă",
       "ip": "IP"
+    },
+    "vocabularies": {
+      "heading": "Valori in asteptarea confirmarii",
+      "value": "Valoare",
+      "intro": "Valori pe care HANGAR le-a observat si nu le-a recunoscut. Nimic nu a fost respins: un vocabular deschis este inregistrat cuvant cu cuvant, oricat de nou, iar aici un om citeste ce a fost."
+    },
+    "webhooks": {
+      "deadLetterHeading": "Livrari in litera moarta",
+      "outboxHeading": "Restanta in cutia de iesire",
+      "outboxHelp": "Evenimente scrise in cutia de iesire pe care niciun dispecer nu le-a distribuit inca. Un numar care creste constant inseamna ca pompa nu ruleaza.",
+      "failedAt": "Trecut in litera moarta",
+      "endpoint": "Punct final",
+      "status": "Ultimul status"
+    },
+    "subscriptions": {
+      "heading": "Gestionarea abonamentelor",
+      "prompt": "Alege o entitate pentru a vedea ce sincronizeaza.",
+      "entityKind": "Tip entitate",
+      "entityId": "ID entitate",
+      "route": "Ruta",
+      "enabled": "Activat",
+      "noCache": "Cache ocolit",
+      "lastStatus": "Ultimul status",
+      "lastSuccess": "Ultimul succes",
+      "nextDue": "Urmatoarea scadenta",
+      "group": "Grup de limitare",
+      "enable": "Activeaza",
+      "disable": "Dezactiveaza",
+      "useCache": "Foloseste cache",
+      "bypassCache": "Ocoleste cache"
     }
+  },
+  "common": {
+    "yes": "Da",
+    "no": "Nu"
   }
 }

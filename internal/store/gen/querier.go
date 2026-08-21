@@ -121,7 +121,37 @@ type Querier interface {
 	// Locking `esi_route` too would serialise unrelated claims against the
 	// catalogue, so only `ss` is locked.
 	ClaimDueSubscriptions(ctx context.Context, claimSize int32) ([]AppSyncSubscription, error)
-	ClaimPendingAlertDeliveries(ctx context.Context, claimSize int32) ([]AppAlertDelivery, error)
+	// Claim-by-lease, not claim-by-read. PHASE 23 (N-10).
+	//
+	// This was a bare SELECT until this phase, and that was a double-send:
+	// alerting.Dispatcher.Tick makes an HTTP call between claiming a delivery
+	// and settling it, so two pumps ticking together read the SAME rows and
+	// sent the same message twice. Nothing has ever stopped an operator
+	// running two `hangar work` replicas — River's normal scale-out, and what
+	// docker-compose.yml's own comments describe — and Gate 3 never saw it
+	// because Gate 3 runs one pump. It became urgent when `serve` gained the
+	// alerting role (N-9), because that is what makes a two-process
+	// installation the ordinary case rather than an operator's choice.
+	//
+	// The shape is LeasePendingWebhookDeliveries', for the reason stated
+	// there: the dispatcher must not hold a transaction open across an HTTP
+	// call, so the claim MOVES next_attempt_at forward by a lease before
+	// releasing the transaction. A crash between claim and send leaves the row
+	// untouched except for the lease, and it becomes claimable again when the
+	// lease expires. The guarantee is at-least-once with no double-send inside
+	// the lease window — the same one the webhook contract makes.
+	//
+	// attempts is deliberately NOT incremented here. Waiting out a lease is
+	// not a failed attempt, and counting it as one would let a pump crash
+	// spend a delivery's dead-letter budget. Settle() owns attempts, and it is
+	// also what overwrites this lease with the real backoff.
+	//
+	// Unlike the webhook claim there is no join: an alert delivery for a
+	// channel that has since been disabled must still be CLAIMED, because
+	// dispatch.go dead-letters it on sight rather than leaving it pending
+	// forever. Filtering it out here would recreate the "neither delivered nor
+	// dead-lettered" state §4.4 exists to rule out.
+	ClaimPendingAlertDeliveries(ctx context.Context, lease time.Duration, claimSize int32) ([]AppAlertDelivery, error)
 	// Index-only scan in causal order: event_id is uuidv7()-keyed, and the
 	// partial index is on (event_id) WHERE dispatched_at IS NULL.
 	//
@@ -548,6 +578,12 @@ type Querier interface {
 	// materialized) is the caller's job to treat as not-permitted — see
 	// internal/api/middleware/authorize.go.
 	GetEffectivePermission(ctx context.Context, userID uuid.UUID, permission string) (AppEffectivePermission, error)
+	// PHASE 23 (N-4). Disabling a rule is entitlement-reducing in exactly the
+	// way deleting one is, so the disable path needs the rule's group to
+	// resolve which platform's linked users must be revoked for. DeleteRule
+	// gets that from its own RETURNING clause; an UPDATE of `enabled` has no
+	// equivalent, so the row is read first.
+	GetEntitlementRule(ctx context.Context, ruleID uuid.UUID) (AppEntitlementRule, error)
 	// app.esi_error_budget — Governor 2's installation-wide budget, one row
 	// (02_DATABASE_SCHEMA.md §4.3 #27, SRS v3.1 §4.1.3). Read through a
 	// one-second in-process cache by the caller; every non-2XX/3XX response
@@ -570,6 +606,27 @@ type Querier interface {
 	// (method, path) is the identity app.esi_route is unique on.
 	GetEsiRouteByMethodAndPath(ctx context.Context, method string, upstreamPath string) (AppEsiRoute, error)
 	GetEsiRouteByOperationID(ctx context.Context, operationID string) (AppEsiRoute, error)
+	// ── PHASE 23 (N-4): A DELIBERATE KEEP, AND WHY ──────────────────────────
+	//
+	// No production caller, and it stays. It was briefly deleted this phase on
+	// the reasoning that nothing in HANGAR wants ONE scope row — the board
+	// lists the unacknowledged ones and the acknowledge endpoint takes a name
+	// and writes — and that was wrong, because it is not the product that
+	// wants it.
+	//
+	// It is GATE 6's assertion instrument. TestGate6NovelScopeGrammar reads
+	// back `esi::synthetic~widget/read@v3` through this query to prove §6.1's
+	// novel scope grammar was recorded rather than rejected, and
+	// TestUnknownScopeStaysAcknowledged reads it to prove UpsertEsiScope's ON
+	// CONFLICT does not reset acknowledged_at and refill the board.
+	//
+	// The alternative is those tests issuing raw SQL, which is strictly worse:
+	// a test that queries the table directly passes while the query layer that
+	// production would use is broken, which is the exact gap between "the data
+	// is there" and "HANGAR can read it" that Gate 6 exists to close.
+	//
+	// Same category as UpsertReplicaHeartbeat below and internal/rbac.
+	// ResolveLive in the sibling allowlist: a measurement, not a mechanism.
 	GetEsiScope(ctx context.Context, scope string) (AppEsiScope, error)
 	GetKillmail(ctx context.Context, ownerKind string, ownerID int64, killmailID int64) (AppKillmail, error)
 	GetLatestSdeImport(ctx context.Context) (AppSdeImport, error)
@@ -1247,6 +1304,24 @@ type Querier interface {
 	// fuel for (no Station_Manager role, or a structure type that reports
 	// none) is not a structure with no fuel.
 	ListStructuresLowOnFuel(ctx context.Context, within time.Duration) ([]ListStructuresLowOnFuelRow, error)
+	// PHASE 23 (N-4). The list an operator manages subscriptions FROM.
+	//
+	// SetSyncSubscriptionEnabled and SetSyncNoCacheOptIn had no production
+	// caller since Phase 6 — an operator could not snooze, disable or opt a
+	// subscription out of caching except by writing SQL — and neither could
+	// have one without this, because nothing anywhere returned a
+	// subscription_id. `/api/v1/admin/sync/subscriptions` lists schedulable
+	// ROUTES, which is a different thing wearing the same name.
+	//
+	// Scoped to ONE entity rather than listing the table. A real installation
+	// holds hundreds of thousands of subscriptions (Gate 1 measured 225,000),
+	// so a flat list is not a screen anybody can use; "what is this character
+	// subscribed to, and is any of it unhealthy" is the question an operator
+	// actually arrives with.
+	//
+	// The join is what makes the row readable: a subscription carries a
+	// route_id, and an operator needs the path.
+	ListSyncSubscriptionsForEntity(ctx context.Context, entityKind string, entityID int64) ([]ListSyncSubscriptionsForEntityRow, error)
 	ListUnacknowledgedEsiScopes(ctx context.Context) ([]AppEsiScope, error)
 	ListUnacknowledgedNotificationTypes(ctx context.Context) ([]AppNotificationUnknownType, error)
 	ListUnacknowledgedOpenVocabulary(ctx context.Context, vocabulary string) ([]AppOpenVocabulary, error)
@@ -1655,6 +1730,15 @@ type Querier interface {
 	// binding is the second, independent layer of defense against injection.
 	SearchCharactersByName(ctx context.Context, query string, pageSize int32) ([]AppCharacter, error)
 	SearchCorporationsByName(ctx context.Context, query string, pageSize int32) ([]AppCorporation, error)
+	// PHASE 23 (N-4). The disable, and deliberately not a delete.
+	//
+	// app.alert_delivery.channel_id is ON DELETE CASCADE, so removing a channel
+	// would silently erase every delivery ever made through it — the audit
+	// trail §4.4 requires, destroyed by an operator tidying up a channel they
+	// stopped using. Disabling is what they actually want: the pump refuses a
+	// disabled channel and DEAD-LETTERS what was owed to it (dispatch.go), so
+	// the alerts are visible on the board rather than lost.
+	SetAlertChannelEnabled(ctx context.Context, channelID uuid.UUID, enabled bool) error
 	// PHASE 20.5 (B30). Asset names arrive in a SECOND upstream call —
 	// POST /{owner}/{id}/assets/names, whose request body is the item ids the
 	// assets LIST call just returned — so they are applied over rows the list
@@ -1689,6 +1773,10 @@ type Querier interface {
 	// inventing values for every other column just to set this one.
 	SetCorporationMemberLimit(ctx context.Context, corporationID int64, memberLimit *int32) error
 	SetDiscordInvalidBudgetPaused(ctx context.Context, paused bool) error
+	// NEVER call this directly from a handler. internal/api/v1's
+	// SetEntitlementRuleEnabled wraps it with the urgent revocation a disable
+	// requires — see admin_provisioning.go for why a bare flag write is defect
+	// B32 reintroduced through a different verb.
 	SetEntitlementRuleEnabled(ctx context.Context, ruleID uuid.UUID, enabled bool) error
 	SetErrorBudgetPaused(ctx context.Context, paused bool) error
 	// PHASE 15.1 — SRS §6.8 `POST /api/v1/admin/platforms/{id}/lockdown`.

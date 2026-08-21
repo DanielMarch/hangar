@@ -45,7 +45,19 @@ SELECT er.*
  WHERE pg.platform_id = $1 AND er.enabled
  ORDER BY er.created_at;
 
+-- name: GetEntitlementRule :one
+-- PHASE 23 (N-4). Disabling a rule is entitlement-reducing in exactly the
+-- way deleting one is, so the disable path needs the rule's group to
+-- resolve which platform's linked users must be revoked for. DeleteRule
+-- gets that from its own RETURNING clause; an UPDATE of `enabled` has no
+-- equivalent, so the row is read first.
+SELECT * FROM app.entitlement_rule WHERE rule_id = $1;
+
 -- name: SetEntitlementRuleEnabled :exec
+-- NEVER call this directly from a handler. internal/api/v1's
+-- SetEntitlementRuleEnabled wraps it with the urgent revocation a disable
+-- requires — see admin_provisioning.go for why a bare flag write is defect
+-- B32 reintroduced through a different verb.
 UPDATE app.entitlement_rule SET enabled = $2 WHERE rule_id = $1;
 
 -- name: DeleteEntitlementRule :one

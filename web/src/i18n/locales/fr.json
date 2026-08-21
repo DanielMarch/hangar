@@ -230,7 +230,10 @@
       "platforms": "Plateformes",
       "alerts": "Alertes",
       "users": "Utilisateurs",
-      "security": "Journal de sécurité"
+      "security": "Journal de sécurité",
+      "routing": "Routage des alertes",
+      "vocabularies": "Vocabulaires",
+      "webhooks": "Webhooks"
     },
     "sync": {
       "totalRoutes": "Routes ingérées",
@@ -352,7 +355,26 @@
       "occurrences": "Occurrences",
       "sample": "Charge utile",
       "viewSample": "Voir",
-      "noSample": "Aucune charge utile d'exemple n'a été enregistrée."
+      "noSample": "Aucune charge utile d'exemple n'a été enregistrée.",
+      "enabled": "Active",
+      "enable": "Activer",
+      "disable": "Desactiver",
+      "channelsHeading": "Canaux de distribution",
+      "newChannel": "Nouveau canal",
+      "channelConfig": "Configuration (JSON)",
+      "configNotJson": "La configuration n'est pas un JSON valide.",
+      "create": "Creer",
+      "catalogueHeading": "Catalogue des alertes",
+      "domain": "Domaine",
+      "severity": "Gravite",
+      "routing": "Routage",
+      "unrouted": "Aucune regle de routage ne cible ce type d'alerte. Ses evenements sont enregistres et livres a personne. Une nouvelle installation demarre ainsi : les canaux par defaut viennent de l'environnement, et le destinataire est deliberement laisse a votre choix.",
+      "currentRules": "Regles actuelles",
+      "noRules": "Aucune regle de routage pour l'instant.",
+      "addRule": "Ajouter une regle",
+      "targetKind": "Audience",
+      "targetRef": "Identifiant d'audience",
+      "mention": "Mention"
     },
     "platforms": {
       "heading": "Plateformes de provisionnement",
@@ -364,7 +386,12 @@
       "live": "Active",
       "lock": "Geler le provisionnement",
       "unlock": "Reprendre le provisionnement",
-      "reasonPlaceholder": "Motif du gel"
+      "reasonPlaceholder": "Motif du gel",
+      "create": "Creer",
+      "restartNote": "Un pilote se lie aux plateformes au demarrage du processus : une plateforme creee maintenant sera approvisionnee au prochain redemarrage.",
+      "groupsHeading": "Groupes distants",
+      "noGroups": "Aucun groupe enregistre. Une regle de droits a besoin d'une cible.",
+      "remoteRef": "Identifiant distant"
     },
     "rules": {
       "heading": "Règles d'habilitation",
@@ -414,6 +441,40 @@
       "actor": "Auteur",
       "target": "Cible",
       "ip": "IP"
+    },
+    "vocabularies": {
+      "heading": "Valeurs en attente d'accuse de reception",
+      "value": "Valeur",
+      "intro": "Valeurs observees par HANGAR et non reconnues. Rien n'a ete rejete : un vocabulaire ouvert est enregistre tel quel, aussi inedit soit-il, et c'est ici qu'un humain vient lire ce que c'etait."
+    },
+    "webhooks": {
+      "deadLetterHeading": "Livraisons en lettre morte",
+      "outboxHeading": "Arriere de la boite d'envoi",
+      "outboxHelp": "Evenements ecrits dans la boite d'envoi qu'aucun distributeur n'a encore diffuses. Un nombre qui ne cesse de croitre signifie que la pompe ne tourne pas.",
+      "failedAt": "Mise en lettre morte",
+      "endpoint": "Point de terminaison",
+      "status": "Dernier statut"
+    },
+    "subscriptions": {
+      "heading": "Gestion des abonnements",
+      "prompt": "Choisissez une entite pour voir ce qu'elle synchronise.",
+      "entityKind": "Type d'entite",
+      "entityId": "Identifiant d'entite",
+      "route": "Route",
+      "enabled": "Active",
+      "noCache": "Cache contourne",
+      "lastStatus": "Dernier statut",
+      "lastSuccess": "Dernier succes",
+      "nextDue": "Prochaine echeance",
+      "group": "Groupe de limitation",
+      "enable": "Activer",
+      "disable": "Desactiver",
+      "useCache": "Utiliser le cache",
+      "bypassCache": "Contourner le cache"
     }
+  },
+  "common": {
+    "yes": "Oui",
+    "no": "Non"
   }
 }

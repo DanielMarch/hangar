@@ -111,6 +111,24 @@ func registerCharacters(hapi huma.API, deps api.Deps) {
 		}))
 
 	get[NotificationsIn, CollectionOut](hapi, deps, permCharView, "/api/v1/characters/{id}/notifications", "list-character-notifications", "EVE notifications (keyset-paginated)", charTag, notificationsHandler(deps))
+	// PHASE 23 (N-4). The YAML-parse-failure view.
+	//
+	// Principle 14 applied to a whole payload shape: a notification whose
+	// `text` field HANGAR cannot parse is STORED with parse_failed = true
+	// rather than dropped, and migration 00035 added the column for exactly
+	// that. Nothing has ever read it, so the notifications HANGAR could not
+	// understand were preserved faithfully and shown to nobody — which is
+	// the same as dropping them, with extra steps and a bigger table.
+	//
+	// A character route rather than an admin board because the query is
+	// character-scoped and the answer is character-specific: "this
+	// character has four notifications HANGAR did not understand" belongs
+	// next to that character's notifications, not on an installation-wide
+	// screen that would have to ask it 4,000 times.
+	get[IDIn, CollectionOut](hapi, deps, permCharView, "/api/v1/characters/{id}/notifications/unparseable", "list-character-unparseable-notifications", "Notifications whose payload HANGAR could not parse (Principle 14)", charTag,
+		ownerListHandler(func(ctx context.Context, id int64) ([]gen.AppCharacterNotification, error) {
+			return deps.Store.ListUnparseableCharacterNotifications(ctx, id)
+		}))
 	get[IDIn, CollectionOut](hapi, deps, permCharView, "/api/v1/characters/{id}/notifications/contacts", "list-character-notification-contacts", "Contact-change notification detail", charTag,
 		ownerListHandler(func(ctx context.Context, id int64) ([]gen.AppNotificationContact, error) {
 			return deps.Store.ListNotificationContacts(ctx, id)

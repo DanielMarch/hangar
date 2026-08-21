@@ -230,7 +230,10 @@
       "platforms": "Platforms",
       "alerts": "Alerts",
       "users": "Users",
-      "security": "Security log"
+      "security": "Security log",
+      "routing": "Alert routing",
+      "vocabularies": "Vocabularies",
+      "webhooks": "Webhooks"
     },
     "sync": {
       "totalRoutes": "Routes ingested",
@@ -352,7 +355,26 @@
       "occurrences": "Occurrences",
       "sample": "Payload",
       "viewSample": "View",
-      "noSample": "No sample payload was recorded."
+      "noSample": "No sample payload was recorded.",
+      "enabled": "Enabled",
+      "enable": "Enable",
+      "disable": "Disable",
+      "channelsHeading": "Delivery channels",
+      "newChannel": "New channel",
+      "channelConfig": "Configuration (JSON)",
+      "configNotJson": "Configuration is not valid JSON.",
+      "create": "Create",
+      "catalogueHeading": "Alert catalogue",
+      "domain": "Domain",
+      "severity": "Severity",
+      "routing": "Routing",
+      "unrouted": "No routing rule targets this alert type. Its events are recorded and delivered to nobody. A fresh installation starts this way: default channels are provisioned from the environment, and who receives what is deliberately left to you.",
+      "currentRules": "Current rules",
+      "noRules": "No routing rules yet.",
+      "addRule": "Add a rule",
+      "targetKind": "Audience",
+      "targetRef": "Audience id",
+      "mention": "Mention"
     },
     "platforms": {
       "heading": "Provisioning platforms",
@@ -364,7 +386,12 @@
       "live": "Live",
       "lock": "Freeze provisioning",
       "unlock": "Resume provisioning",
-      "reasonPlaceholder": "Reason for the freeze"
+      "reasonPlaceholder": "Reason for the freeze",
+      "create": "Create",
+      "restartNote": "A driver binds to platform rows at process start, so a platform created now is provisioned from the next restart.",
+      "groupsHeading": "Remote groups",
+      "noGroups": "No groups registered yet. An entitlement rule needs one to target.",
+      "remoteRef": "Remote id"
     },
     "rules": {
       "heading": "Entitlement rules",
@@ -414,6 +441,40 @@
       "actor": "Actor",
       "target": "Target",
       "ip": "IP"
+    },
+    "vocabularies": {
+      "heading": "Values pending acknowledgement",
+      "value": "Value",
+      "intro": "Values HANGAR observed and did not recognise. Nothing here was rejected: an open vocabulary is recorded verbatim, however novel, and this is where a human reads what it was."
+    },
+    "webhooks": {
+      "deadLetterHeading": "Dead-lettered deliveries",
+      "outboxHeading": "Outbox backlog",
+      "outboxHelp": "Events written to the outbox that no dispatcher has fanned out yet. A number that keeps climbing means the pump is not running.",
+      "failedAt": "Dead-lettered",
+      "endpoint": "Endpoint",
+      "status": "Last status"
+    },
+    "subscriptions": {
+      "heading": "Subscription management",
+      "prompt": "Choose an entity to see what it synchronises.",
+      "entityKind": "Entity kind",
+      "entityId": "Entity id",
+      "route": "Route",
+      "enabled": "Enabled",
+      "noCache": "Cache bypassed",
+      "lastStatus": "Last status",
+      "lastSuccess": "Last success",
+      "nextDue": "Next due",
+      "group": "Rate-limit group",
+      "enable": "Enable",
+      "disable": "Disable",
+      "useCache": "Use cache",
+      "bypassCache": "Bypass cache"
     }
+  },
+  "common": {
+    "yes": "Yes",
+    "no": "No"
   }
 }

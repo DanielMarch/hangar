@@ -23,9 +23,18 @@
 # rather than fail its job, and internal/sync/worker/unavailable.go is now
 # that caller. The column had existed since Phase 6 and nothing had ever
 # written to it.
-ListRecentSyncRuns
-SetSyncNoCacheOptIn
-SetSyncSubscriptionEnabled
+#
+# ── PHASE 23 (N-4): THIS GROUP IS EMPTY. BUILT, NOT DELETED. ─────────────
+# ListRecentSyncRuns, SetSyncNoCacheOptIn and SetSyncSubscriptionEnabled all
+# have production callers: internal/api/v1/admin_boards.go's subscription
+# management surface (GET .../subscriptions/{kind}/{id}, GET
+# .../subscriptions/{id}/runs, PATCH .../subscriptions/{id}).
+#
+# Note WHY it could not have been closed by wiring alone. Nothing anywhere
+# returned a subscription_id — `/api/v1/admin/sync/subscriptions` lists
+# schedulable ROUTES — so the three setters had no reachable subject. The
+# missing piece was a fourth query, ListSyncSubscriptionsForEntity, not a
+# missing caller for these three.
 
 # B24 — CLOSED in Phase 20.5. CreateWebhookEndpoint and
 # ListWebhookEndpointsForUser have production callers (internal/api/v1/
@@ -45,14 +54,21 @@ SetSyncSubscriptionEnabled
 GetUserByMainCharacterID
 
 # B25 — alert routing, channels and the unknown-type boards
-CountAlertTypesByDomain
-CreateAlertRoutingRule
-GetAlertType
-ListAlertChannels
-ListAlertEventsForCoalesceKeySince
-ListAlertTypes
-ListRecentAlertEvents
-ListUnparseableCharacterNotifications
+#
+# ── PHASE 23 (N-4): EMPTY. BUILT, NOT DELETED. ──────────────────────────
+# All eight have production callers. Seven are
+# internal/api/v1/admin_alerting.go — §4.4's configuration surface, the
+# thing that turns N-9's fix ("a stock installation now produces alerts")
+# into a feature ("and an operator can say where they go"). Two permissions
+# had been in the closed vocabulary since Phase 10 with nothing behind
+# either, `alerting.channels.manage` and `alerting.routing.manage`, which is
+# the same evidence of absence as a query with no caller.
+#
+# ListUnparseableCharacterNotifications went somewhere else, and the
+# distinction is worth keeping: it is CHARACTER-scoped, so it is
+# GET /api/v1/characters/{id}/notifications/unparseable and not an
+# installation-wide board that would have to ask the same question four
+# thousand times.
 
 # B30 — CLOSED in Phase 20.5 for the WRITERS; these five are READERS, and
 # each is waiting for an endpoint rather than for a dispatch entry. The
@@ -71,18 +87,53 @@ ListCorporationProjectContributions
 
 # B35 — TeamSpeak identity linking
 
-# Platform and entitlement configuration has no surface
-CreatePlatform
-CreatePlatformGroup
-ListEntitlementRulesForGroup
-ListEntitlementRulesForSource
-SetEntitlementRuleEnabled
+# ── PHASE 23 (N-4): "Platform and entitlement configuration has no surface"
+#    IS CLOSED, AND IT WAS THE MOST SERIOUS ENTRY IN THIS FILE ───────────
+#
+# All five have production callers (internal/api/v1/admin_boards.go).
+#
+# CreatePlatform is the one that deserved a defect number rather than an
+# allowlist line. app.platform had NO production writer anywhere, so no
+# installation could create a platform row by any means the product
+# offered — and cmd/hangar/discord.go's own comment says exactly that
+# ("there can be zero (an administrator hasn't created the platform
+# record)") before warning and registering no driver. Phases 11-13 built
+# three provisioning drivers, an entitlement engine, an exposure board and
+# the revocation SLO Gate 2 measures, on top of a table nothing could
+# populate. Every test inserts the row it needs, which is why no test could
+# see it.
+#
+# SetEntitlementRuleEnabled did NOT simply gain a caller. Disabling a grant
+# rule reduces entitlements exactly as deleting one does, so a bare flag
+# write would have been defect B32 — the silent deferral — reintroduced
+# through a different verb. The query now carries a warning not to call it
+# directly, and internal/api/v1.SetEntitlementRuleEnabled wraps it with the
+# urgent revocation §2.2's SLO requires.
 
-# Open-vocabulary boards (Gate 6 surfaces these; no reader is wired)
-AcknowledgeOpenVocabularyValue
-CountUnacknowledgedOpenVocabulary
+# ── PHASE 23 (N-4): open-vocabulary boards — three BUILT, one DELETED ────
+#
+# ListUnacknowledgedOpenVocabulary, CountUnacknowledgedOpenVocabulary and
+# AcknowledgeOpenVocabularyValue back the board at
+# /api/v1/admin/vocabularies (internal/api/v1/admin_boards.go). Gate 6's
+# whole demonstration is that a spec carrying values nobody anticipated is
+# ABSORBED rather than refused; a table that is written and never read is a
+# decision to ignore the thing you went to the trouble of not rejecting.
+#
+# GetEsiScope stays, and its reason is now specific rather than inherited.
+# It reads ONE scope row by name and nothing in HANGAR wants one — but it
+# is GATE 6's assertion instrument: TestGate6NovelScopeGrammar reads back
+# `esi::synthetic~widget/read@v3` through it to prove §6.1's novel scope
+# grammar was recorded rather than rejected, and
+# TestUnknownScopeStaysAcknowledged reads it to prove the board does not
+# refill itself. The alternative is those two tests issuing raw SQL, which
+# passes while the query layer production would use is broken — the exact
+# gap between "the data is there" and "HANGAR can read it" that Gate 6
+# exists to close. A MEASUREMENT rather than a mechanism, in the same
+# category as UpsertReplicaHeartbeat below.
+#
+# It was briefly deleted this phase on the "nothing wants one row" reading,
+# and restored when the two callers turned out to be the gate.
 GetEsiScope
-ListUnacknowledgedOpenVocabulary
 
 # Housekeeping. THE THREE DELETES LEFT THIS GROUP IN PHASE 21 (defect B-2):
 # DeleteExpiredSessions, DeleteExpiredEsiCacheEntries and DeleteStaleReplicas

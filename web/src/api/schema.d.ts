@@ -4,6 +4,41 @@
  */
 
 export interface paths {
+  "/api/v1/admin/alerts/channels": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Configured alert delivery channels */
+    get: operations["admin-alerts-channels"];
+    put?: never;
+    /** Create an alert delivery channel */
+    post: operations["admin-alerts-create-channel"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/alerts/channels/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Enable or disable one alert channel */
+    patch: operations["admin-alerts-set-channel-enabled"];
+    trace?: never;
+  };
   "/api/v1/admin/alerts/dead-letter": {
     parameters: {
       query?: never;
@@ -38,6 +73,91 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/alerts/events": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Recent alert events, by type or by coalescing key */
+    get: operations["admin-alerts-events"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/alerts/types": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The alert catalogue: every type §4.4 can raise, with its domain, severity and coalescing window */
+    get: operations["admin-alerts-types"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/alerts/types/by-domain": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Alert type counts per domain */
+    get: operations["admin-alerts-types-by-domain"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/alerts/types/{type}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** One alert type and every routing rule that targets it */
+    get: operations["admin-alerts-type"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/alerts/types/{type}/rules": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Route one alert type to a channel for one audience */
+    post: operations["admin-alerts-create-rule"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/alerts/unknown-types": {
     parameters: {
       query?: never;
@@ -66,6 +186,23 @@ export interface paths {
     put?: never;
     /** Acknowledge one unrecognised notification type */
     post: operations["admin-alerts-unknown-types-acknowledge"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/entitlements/by-source": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Every enabled entitlement rule driven by one source (squad, role, corporation, alliance) */
+    get: operations["admin-entitlements-by-source"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -218,7 +355,8 @@ export interface paths {
     /** Configured platforms (Discord/TeamSpeak/Mumble) */
     get: operations["admin-platforms"];
     put?: never;
-    post?: never;
+    /** Create a provisioning platform connection */
+    post: operations["admin-create-platform"];
     delete?: never;
     options?: never;
     head?: never;
@@ -234,6 +372,24 @@ export interface paths {
     };
     /** Groups one platform offers as entitlement targets */
     get: operations["admin-platform-groups"];
+    put?: never;
+    /** Register a remote group as an entitlement target */
+    post: operations["admin-create-platform-group"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/platforms/{id}/groups/{group_id}/rules": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Every enabled rule that grants one platform group */
+    get: operations["admin-platform-group-rules"];
     put?: never;
     post?: never;
     delete?: never;
@@ -309,7 +465,8 @@ export interface paths {
     delete: operations["admin-delete-platform-rule"];
     options?: never;
     head?: never;
-    patch?: never;
+    /** Enable or disable one entitlement rule without deleting it */
+    patch: operations["admin-set-rule-enabled"];
     trace?: never;
   };
   "/api/v1/admin/platforms/{id}/teamspeak/redeem": {
@@ -552,6 +709,57 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/sync/subscriptions/{entity_kind}/{entity_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Every sync subscription for one entity, with its health */
+    get: operations["admin-sync-entity-subscriptions"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/sync/subscriptions/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Enable/disable a subscription, or opt it out of conditional caching */
+    patch: operations["admin-sync-patch-subscription"];
+    trace?: never;
+  };
+  "/api/v1/admin/sync/subscriptions/{id}/runs": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Recent sync runs for one subscription */
+    get: operations["admin-sync-subscription-runs"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/users": {
     parameters: {
       query?: never;
@@ -616,6 +824,91 @@ export interface paths {
     post?: never;
     /** Revoke a role from a user */
     delete: operations["admin-revoke-user-role"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/vocabularies": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Every open vocabulary, with its count of values pending acknowledgement */
+    get: operations["admin-vocabularies"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/vocabularies/{vocabulary}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Observed values of one open vocabulary that are pending acknowledgement */
+    get: operations["admin-vocabulary-board"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/vocabularies/{vocabulary}/acknowledge": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Acknowledge one observed value */
+    post: operations["admin-vocabulary-acknowledge"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/webhooks/dead-letter": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Webhook deliveries that will never be retried */
+    get: operations["admin-webhooks-dead-letter"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/webhooks/outbox": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Undispatched §4.9 outbox backlog */
+    get: operations["admin-webhooks-outbox"];
+    put?: never;
+    post?: never;
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -1328,6 +1621,23 @@ export interface paths {
     };
     /** Contact-change notification detail */
     get: operations["list-character-notification-contacts"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/characters/{id}/notifications/unparseable": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Notifications whose payload HANGAR could not parse (Principle 14) */
+    get: operations["list-character-unparseable-notifications"];
     put?: never;
     post?: never;
     delete?: never;
@@ -3074,6 +3384,16 @@ export interface components {
       /** @description The scope string, verbatim and unparsed (Principle 14). */
       scope: string;
     };
+    AcknowledgeVocabularyInBody: {
+      /**
+       * Format: uri
+       * @description A URL to the JSON Schema for this object.
+       * @example https://example.com/schemas/AcknowledgeVocabularyInBody.json
+       */
+      readonly $schema?: string;
+      /** @description The observed value being acknowledged. */
+      value: string;
+    };
     AddGrantInBody: {
       /**
        * Format: uri
@@ -3144,6 +3464,45 @@ export interface components {
       secret: string;
       token_id: string;
     };
+    CreateChannelInBody: {
+      /**
+       * Format: uri
+       * @description A URL to the JSON Schema for this object.
+       * @example https://example.com/schemas/CreateChannelInBody.json
+       */
+      readonly $schema?: string;
+      /** @description Channel-specific configuration, validated by the same constructor the pump uses. */
+      config: unknown;
+      /** @description smtp, slack_webhook or discord_webhook. */
+      kind: string;
+      /** @description Operator-facing name; unique. */
+      name: string;
+    };
+    CreatePlatformGroupInBody: {
+      /**
+       * Format: uri
+       * @description A URL to the JSON Schema for this object.
+       * @example https://example.com/schemas/CreatePlatformGroupInBody.json
+       */
+      readonly $schema?: string;
+      /** @description Operator-facing name. */
+      name: string;
+      /** @description The platform's own id for the group: a Discord role id, a TS3 server group id, a Mumble ACL group name. */
+      remote_ref: string;
+    };
+    CreatePlatformInBody: {
+      /**
+       * Format: uri
+       * @description A URL to the JSON Schema for this object.
+       * @example https://example.com/schemas/CreatePlatformInBody.json
+       */
+      readonly $schema?: string;
+      /** @description Platform-specific configuration; may be an empty object when the connection is configured by environment. */
+      config: unknown;
+      /** @description discord, teamspeak or mumble. */
+      kind: string;
+      name: string;
+    };
     CreateRoleInBody: {
       /**
        * Format: uri
@@ -3153,6 +3512,22 @@ export interface components {
       readonly $schema?: string;
       description?: string;
       name: string;
+    };
+    CreateRoutingRuleInBody: {
+      /**
+       * Format: uri
+       * @description A URL to the JSON Schema for this object.
+       * @example https://example.com/schemas/CreateRoutingRuleInBody.json
+       */
+      readonly $schema?: string;
+      /** Format: uuid */
+      channel_id: string;
+      /** @description Channel-native mention to lead the message with, e.g. @here. */
+      mention?: string;
+      /** @description user, squad, corporation, alliance or installation. */
+      target_kind: string;
+      /** @description Id of the target entity; empty for 'installation'. */
+      target_ref?: string;
     };
     CreateRuleInBody: {
       /**
@@ -3455,6 +3830,24 @@ export interface components {
       kinds?: string[] | null;
       query: string;
     };
+    SetChannelEnabledInBody: {
+      /**
+       * Format: uri
+       * @description A URL to the JSON Schema for this object.
+       * @example https://example.com/schemas/SetChannelEnabledInBody.json
+       */
+      readonly $schema?: string;
+      enabled: boolean;
+    };
+    SetRuleEnabledInBody: {
+      /**
+       * Format: uri
+       * @description A URL to the JSON Schema for this object.
+       * @example https://example.com/schemas/SetRuleEnabledInBody.json
+       */
+      readonly $schema?: string;
+      enabled: boolean;
+    };
     SquadMemberInBody: {
       /**
        * Format: uri
@@ -3482,6 +3875,18 @@ export interface components {
        */
       readonly $schema?: string;
       role_ids: string[] | null;
+    };
+    SubscriptionPatchInBody: {
+      /**
+       * Format: uri
+       * @description A URL to the JSON Schema for this object.
+       * @example https://example.com/schemas/SubscriptionPatchInBody.json
+       */
+      readonly $schema?: string;
+      /** @description Enable or disable this subscription entirely. */
+      enabled?: boolean;
+      /** @description Opt this subscription out of §5.4's conditional-request caching. */
+      opt_in_no_cache?: boolean;
     };
     Sync: {
       blocked_by_pin?: string;
@@ -3571,6 +3976,101 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  "admin-alerts-channels": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-alerts-create-channel": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateChannelInBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ItemMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-alerts-set-channel-enabled": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SetChannelEnabledInBody"];
+      };
+    };
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
   "admin-alerts-dead-letter": {
     parameters: {
       query?: never;
@@ -3630,6 +4130,169 @@ export interface operations {
       };
     };
   };
+  "admin-alerts-events": {
+    parameters: {
+      query?: {
+        /** @description Alert type to list recent events for. */
+        type?: string;
+        /** @description Coalescing key; lists the events that were rolled up under it. */
+        coalesce_key?: string;
+        /** @description How far back the coalescing lookup reaches, in hours. */
+        since_hours?: number;
+        /** @description Page size for the by-type lookup, 1-200. */
+        limit?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-alerts-types": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-alerts-types-by-domain": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-alerts-type": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        type: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ItemMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-alerts-create-rule": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description app.alert_type.alert_type. */
+        type: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateRoutingRuleInBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ItemMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
   "admin-alerts-unknown-types": {
     parameters: {
       query?: never;
@@ -3677,6 +4340,40 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-entitlements-by-source": {
+    parameters: {
+      query?: {
+        /** @description squad, role, corporation or alliance. */
+        source_kind?: string;
+        /** @description Id of the source entity. */
+        source_ref?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionMapStringInterface {}"];
+        };
       };
       /** @description Error */
       default: {
@@ -3958,6 +4655,39 @@ export interface operations {
       };
     };
   };
+  "admin-create-platform": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreatePlatformInBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ItemMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
   "admin-platform-groups": {
     parameters: {
       query?: never;
@@ -3965,6 +4695,73 @@ export interface operations {
       path: {
         /** @description HANGAR-assigned UUID. */
         id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-create-platform-group": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreatePlatformGroupInBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ItemMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-platform-group-rules": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        group_id: string;
       };
       cookie?: never;
     };
@@ -4175,6 +4972,40 @@ export interface operations {
       cookie?: never;
     };
     requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-set-rule-enabled": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        rule_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SetRuleEnabledInBody"];
+      };
+    };
     responses: {
       /** @description No Content */
       204: {
@@ -4691,6 +5522,109 @@ export interface operations {
       };
     };
   };
+  "admin-sync-entity-subscriptions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description character, corporation, alliance or global. */
+        entity_kind: string;
+        /** @description EVE id of the entity; 0 for global. */
+        entity_id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-sync-patch-subscription": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SubscriptionPatchInBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ItemMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-sync-subscription-runs": {
+    parameters: {
+      query?: {
+        /** @description How many recent runs, 1-200. */
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
   "admin-users": {
     parameters: {
       query?: {
@@ -4844,6 +5778,158 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-vocabularies": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ItemMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-vocabulary-board": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description One of domain.OpenVocabularies(): ref_type, location_type, notification_type, scope, cache_mode, contract_status, required_role. */
+        vocabulary: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-vocabulary-acknowledge": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        vocabulary: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AcknowledgeVocabularyInBody"];
+      };
+    };
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-webhooks-dead-letter": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "admin-webhooks-outbox": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ItemMapStringInterface {}"];
+        };
       };
       /** @description Error */
       default: {
@@ -6208,6 +7294,38 @@ export interface operations {
     };
   };
   "list-character-notification-contacts": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Numeric EVE id (character, corporation, alliance...). */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionMapStringInterface {}"];
+        };
+      };
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["ErrorModel"];
+        };
+      };
+    };
+  };
+  "list-character-unparseable-notifications": {
     parameters: {
       query?: never;
       header?: never;

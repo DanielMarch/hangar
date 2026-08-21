@@ -156,6 +156,30 @@ func (q *Queries) DeleteEntitlementRule(ctx context.Context, ruleID uuid.UUID) (
 	return i, err
 }
 
+const getEntitlementRule = `-- name: GetEntitlementRule :one
+SELECT rule_id, source_kind, source_ref, group_id, effect, enabled, created_at FROM app.entitlement_rule WHERE rule_id = $1
+`
+
+// PHASE 23 (N-4). Disabling a rule is entitlement-reducing in exactly the
+// way deleting one is, so the disable path needs the rule's group to
+// resolve which platform's linked users must be revoked for. DeleteRule
+// gets that from its own RETURNING clause; an UPDATE of `enabled` has no
+// equivalent, so the row is read first.
+func (q *Queries) GetEntitlementRule(ctx context.Context, ruleID uuid.UUID) (AppEntitlementRule, error) {
+	row := q.db.QueryRow(ctx, getEntitlementRule, ruleID)
+	var i AppEntitlementRule
+	err := row.Scan(
+		&i.RuleID,
+		&i.SourceKind,
+		&i.SourceRef,
+		&i.GroupID,
+		&i.Effect,
+		&i.Enabled,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getPlatform = `-- name: GetPlatform :one
 SELECT platform_id, kind, name, config, enabled, created_at, updated_at, locked_down, locked_down_at, locked_down_by, lockdown_reason FROM app.platform WHERE platform_id = $1
 `
@@ -721,6 +745,10 @@ const setEntitlementRuleEnabled = `-- name: SetEntitlementRuleEnabled :exec
 UPDATE app.entitlement_rule SET enabled = $2 WHERE rule_id = $1
 `
 
+// NEVER call this directly from a handler. internal/api/v1's
+// SetEntitlementRuleEnabled wraps it with the urgent revocation a disable
+// requires — see admin_provisioning.go for why a bare flag write is defect
+// B32 reintroduced through a different verb.
 func (q *Queries) SetEntitlementRuleEnabled(ctx context.Context, ruleID uuid.UUID, enabled bool) error {
 	_, err := q.db.Exec(ctx, setEntitlementRuleEnabled, ruleID, enabled)
 	return err

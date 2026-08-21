@@ -230,7 +230,10 @@
       "platforms": "플랫폼",
       "alerts": "알림",
       "users": "사용자",
-      "security": "보안 로그"
+      "security": "보안 로그",
+      "routing": "경보 라우팅",
+      "vocabularies": "어휘",
+      "webhooks": "웹훅"
     },
     "sync": {
       "totalRoutes": "수집된 라우트",
@@ -352,7 +355,26 @@
       "occurrences": "발생 횟수",
       "sample": "페이로드",
       "viewSample": "보기",
-      "noSample": "샘플 페이로드가 기록되지 않았습니다."
+      "noSample": "샘플 페이로드가 기록되지 않았습니다.",
+      "enabled": "활성",
+      "enable": "활성화",
+      "disable": "비활성화",
+      "channelsHeading": "전달 채널",
+      "newChannel": "새 채널",
+      "channelConfig": "구성 (JSON)",
+      "configNotJson": "구성이 올바른 JSON이 아닙니다.",
+      "create": "생성",
+      "catalogueHeading": "경보 카탈로그",
+      "domain": "도메인",
+      "severity": "심각도",
+      "routing": "라우팅",
+      "unrouted": "이 경보 유형을 대상으로 하는 라우팅 규칙이 없습니다. 이벤트는 기록되지만 아무에게도 전달되지 않습니다. 새 설치는 이 상태에서 시작합니다. 기본 채널은 환경에서 생성되며, 누가 받을지는 의도적으로 운영자에게 맡깁니다.",
+      "currentRules": "현재 규칙",
+      "noRules": "아직 라우팅 규칙이 없습니다.",
+      "addRule": "규칙 추가",
+      "targetKind": "대상",
+      "targetRef": "대상 ID",
+      "mention": "멘션"
     },
     "platforms": {
       "heading": "프로비저닝 플랫폼",
@@ -364,7 +386,12 @@
       "live": "운영 중",
       "lock": "프로비저닝 동결",
       "unlock": "프로비저닝 재개",
-      "reasonPlaceholder": "동결 사유"
+      "reasonPlaceholder": "동결 사유",
+      "create": "생성",
+      "restartNote": "드라이버는 프로세스 시작 시 플랫폼 행에 바인딩되므로, 지금 만든 플랫폼은 다음 재시작부터 프로비저닝됩니다.",
+      "groupsHeading": "원격 그룹",
+      "noGroups": "등록된 그룹이 없습니다. 자격 규칙에는 대상이 필요합니다.",
+      "remoteRef": "원격 ID"
     },
     "rules": {
       "heading": "권한 규칙",
@@ -414,6 +441,40 @@
       "actor": "실행자",
       "target": "대상",
       "ip": "IP"
+    },
+    "vocabularies": {
+      "heading": "확인 대기 중인 값",
+      "value": "값",
+      "intro": "HANGAR가 관측했지만 인식하지 못한 값입니다. 아무것도 거부되지 않았습니다. 열린 어휘는 아무리 새로워도 그대로 기록되며, 여기서 사람이 그것이 무엇이었는지 읽습니다."
+    },
+    "webhooks": {
+      "deadLetterHeading": "데드레터 전달",
+      "outboxHeading": "발신함 적체",
+      "outboxHelp": "발신함에 기록되었지만 아직 어떤 디스패처도 전송하지 않은 이벤트입니다. 계속 늘어난다면 펌프가 실행되고 있지 않다는 뜻입니다.",
+      "failedAt": "데드레터 시각",
+      "endpoint": "엔드포인트",
+      "status": "마지막 상태"
+    },
+    "subscriptions": {
+      "heading": "구독 관리",
+      "prompt": "엔터티를 선택하면 무엇을 동기화하는지 볼 수 있습니다.",
+      "entityKind": "엔터티 종류",
+      "entityId": "엔터티 ID",
+      "route": "라우트",
+      "enabled": "활성",
+      "noCache": "캐시 우회",
+      "lastStatus": "마지막 상태",
+      "lastSuccess": "마지막 성공",
+      "nextDue": "다음 예정",
+      "group": "속도 제한 그룹",
+      "enable": "활성화",
+      "disable": "비활성화",
+      "useCache": "캐시 사용",
+      "bypassCache": "캐시 우회"
     }
+  },
+  "common": {
+    "yes": "예",
+    "no": "아니오"
   }
 }

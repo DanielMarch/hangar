@@ -21,6 +21,12 @@ const TABS = [
   { to: "/admin/scopes", labelKey: "admin.tabs.scopes" },
   { to: "/admin/platforms", labelKey: "admin.tabs.platforms" },
   { to: "/admin/alerts", labelKey: "admin.tabs.alerts" },
+  // PHASE 23 (N-4). Three tabs for three surfaces that had store queries
+  // and no screen: §4.4's routing configuration, the open-vocabulary board
+  // Gate 6 fills, and §4.9's webhook boards.
+  { to: "/admin/routing", labelKey: "admin.tabs.routing" },
+  { to: "/admin/vocabularies", labelKey: "admin.tabs.vocabularies" },
+  { to: "/admin/webhooks", labelKey: "admin.tabs.webhooks" },
   { to: "/admin/users", labelKey: "admin.tabs.users" },
   { to: "/admin/security", labelKey: "admin.tabs.security" },
 ] as const;
