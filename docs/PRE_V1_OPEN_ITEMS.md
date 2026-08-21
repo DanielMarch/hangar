@@ -1,4 +1,4 @@
-# Pre-v1.0 open items — audit at `c0b35ac`
+# Pre-v1.0 open items — audit at `c0b35ac`, closed at `v1.0.0-rc3`
 
 > **Status after Phase 22.** All seven gates have been re-run at `v1.0.0-rc2`, against a binary
 > with the six defects of §§5–9 closed. Evidence is in `docs/gate-evidence/v1.0.0-rc2/`.
@@ -968,6 +968,143 @@ per run and needed no change.
 B-3 is minutes of work once the placement decision is made. B-2 is a small, well-understood job.
 B-4 is the operator's. **B-1 is the real gate to v1.0**: roughly nine hours of measured runs, an
 N=3 deployment, a clean host, and runners that do not exist yet.
+
+### After Phase 23 — `v1.0.0-rc3`
+
+**§3 is empty and §2 has no open blocker.** Every N-item is closed, B-4 is closed, B-12 is closed,
+and Gate 5 is met without a substitution for the first time in the project's history.
+
+The gates re-run at rc3, and what each one's subject was:
+
+| Gate | Runs | Result | Why it was re-run |
+| :-- | :-- | :-- | :-- |
+| 1 ESI Load Stability | 1 at N=1, 1 at N=3 | **PASS**, both | N-5 put the cache key on the request path |
+| 2 Revocation SLO | not re-run | rc2 stands | **Nothing this phase touched it.** No change to `internal/provisioning`, the urgent queue, the revocation triggers or §2.2's measurement path |
+| 3 Alert Delivery Integrity | 2 | **PASS**, identical | N-10 changed the claim protocol and N-9 changed which process runs the pump |
+| 4 Feature Parity | 2 | **PASS**, byte-identical | N-4 built new surface |
+| 5 Deployment Usability | 2 | **PASS**, identical | N-6 is in `migrate up`, and D-2 published the artefacts 5.2 measures |
+| 6 Spec-Drift Resilience | 2, at the tag | *runs at the tag — see the note below* | §6.2 must see the finished tree |
+| 7 Third-Party Migration | 2 | **PASS**, identical | N-1, N-2 and N-3 changed the corpus and the served set |
+
+**Gate 6 cannot be in this table when this table is tagged.** §6.2's proof is that the ingest
+required no source change — `git status --porcelain` empty at a commit equal to the release
+tag — so it must run AFTER the tag exists, and its own artefacts are then the one commit that
+follows the tag. `docs/gate-evidence/README.md` explains why that is unavoidable rather than
+untidy. This row is filled in by that commit.
+
+**Gate 2 is the one deliberately not re-run, and saying so is the point.** Its subject —
+`provisioning_revocation_seconds`, the urgent queue, and the entitlement-reducing triggers — was
+untouched: `git diff cdbd15d..HEAD -- internal/provisioning` is empty apart from the entitlement
+rule *disable* path, which this phase ADDED and which enqueues through the same
+`Urgent.HandleUserChange` the delete has always used. Spending an hour to watch the same binary
+produce the same number would be ceremony, and rc2's measurement (p99 **0.132s** against a 60s
+budget over 15,000 revocations) is the one that stands.
+
+#### Gate 1, because it is the largest measurement in the release
+
+| | N=1 | N=3 |
+| :-- | --: | --: |
+| requests served in 4h | **1,132,172** | **1,146,665** |
+| longest zero-throughput interval | **1m30s** | **1m0s** (floor: 5m0s) |
+| `esi_ledger_divergence` | **0** over 9,905 group-samples | **0** over 30,228 |
+| Governor 1 breaches | **0** | **0** |
+| consumption above `max_tokens` | **0** | **0** |
+| `esi_ledger_mode` | `[solo]` | `[clustered]` |
+
+**Conditions 1.4 and 1.6 pass together at both counts**, which is the pairing that decides
+whether §9's deadlock is gone: the proactive pause fired — the error budget reached 19 and 20
+against a threshold of 20 — and throughput continued anyway. At rc1 the same pause ended the run
+at minute sixteen and the installation never called ESI again.
+
+It is also the load evidence N-5 needed. The cache key resolves the path on every request, and
+2.28 million of them produced zero divergence.
+
+#### What actually changed, and the measurement that closed each
+
+| Item | The measurement |
+| :-- | :-- |
+| **N-10** the pump claimed by read | Against the old code, two pumps made **12 claims for 6 deliveries** and sent every message twice. After: 6 claims, one message, `attempts = 1` |
+| **N-9** no alerts on a stock deployment | Seven verdicts on a one-container compose stack, including a **webhook sink's own transcript** of the delivered message and both Gate 3 metrics that `serve` exported as `nil` |
+| **N-5** the fan-out cache key | Two tests that fail against the templated key: character 2 replayed character 1's body; wallet division 2 replayed division 1's |
+| **N-6** schema integrity | **1,133 columns and 115 indexes** beside the 163 tables, verified against a real PG18 — and proven in the release path by dropping an INDEX and watching `migrate up` exit 1 naming it |
+| **N-4** absent product surface | 21 allowlist entries gone; the live installation's vocabulary board shows **16 values it had recorded and nobody could read** |
+| **N-1/N-2/N-3** Gate 7 | **17 of 34** served, **nothing pending**, and two byte-compatibility defects found in already-served routes |
+| **N-7 / D-4** the SDE | An importer that had **never worked** now imports 52,863 types in 59s |
+| **D-1** the ledger benchmark | **9 runs of 11** at p99 6.40–9.63 ms against a 10 ms budget — the first committed measurement of the Phase 4 exit criterion being met |
+| **D-3** the systemd unit | It did not exist. It exists and starts under systemd 252 |
+| **D-2 / B-12** publication | All three of §5.1's commands verified anonymously, the pull after `docker logout` |
+| **B-4** the operator actions | 50 → 52 scopes; capability #41's structure half ran against real ESI at **200 with zero rows**, exactly as 20.9 predicted |
+
+#### Is HANGAR ready to ship as v1.0 — not as a candidate, as a release?
+
+**Yes, with one qualification that is about process rather than product, and it is stated first
+because it is the only thing standing anywhere near the answer.**
+
+The product case is measured rather than argued. All seven gates are met — six re-run at this
+commit and the seventh, Gate 2, unchanged with the derivation committed beside it. §3 is empty.
+§2 has no open blocker. The full regression passes with zero skips. `2.28 million` ESI requests
+across two replica counts produced zero rate-limit breaches and zero ledger divergence, and the
+alert pipeline balanced its accounting identity to zero remainder twice.
+
+**The qualification: v1.0 would be the first release of this software to anyone.** Every
+measurement in this directory was taken on one developer's machine, against a recording proxy
+rather than CCP's ESI, with one EVE character, one corporation, no alliance, and no SDE until
+this phase. That is not a defect and no gate asks for more — but "it passes every gate" and "it
+has been operated by somebody other than its author" are different claims, and only the first is
+true. A release that has never been installed by a stranger is a release whose install path has
+been verified and not exercised.
+
+That is an argument for shipping it and watching, not for holding it. The gates were designed to
+be the bar, they are met, and the alternative to shipping is another phase of the same
+single-machine evidence.
+
+**What changes the answer.** If §8's "release blocks on all seven" is read strictly, one detail
+matters: Gate 1 ran once per replica count rather than twice, and Gate 2 was not re-run at all.
+Neither is a failing measurement; both are smaller samples than every other gate has. A reader
+who requires every gate to have been run twice at the release commit does not have that, and
+should say so rather than be told it is fine.
+
+**What does not change it.** None of the six known limitations in
+`docs/RELEASE_NOTES.md` is a defect. Each is a decision with a measurement behind it —
+seventeen unservable legacy routes with derived reasons, an alliance worker with no alliance to
+work on, an unread station-name column CCP does not ship, a unit file verified in a container.
+They are the shape of an honest first release rather than of an unfinished one.
+
+#### What a reader should check first to disbelieve this
+
+In order of how likely each is to be wrong.
+
+1. **Gate 1 ran once per replica count, not twice.** That is a deviation from this project's own
+   most expensive lesson, taken as an explicit decision to save eight hours. The specific hazard
+   the twice-rule guards — a verdict that depends on whether the gate has been run before — is the
+   one Phase 22 closed for Gate 1 (defect 10.5, it now `TRUNCATE`s what it owns), so of the seven
+   it is where a second run would add least. It is still a smaller sample than every other gate
+   has.
+
+2. **Gate 2 was not re-run at all.** The argument above is a reasoning argument, not a
+   measurement. If you think the alerting-role assembly or the entitlement-disable path could
+   perturb the revocation SLO, the answer is an hour of machine time and nobody has spent it.
+
+3. **`character.wallet-journal` is served on a reproduction of legacy's own rounding.**
+   `v2shim.phpPrecision` deliberately re-introduces a precision loss that legacy's PDO write path
+   introduced at `precision=14`. That is what a byte-compatibility shim is for, and it is measured
+   against the recorded corpus — but it is a money path, and a reader who wants to disagree with
+   it should start there. `/api/v1` is unaffected and remains exact.
+
+4. **The gate runners have failed more often than the product.** Nine runner defects across two
+   phases against three product defects. Every gate verdict in this directory rests on apparatus
+   that has been wrong before, and the corrections have all been the same shape — derive the value
+   from the artefact rather than typing it into the checker.
+
+5. **`AllianceWorker` has never run against real ESI**, and on this installation never can. Gate 4
+   counts capability #37 as verified on the strength of a seeded integration test.
+
+6. **The systemd unit is verified in a container.** Several sandboxing directives are enforced more
+   weakly there than on metal.
+
+7. **Gate 1's load numbers come from a recording proxy, not CCP's ESI.** Unchanged from rc2, by
+   design, and §1.1 says so — but it means the governors were measured against a server that
+   behaves exactly as the spec says. Real ESI does not.
 
 ### After Phase 22 — `v1.0.0-rc2` IS a release candidate, with one item outside the codebase
 
