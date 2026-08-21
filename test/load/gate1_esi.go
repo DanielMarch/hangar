@@ -573,7 +573,14 @@ func writeEvidence(cfg Config, proxy *Proxy, res *Result) error {
 	if err := writeJSON(filepath.Join(cfg.OutputDir, "environment.json"), env); err != nil {
 		return err
 	}
-	if err := writeJSON(filepath.Join(cfg.OutputDir, "breaches.json"), res.Breaches); err != nil {
+	// PHASE 23. `writeJSON(..., res.Breaches)` on a nil slice emits the
+	// JSON literal `null`, and breaches.json read `null` at both rc1 and
+	// rc2. It MEANT zero breaches, and condition 1.1 says so independently
+	// ("proxy recorded 0 requests admitted with available <= 0"), so no
+	// verdict was ever wrong — but §1.2's exit criterion is worded
+	// "breaches.json must be EMPTY", and an artefact a reader has to
+	// interpret is a bad artefact. `[]` is empty; `null` is a question.
+	if err := writeJSON(filepath.Join(cfg.OutputDir, "breaches.json"), nonNil(res.Breaches)); err != nil {
 		return err
 	}
 	if err := writeJSON(filepath.Join(cfg.OutputDir, "conditions.json"), res.Conditions); err != nil {
@@ -597,6 +604,20 @@ func writeEvidence(cfg Config, proxy *Proxy, res *Result) error {
 		}
 	}
 	return nil
+}
+
+// nonNil renders a nil slice as `[]` rather than `null`.
+//
+// It exists for breaches.json and is applied there rather than inside
+// writeJSON, because writeJSON also encodes MAPS and structs, where the
+// distinction between absent and empty is real and worth keeping. The
+// blocking artefact of a gate whose criterion is "must be empty" is the one
+// place the distinction is only a distraction.
+func nonNil[T any](rows []T) []T {
+	if rows == nil {
+		return []T{}
+	}
+	return rows
 }
 
 func writeJSON(path string, v any) error {

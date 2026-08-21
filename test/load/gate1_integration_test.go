@@ -371,6 +371,17 @@ func TestHarnessRunProducesEveryEvidenceArtefact(t *testing.T) {
 		require.NotZero(t, info.Size(), "%s must not be empty", name)
 	}
 
+	// PHASE 23. §1.2's exit criterion is worded "breaches.json must be
+	// EMPTY", and a nil slice encodes as `null` — which is what the rc1 and
+	// rc2 artefacts both contain. It meant zero breaches and no verdict was
+	// ever wrong, but a blocking artefact a reader has to interpret is a
+	// bad artefact, and this is the kind of thing that costs an argument at
+	// exactly the wrong moment.
+	breaches, err := os.ReadFile(filepath.Join(dir, "breaches.json"))
+	require.NoError(t, err)
+	require.Equal(t, "[]", strings.TrimSpace(string(breaches)),
+		"a run with no breaches must write the empty JSON ARRAY, not `null`")
+
 	require.NotEmpty(t, res.Conditions, "every run must report a verdict per condition")
 	byID := map[string]load.ConditionResult{}
 	for _, c := range res.Conditions {
