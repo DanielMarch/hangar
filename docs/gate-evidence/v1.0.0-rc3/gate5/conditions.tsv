@@ -2,11 +2,9 @@
 5.3-callback-mismatch	pass	reported at boot as a configuration error naming the EXPECTED callback (https://hangar.example.com/auth/callback), not an opaque OAuth failure
 5.3-postgres-not-ready	pass	the migrate service depends_on postgres with condition: service_healthy
 5.1	pass	exactly three commands, no editor step (the two SSO values are prompted for by install.sh)
-5.2	SUBSTITUTED	the SOURCES are published and fetch anonymously (200), but the IMAGE is not: ghcr.io/danielmarch/hangar:latest answered no-token. Two of §5.1's three commands are therefore real and the third is not. Pushing the image needs a write:packages credential this session does not hold; see docs/PRE_V1_OPEN_ITEMS.md B-12
+5.2	pass	no build: key, no compilation, and BOTH halves verified anonymously: the compose file and install.sh fetch 200 from https://raw.githubusercontent.com/DanielMarch/hangar/main, and ghcr.io/danielmarch/hangar:latest returns a manifest to an anonymous pull token
 5.4	pass	/healthz and /readyz both 200 after 10s (budget 300s); migrations ran from the one-shot migrate service
 5.5	pass	services are exactly: hangar migrate postgres  (no redis)
 5.6	pass	the SPA is served by the binary itself on the same port as the API
-first-boot-alerts	FAIL	expected 54 alert types and 4 thresholds, got ? and ?
-5.7	FAIL	could not seed the survivor row, so the check is inconclusive
-5.8	PARTIAL	the static binary ran on a bare debian:12-slim with no toolchain and migrated an external PostgreSQL 18. systemd itself was NOT exercised — this host is Windows and has no systemd; the unit file is deploy/ material and remains unverified
-5.8-config-name-collision	pass	the binary named 'hangar' in its own working directory (§9.2's documented layout) is not mistaken for a config file, and migrated the external PostgreSQL 18 from there
+first-boot-alerts	pass	54 alert types with 4 thresholds on the FIRST boot
+5.7	pass	after a version bump and a second 'docker compose up -d', migrations re-ran and the seeded row survived

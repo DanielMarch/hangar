@@ -733,7 +733,7 @@ end of it means B-9 is not fixed.
 
 ---
 
-## 6. Found by running Gate 5 for the first time *(B-7 and B-8 CLOSED in Phase 22; B-12 decided)*
+## 6. Found by running Gate 5 for the first time *(B-7 and B-8 CLOSED in Phase 22; B-12 CLOSED in Phase 23)*
 
 Three defects, none of which any test in the suite could have caught, because every test builds its
 own connection string and its own configuration. This is what §5 is for.
@@ -848,6 +848,49 @@ standing between Gate 5 and a real pass**, and it is not a code defect.
 Closing it is four steps, none of which touch the codebase: create `hangar-project/hangar`, push
 `main` and the tag, push the image to `ghcr.io/hangar-project/hangar` with public read, and re-run
 `bash tools/gate5-deploy/run.sh` without the local-origin substitution.
+
+#### CLOSED in Phase 23 — the four steps were performed
+
+**HANGAR is published.** `github.com/DanielMarch/hangar` is public, `main` and both existing tags
+are pushed, and `ghcr.io/danielmarch/hangar` carries `:latest` and `:v1.0.0-rc3` with public read.
+All three of §5.1's commands are now verifiable by somebody who is not this repository:
+
+```
+raw.githubusercontent.com/DanielMarch/hangar/main/docker-compose.yml   200
+raw.githubusercontent.com/DanielMarch/hangar/main/deploy/install.sh    200
+docker pull ghcr.io/danielmarch/hangar:v1.0.0-rc3                      OK, logged out
+```
+
+The last line was run **after `docker logout ghcr.io` and after deleting the local image**, so it
+is a real anonymous pull rather than a cache hit.
+
+**Not under `hangar-project`, and that is a real difference.** Creating an organisation is not
+something this session can do, so the release is published under the operator's own account and
+every documented URL was amended to match — both installers, both compose image references and
+the unit's `Documentation=`. **The Go module path stays `github.com/hangar-project/hangar`**, so
+`go get` of that path does not resolve. Nothing imports HANGAR (it is an application), §9.1's
+install path is the image and §9.2's is the binary, and neither goes through the module proxy —
+but it is a mismatch and it is recorded rather than left to be discovered.
+
+**Condition 5.2 no longer asserts its own answer.** It used to record SUBSTITUTED
+unconditionally, with the 404/403 sentence hard-coded — a verdict that could not change would
+have gone on saying "nothing is published" the day after something was. It now probes both
+halves anonymously at run time, from outside the repository, and records exactly which half is
+missing when one is.
+
+Two things the publication found that nothing else would have:
+
+* **A 71 MB stray binary in the history.** `hangar.exe~`, an editor-backup-named dev build
+  committed in Phase 20.7, which `.gitignore`'s anchored `/hangar.exe` did not match. GitHub
+  flagged it on the first push. Rewritten out of history at the operator's direction — 34 MB to
+  5.7 MB, with the HEAD tree hash unchanged, so the content is identical and only the pack is
+  smaller.
+* **Four hard-coded image names in Gate 5's own runner**, which kept reaching for
+  `hangar-project` after the rename and failed three conditions for reasons unrelated to what
+  they measure. The gate reads the image name from `docker-compose.yml` now — the file an
+  operator downloads — so it cannot drift from the artefact it tests.
+
+**§5.2 is a real pass.** Gate 5 is unqualified for the first time in the project's history.
 
 ---
 

@@ -1,7 +1,7 @@
 Gate 5 — Deployment Usability
 release:   v1.0.0-rc3
-started:   2026-08-21T03:18:46Z
-workdir:   /tmp/tmp.fQoXXu4OrU   (empty — no repository clone, no Go toolchain, no Node)
+started:   2026-08-21T03:28:22Z
+workdir:   /tmp/tmp.AP9qR4lofp   (empty — no repository clone, no Go toolchain, no Node)
 docker:    Docker version 29.6.2, build dfc4efb
 compose:   5.3.1
 
@@ -32,7 +32,7 @@ https://developers.eveonline.com/applications and set in .env:
 The callback URL must be exactly ${HANGAR_PUBLIC_URL}/auth/callback.
 
 ── §5.3 failure modes ──────────────────────────────────────────────────
-$ docker run --rm ghcr.io/hangar-project/hangar:latest serve   # with no configuration at all
+$ docker run --rm ghcr.io/danielmarch/hangar:latest serve   # with no configuration at all
 Error: config: invalid configuration: HANGAR_DB_URL: required value is not set
 HANGAR_MASTER_KEY: required value is not set
 HANGAR_SESSION_SECRET: required value is not set
@@ -77,8 +77,8 @@ $ docker compose -p hangar-gate5 up -d
  Container hangar-postgres Healthy 
  Container hangar-migrate Starting 
  Container hangar-migrate Started 
- Container hangar-postgres Waiting 
  Container hangar-migrate Waiting 
+ Container hangar-postgres Waiting 
  Container hangar-postgres Healthy 
  Container hangar-migrate Exited 
  Container hangar Starting 
@@ -87,127 +87,39 @@ $ docker compose -p hangar-gate5 up -d
 ── §5.2 pass conditions ────────────────────────────────────────────────
 [pass] 5.1 — exactly three commands, no editor step (the two SSO values are prompted for by install.sh)
 5.2 sources: https://raw.githubusercontent.com/DanielMarch/hangar/main/docker-compose.yml -> 200, https://raw.githubusercontent.com/DanielMarch/hangar/main/deploy/install.sh -> 200
-5.2 image: ghcr.io/danielmarch/hangar:latest -> no-token
-[SUBSTITUTED] 5.2 — the SOURCES are published and fetch anonymously (200), but the IMAGE is not: ghcr.io/danielmarch/hangar:latest answered no-token. Two of §5.1's three commands are therefore real and the third is not. Pushing the image needs a write:packages credential this session does not hold; see docs/PRE_V1_OPEN_ITEMS.md B-12
+5.2 image: ghcr.io/danielmarch/hangar:latest -> 200
+[pass] 5.2 — no build: key, no compilation, and BOTH halves verified anonymously: the compose file and install.sh fetch 200 from https://raw.githubusercontent.com/DanielMarch/hangar/main, and ghcr.io/danielmarch/hangar:latest returns a manifest to an anonymous pull token
 [pass] 5.4 — /healthz and /readyz both 200 after 10s (budget 300s); migrations ran from the one-shot migrate service
 default-profile services: hangar migrate postgres 
 [pass] 5.5 — services are exactly: hangar migrate postgres  (no redis)
 [pass] 5.6 — the SPA is served by the binary itself on the same port as the API
-
-── teardown ────────────────────────────────────────────────────────────
- Container hangar Stopping 
- Container hangar Stopped 
- Container hangar Removing 
- Container hangar Removed 
- Container hangar-migrate Stopping 
- Container hangar-migrate Stopped 
- Container hangar-migrate Removing 
- Container hangar-migrate Removed 
- Container hangar-postgres Stopping 
- Container hangar-postgres Stopped 
- Container hangar-postgres Removing 
- Container hangar-postgres Removed 
- Network hangar Removing 
- Volume hangar-postgres-data Removing 
- Volume hangar-postgres-data Removed 
- Network hangar Removed 
-[FAIL] first-boot-alerts — expected 54 alert types and 4 thresholds, got ? and ?
-healthcheck: service "hangar" is not running
+[pass] first-boot-alerts — 54 alert types with 4 thresholds on the FIRST boot
+healthcheck: 
 
 ── §5.2 condition 5.7: re-run after a version bump ─────────────────────
-service "postgres" is not running
+INSERT 0 1
 $ docker compose -p hangar-gate5 up -d
- Image ghcr.io/danielmarch/hangar:bumped Pulling 
- Image ghcr.io/danielmarch/hangar:bumped Pulling 
- Image ghcr.io/danielmarch/hangar:bumped Error error from registry: denied
-denied
- Image ghcr.io/danielmarch/hangar:bumped Interrupted 
-Error response from daemon: error from registry: denied
-denied
-[FAIL] 5.7 — could not seed the survivor row, so the check is inconclusive
+ Container hangar-postgres Running 
+ Container hangar-migrate Recreate 
+ Container hangar-migrate Recreated 
+ Container hangar Recreate 
+ Container hangar Recreated 
+ Container hangar-postgres Waiting 
+ Container hangar-postgres Healthy 
+ Container hangar-migrate Starting 
+ Container hangar-migrate Started 
+ Container hangar-postgres Waiting 
+ Container hangar-migrate Waiting 
+ Container hangar-postgres Healthy 
+ Container hangar-migrate Exited 
+ Container hangar Starting 
+ Container hangar Started 
+[pass] 5.7 — after a version bump and a second 'docker compose up -d', migrations re-ran and the seeded row survived
 
 ── §5.2 condition 5.8: manual deployment, external PostgreSQL 18 ───────
 The static linux/amd64 binary, its .env, and an external PostgreSQL 18 —
 no compose, no image, nothing from the repository but the binary.
 $ docker network create gate5-manual
-d131174114eb308f747ab943032fc4ec7b308495106bf2b943b902076de1f9dc
+db05807f21e74d2e3cdd3d47d05d80ad65e76dbecc771cfdfcffe8f3e198edd6
 $ docker run -d --name gate5-pg --network gate5-manual -e POSTGRES_USER=hangar -e POSTGRES_PASSWORD=hangar -e POSTGRES_DB=hangar postgres:18-alpine
-42023c88b524ce2ed0e861bab6f6bb7967c8e9d79a22f787d5fa0acffe750688
-migrate up: river schema current
-2026/08/21 03:23:42 OK   00001_schemas.sql (2.53ms)
-2026/08/21 03:23:42 OK   00002_platform_vocabulary.sql (10.9ms)
-2026/08/21 03:23:42 OK   00003_platform_reference.sql (24.05ms)
-2026/08/21 03:23:42 OK   00004_platform_identity.sql (63.31ms)
-2026/08/21 03:23:42 OK   00005_platform_rbac.sql (55.8ms)
-2026/08/21 03:23:42 OK   00006_platform_esi_gateway.sql (53.28ms)
-2026/08/21 03:23:42 OK   00007_platform_provisioning.sql (30.5ms)
-2026/08/21 03:23:42 OK   00008_platform_alerting.sql (34.73ms)
-2026/08/21 03:23:42 OK   00009_platform_events.sql (18.61ms)
-2026/08/21 03:23:42 OK   00010_domain_corporation_structure.sql (71.14ms)
-2026/08/21 03:23:42 OK   00011_domain_corporation_projects.sql (12.88ms)
-2026/08/21 03:23:43 OK   00012_domain_history.sql (10.53ms)
-2026/08/21 03:23:43 OK   00013_domain_assets.sql (12.48ms)
-2026/08/21 03:23:43 OK   00014_domain_wallets.sql (25.46ms)
-2026/08/21 03:23:43 OK   00015_domain_contracts.sql (18.17ms)
-2026/08/21 03:23:43 OK   00016_domain_industry_mining.sql (26.76ms)
-2026/08/21 03:23:43 OK   00017_domain_market.sql (22.61ms)
-2026/08/21 03:23:43 OK   00018_domain_killmails.sql (22.02ms)
-2026/08/21 03:23:43 OK   00019_domain_social.sql (20.85ms)
-2026/08/21 03:23:43 OK   00020_domain_character_sheet.sql (39.37ms)
-2026/08/21 03:23:43 OK   00021_domain_fittings.sql (10.41ms)
-2026/08/21 03:23:43 OK   00022_domain_mail.sql (21.87ms)
-2026/08/21 03:23:43 OK   00023_domain_notifications.sql (16.24ms)
-2026/08/21 03:23:43 OK   00024_domain_calendar.sql (14.68ms)
-2026/08/21 03:23:43 OK   00025_domain_planetary.sql (10.84ms)
-2026/08/21 03:23:43 OK   00026_domain_sovereignty.sql (29.94ms)
-2026/08/21 03:23:43 OK   00027_domain_tools.sql (15.46ms)
-2026/08/21 03:23:43 OK   00028_domain_intel.sql (7.34ms)
-2026/08/21 03:23:43 OK   00029_domain_fixups.sql (4.73ms)
-2026/08/21 03:23:43 OK   00030_phase7_character_fixups.sql (31.04ms)
-2026/08/21 03:23:43 OK   00031_phase8_acting_character_history.sql (7.51ms)
-2026/08/21 03:23:43 OK   00032_phase8_mining_extraction_structure_id.sql (3.62ms)
-2026/08/21 03:23:43 OK   00033_phase8_1_skyhook_reagent_fixup.sql (7.47ms)
-2026/08/21 03:23:43 OK   00034_phase9_market_issued_by.sql (3.01ms)
-2026/08/21 03:23:43 OK   00035_phase9_notification_payload.sql (5.72ms)
-2026/08/21 03:23:43 OK   00036_phase9_sde_core_tables.sql (85.03ms)
-2026/08/21 03:23:43 OK   00037_phase11_entitlement_source_fixup.sql (3.52ms)
-2026/08/21 03:23:43 OK   00038_phase12_discord_invalid_budget.sql (4.84ms)
-2026/08/21 03:23:43 OK   00039_phase13_teamspeak_challenge.sql (8.26ms)
-2026/08/21 03:23:43 OK   00040_phase15_1_defect_closure.sql (6.47ms)
-2026/08/21 03:23:43 OK   00041_phase19_outbox_dispatch.sql (7.96ms)
-2026/08/21 03:23:43 OK   00042_phase20_4_ledger_divergence_pair.sql (3.13ms)
-2026/08/21 03:23:43 OK   00043_phase20_4_1_reconcile_residual.sql (3.51ms)
-2026/08/21 03:23:43 OK   00044_phase20_5_webhook_secret_rotation.sql (4.25ms)
-2026/08/21 03:23:43 OK   00045_phase20_6_keyset_covering_indexes.sql (13.93ms)
-2026/08/21 03:23:43 OK   00046_phase20_9_character_skill_summary.sql (5.29ms)
-2026/08/21 03:23:43 goose: successfully migrated database to version: 46
-migrate up: app/sde schema current — tables, columns and indexes verified against the migrations, not just goose's log
-migrate up: seed data applied
-migrate up: 50 alert types seeded, and 4 THRESHOLD types are DEFERRED.
-migrate up:   corporation.structure.fuel_low, corporation.starbase.fuel_low,
-migrate up:   corporation.member.inactive, corporation.contract.expiring
-migrate up: each declares an ESI source route, and app.esi_route is empty until the
-migrate up: catalogue is ingested. They complete automatically on the first ingest —
-migrate up: `serve` does one at startup, or run `hangar admin ingest-catalogue`.
-migrate up: Until then no routing rule can be created for them and they cannot fire.
-[PARTIAL] 5.8 — the static binary ran on a bare debian:12-slim with no toolchain and migrated an external PostgreSQL 18. systemd itself was NOT exercised — this host is Windows and has no systemd; the unit file is deploy/ material and remains unverified
-
-$ /hangar migrate up   # the binary named 'hangar' in its own working directory
-migrate up: river schema current
-2026/08/21 03:23:44 goose: no migrations to run. current version: 46
-migrate up: app/sde schema current — tables, columns and indexes verified against the migrations, not just goose's log
-migrate up: seed data applied
-migrate up: 50 alert types seeded, and 4 THRESHOLD types are DEFERRED.
-migrate up:   corporation.structure.fuel_low, corporation.starbase.fuel_low,
-migrate up:   corporation.member.inactive, corporation.contract.expiring
-migrate up: each declares an ESI source route, and app.esi_route is empty until the
-migrate up: catalogue is ingested. They complete automatically on the first ingest —
-migrate up: `serve` does one at startup, or run `hangar admin ingest-catalogue`.
-migrate up: Until then no routing rule can be created for them and they cannot fire.
-[pass] 5.8-config-name-collision — the binary named 'hangar' in its own working directory (§9.2's documented layout) is not mistaken for a config file, and migrated the external PostgreSQL 18 from there
-
-finished:  2026-08-21T03:23:46Z
-transcript: /c/HANGAR/docs/gate-evidence/v1.0.0-rc3/gate5/transcript.txt
-
-── teardown ────────────────────────────────────────────────────────────
-time="2026-08-20T22:23:46-05:00" level=warning msg="Warning: No resource found to remove for project \"hangar-gate5\"."
+761f9f89b9841b62d92f483f2e7a9b16e14e130a8f0d34f4ec6d5e08033b565f
