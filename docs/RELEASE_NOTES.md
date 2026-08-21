@@ -60,6 +60,36 @@ be byte-identical to a recording and wrong on every real installation.
 integrator to wait for a release that was never coming. Every route now serves, or says
 permanently why it does not.
 
+### How to install it
+
+Three commands, no editor step. The two EVE SSO values are prompted for by the installer.
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/DanielMarch/hangar/main/docker-compose.yml
+```
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DanielMarch/hangar/main/deploy/install.sh | sh
+```
+
+```bash
+docker compose up -d
+```
+
+The image is `ghcr.io/danielmarch/hangar`, public, and pulled rather than built — the compose
+file has no `build:` key and nothing on the path compiles anything. Gate 5 verifies all three
+commands anonymously, and verifies the pull after `docker logout`, so what is measured is what a
+stranger gets.
+
+**Published under `DanielMarch/hangar`, not `hangar-project/hangar`**, which every document in
+this repository named until v1.0.0. Creating an organisation was not available, so the release
+lives under the author's account and every documented URL was amended to match.
+
+**One consequence, stated because it will otherwise be discovered:** the Go module path is still
+`github.com/hangar-project/hangar`, so `go get github.com/hangar-project/hangar` does not
+resolve. HANGAR is an application and nothing imports it; §9.1's install path is the image above
+and §9.2's is a static binary from the release page. Neither goes through the module proxy.
+
 ### Known limitations at v1.0.0
 
 Stated here rather than discovered. `docs/PRE_V1_OPEN_ITEMS.md` carries the full derivation of
