@@ -1,0 +1,15 @@
+run 1: exit 0
+    2000	    118976 ns/op	      8459 ops/s	      9147 p99_us
+    2000	     37200 ns/op	     27011 ops/s	       891.0 p50_us	      4932 p99_us
+run 2: exit 0
+    2000	    111963 ns/op	      8995 ops/s	      8740 p99_us
+    2000	     34528 ns/op	     29140 ops/s	       912.0 p50_us	      2602 p99_us
+run 3: exit 0
+    2000	    109945 ns/op	      9161 ops/s	      8764 p99_us
+    2000	     36726 ns/op	     27396 ops/s	       908.0 p50_us	      2799 p99_us
+run 4: exit 0
+    2000	    115049 ns/op	      8754 ops/s	      8806 p99_us
+    2000	     34250 ns/op	     29339 ops/s	       860.0 p50_us	      2589 p99_us
+run 5: exit 1
+    shared_integration_test.go:506: p99 acquire/settle latency 11.900628ms exceeds the 10ms budget
+    2000	     36376 ns/op	     27572 ops/s	       944.0 p50_us	      2909 p99_us

@@ -1,0 +1,353 @@
+### pulling golang:1.26-alpine
+1.26-alpine: Pulling from library/golang
+4f4fb700ef54: Pulling fs layer
+f7eaed125041: Pulling fs layer
+fbbf4aee6bbb: Pulling fs layer
+58f862ff0630: Pulling fs layer
+7867e410bcdf: Download complete
+4f4fb700ef54: Already exists
+4f4fb700ef54: Pull complete
+f7eaed125041: Download complete
+fbbf4aee6bbb: Download complete
+1972b55ec2a7: Download complete
+fbbf4aee6bbb: Pull complete
+58f862ff0630: Download complete
+f7eaed125041: Pull complete
+58f862ff0630: Pull complete
+Digest: sha256:28d89ee9cc0ff9fec75c82ca201e6bf7fdf9a679d4b7b24dfa04f2bb766bb468
+Status: Downloaded newer image for golang:1.26-alpine
+docker.io/library/golang:1.26-alpine
+### PostgreSQL 18 on a docker network, reachable over the Linux bridge
+fcab159e51ef859af40afffac76a0904fd8ac79e89083772560fe3e424b03d38
+3b57af590a5ceb8c859a37c0e93bbd765206bea13c6614da19920a85422908ae
+### 3 runs, inside the container, against bench-ledger-pg over the bridge
+
+--- run 1 ---
+go: downloading github.com/google/uuid v1.6.0
+go: downloading github.com/jackc/pgx/v5 v5.10.0
+go: downloading github.com/pressly/goose/v3 v3.26.0
+go: downloading github.com/stretchr/testify v1.11.1
+go: downloading github.com/testcontainers/testcontainers-go/modules/postgres v0.40.0
+go: downloading github.com/prometheus/client_golang v1.23.2
+go: downloading go.opentelemetry.io/otel v1.45.0
+go: downloading go.opentelemetry.io/otel/sdk v1.45.0
+go: downloading go.opentelemetry.io/otel/trace v1.45.0
+go: downloading github.com/spf13/viper v1.21.0
+go: downloading github.com/shopspring/decimal v1.4.0
+go: downloading github.com/testcontainers/testcontainers-go v0.40.0
+go: downloading github.com/fsnotify/fsnotify v1.9.0
+go: downloading github.com/go-viper/mapstructure/v2 v2.5.0
+go: downloading github.com/sagikazarmark/locafero v0.11.0
+go: downloading github.com/spf13/afero v1.15.0
+go: downloading github.com/spf13/cast v1.10.0
+go: downloading github.com/davecgh/go-spew v1.1.1
+go: downloading github.com/spf13/pflag v1.0.10
+go: downloading github.com/pmezard/go-difflib v1.0.0
+go: downloading github.com/beorn7/perks v1.0.1
+go: downloading github.com/cespare/xxhash/v2 v2.3.0
+go: downloading github.com/prometheus/client_model v0.6.2
+go: downloading github.com/prometheus/common v0.66.1
+go: downloading google.golang.org/protobuf v1.36.11
+go: downloading github.com/prometheus/procfs v0.16.1
+go: downloading github.com/jackc/puddle/v2 v2.2.2
+go: downloading github.com/subosito/gotenv v1.6.0
+go: downloading github.com/pelletier/go-toml/v2 v2.4.3
+go: downloading go.yaml.in/yaml/v3 v3.0.5
+go: downloading github.com/jackc/pgpassfile v1.0.0
+go: downloading github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761
+go: downloading golang.org/x/text v0.40.0
+go: downloading gopkg.in/yaml.v3 v3.0.1
+go: downloading github.com/sethvargo/go-retry v0.3.0
+go: downloading go.uber.org/multierr v1.11.0
+go: downloading github.com/sourcegraph/conc v0.3.1-0.20240121214520-5f936abd7ae8
+go: downloading golang.org/x/sys v0.47.0
+go: downloading github.com/go-logr/logr v1.4.4
+go: downloading go.opentelemetry.io/otel/metric v1.45.0
+go: downloading github.com/mfridman/interpolate v0.0.2
+go: downloading golang.org/x/sync v0.22.0
+go: downloading github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
+go: downloading go.yaml.in/yaml/v2 v2.4.2
+go: downloading github.com/go-logr/stdr v1.2.2
+go: downloading go.opentelemetry.io/auto/sdk v1.2.1
+go: downloading dario.cat/mergo v1.0.2
+go: downloading github.com/cenkalti/backoff/v4 v4.3.0
+go: downloading github.com/containerd/errdefs v1.0.0
+go: downloading github.com/containerd/platforms v0.2.1
+go: downloading github.com/cpuguy83/dockercfg v0.3.2
+go: downloading github.com/docker/docker v28.5.1+incompatible
+go: downloading github.com/docker/go-connections v0.6.0
+go: downloading github.com/moby/go-archive v0.1.0
+go: downloading github.com/moby/patternmatcher v0.6.0
+go: downloading github.com/moby/term v0.5.0
+go: downloading github.com/opencontainers/image-spec v1.1.1
+go: downloading golang.org/x/crypto v0.54.0
+go: downloading github.com/containerd/log v0.1.0
+go: downloading github.com/moby/sys/sequential v0.6.0
+go: downloading github.com/moby/sys/user v0.4.0
+go: downloading github.com/moby/sys/userns v0.1.0
+go: downloading github.com/magiconair/properties v1.8.10
+go: downloading github.com/shirou/gopsutil/v4 v4.25.6
+go: downloading github.com/opencontainers/go-digest v1.0.0
+go: downloading github.com/klauspost/compress v1.19.0
+go: downloading github.com/sirupsen/logrus v1.9.3
+go: downloading github.com/tklauser/go-sysconf v0.3.12
+go: downloading github.com/tklauser/numcpus v0.6.1
+go: downloading github.com/moby/docker-image-spec v1.3.1
+go: downloading github.com/morikuni/aec v1.0.0
+go: downloading github.com/docker/go-units v0.5.0
+go: downloading go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.70.0
+go: downloading github.com/containerd/errdefs/pkg v0.3.0
+go: downloading github.com/distribution/reference v0.6.0
+go: downloading github.com/pkg/errors v0.9.1
+go: downloading github.com/felixge/httpsnoop v1.1.0
+2026/08/21 01:59:23 OK   00001_schemas.sql (3.36ms)
+2026/08/21 01:59:23 OK   00002_platform_vocabulary.sql (13.02ms)
+2026/08/21 01:59:23 OK   00003_platform_reference.sql (27.51ms)
+2026/08/21 01:59:23 OK   00004_platform_identity.sql (63.38ms)
+2026/08/21 01:59:23 OK   00005_platform_rbac.sql (56.68ms)
+2026/08/21 01:59:23 OK   00006_platform_esi_gateway.sql (63.57ms)
+2026/08/21 01:59:23 OK   00007_platform_provisioning.sql (33.3ms)
+2026/08/21 01:59:23 OK   00008_platform_alerting.sql (39.32ms)
+2026/08/21 01:59:23 OK   00009_platform_events.sql (23.77ms)
+2026/08/21 01:59:23 OK   00010_domain_corporation_structure.sql (79.24ms)
+2026/08/21 01:59:23 OK   00011_domain_corporation_projects.sql (15.74ms)
+2026/08/21 01:59:23 OK   00012_domain_history.sql (12.11ms)
+2026/08/21 01:59:23 OK   00013_domain_assets.sql (15.44ms)
+2026/08/21 01:59:24 OK   00014_domain_wallets.sql (30.5ms)
+2026/08/21 01:59:24 OK   00015_domain_contracts.sql (21.06ms)
+2026/08/21 01:59:24 OK   00016_domain_industry_mining.sql (30.83ms)
+2026/08/21 01:59:24 OK   00017_domain_market.sql (24.2ms)
+2026/08/21 01:59:24 OK   00018_domain_killmails.sql (26.34ms)
+2026/08/21 01:59:24 OK   00019_domain_social.sql (25.08ms)
+2026/08/21 01:59:24 OK   00020_domain_character_sheet.sql (48.42ms)
+2026/08/21 01:59:24 OK   00021_domain_fittings.sql (12.93ms)
+2026/08/21 01:59:24 OK   00022_domain_mail.sql (26.02ms)
+2026/08/21 01:59:24 OK   00023_domain_notifications.sql (18.18ms)
+2026/08/21 01:59:24 OK   00024_domain_calendar.sql (16.02ms)
+2026/08/21 01:59:24 OK   00025_domain_planetary.sql (13.11ms)
+2026/08/21 01:59:24 OK   00026_domain_sovereignty.sql (9.18ms)
+2026/08/21 01:59:24 OK   00027_domain_tools.sql (17.64ms)
+2026/08/21 01:59:24 OK   00028_domain_intel.sql (9.77ms)
+2026/08/21 01:59:24 OK   00029_domain_fixups.sql (4.9ms)
+2026/08/21 01:59:24 OK   00030_phase7_character_fixups.sql (38.73ms)
+2026/08/21 01:59:24 OK   00031_phase8_acting_character_history.sql (9.21ms)
+2026/08/21 01:59:24 OK   00032_phase8_mining_extraction_structure_id.sql (3.76ms)
+2026/08/21 01:59:24 OK   00033_phase8_1_skyhook_reagent_fixup.sql (9.58ms)
+2026/08/21 01:59:24 OK   00034_phase9_market_issued_by.sql (3.24ms)
+2026/08/21 01:59:24 OK   00035_phase9_notification_payload.sql (6.45ms)
+2026/08/21 01:59:24 OK   00036_phase9_sde_core_tables.sql (121.31ms)
+2026/08/21 01:59:24 OK   00037_phase11_entitlement_source_fixup.sql (3.13ms)
+2026/08/21 01:59:24 OK   00038_phase12_discord_invalid_budget.sql (5.37ms)
+2026/08/21 01:59:24 OK   00039_phase13_teamspeak_challenge.sql (9.54ms)
+2026/08/21 01:59:24 OK   00040_phase15_1_defect_closure.sql (6.86ms)
+2026/08/21 01:59:24 OK   00041_phase19_outbox_dispatch.sql (7.94ms)
+2026/08/21 01:59:24 OK   00042_phase20_4_ledger_divergence_pair.sql (3.8ms)
+2026/08/21 01:59:24 OK   00043_phase20_4_1_reconcile_residual.sql (2.99ms)
+2026/08/21 01:59:24 OK   00044_phase20_5_webhook_secret_rotation.sql (5.25ms)
+2026/08/21 01:59:24 OK   00045_phase20_6_keyset_covering_indexes.sql (17.07ms)
+2026/08/21 01:59:24 OK   00046_phase20_9_character_skill_summary.sql (6.53ms)
+2026/08/21 01:59:24 goose: successfully migrated database to version: 46
+goos: linux
+goarch: amd64
+pkg: github.com/hangar-project/hangar/internal/esi/ratelimit
+cpu: AMD Ryzen 7 5700X3D 8-Core Processor           
+BenchmarkLedgerClusteredThroughput-16        	2026/08/21 01:59:24 goose: no migrations to run. current version: 46
+    2000	     89201 ns/op	     11284 ops/s	      6399 p99_us
+2026/08/21 01:59:24 goose: no migrations to run. current version: 46
+BenchmarkLedgerClusteredTransportFloor-16    	2026/08/21 01:59:24 goose: no migrations to run. current version: 46
+    2000	     31379 ns/op	     32053 ops/s	       816.0 p50_us	      2318 p99_us
+PASS
+ok  	github.com/hangar-project/hangar/internal/esi/ratelimit	1.557s
+TRUNCATE TABLE
+    2000	     89201 ns/op	     11284 ops/s	      6399 p99_us
+    2000	     31379 ns/op	     32053 ops/s	       816.0 p50_us	      2318 p99_us
+
+--- run 2 ---
+go: downloading github.com/jackc/pgx/v5 v5.10.0
+go: downloading github.com/google/uuid v1.6.0
+go: downloading github.com/pressly/goose/v3 v3.26.0
+go: downloading github.com/stretchr/testify v1.11.1
+go: downloading github.com/testcontainers/testcontainers-go/modules/postgres v0.40.0
+go: downloading github.com/prometheus/client_golang v1.23.2
+go: downloading go.opentelemetry.io/otel v1.45.0
+go: downloading go.opentelemetry.io/otel/sdk v1.45.0
+go: downloading go.opentelemetry.io/otel/trace v1.45.0
+go: downloading github.com/spf13/viper v1.21.0
+go: downloading github.com/testcontainers/testcontainers-go v0.40.0
+go: downloading github.com/shopspring/decimal v1.4.0
+go: downloading github.com/fsnotify/fsnotify v1.9.0
+go: downloading github.com/go-viper/mapstructure/v2 v2.5.0
+go: downloading github.com/sagikazarmark/locafero v0.11.0
+go: downloading github.com/spf13/afero v1.15.0
+go: downloading github.com/spf13/cast v1.10.0
+go: downloading github.com/davecgh/go-spew v1.1.1
+go: downloading github.com/spf13/pflag v1.0.10
+go: downloading github.com/pmezard/go-difflib v1.0.0
+go: downloading github.com/beorn7/perks v1.0.1
+go: downloading github.com/cespare/xxhash/v2 v2.3.0
+go: downloading github.com/prometheus/client_model v0.6.2
+go: downloading github.com/prometheus/common v0.66.1
+go: downloading google.golang.org/protobuf v1.36.11
+go: downloading github.com/prometheus/procfs v0.16.1
+go: downloading github.com/sethvargo/go-retry v0.3.0
+go: downloading go.uber.org/multierr v1.11.0
+go: downloading github.com/jackc/puddle/v2 v2.2.2
+go: downloading github.com/subosito/gotenv v1.6.0
+go: downloading github.com/pelletier/go-toml/v2 v2.4.3
+go: downloading go.yaml.in/yaml/v3 v3.0.5
+go: downloading github.com/jackc/pgpassfile v1.0.0
+go: downloading github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761
+go: downloading golang.org/x/text v0.40.0
+go: downloading gopkg.in/yaml.v3 v3.0.1
+go: downloading golang.org/x/sys v0.47.0
+go: downloading github.com/sourcegraph/conc v0.3.1-0.20240121214520-5f936abd7ae8
+go: downloading github.com/go-logr/logr v1.4.4
+go: downloading go.opentelemetry.io/otel/metric v1.45.0
+go: downloading github.com/mfridman/interpolate v0.0.2
+go: downloading golang.org/x/sync v0.22.0
+go: downloading github.com/go-logr/stdr v1.2.2
+go: downloading go.opentelemetry.io/auto/sdk v1.2.1
+go: downloading github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
+go: downloading go.yaml.in/yaml/v2 v2.4.2
+go: downloading dario.cat/mergo v1.0.2
+go: downloading github.com/cenkalti/backoff/v4 v4.3.0
+go: downloading github.com/containerd/errdefs v1.0.0
+go: downloading github.com/docker/docker v28.5.1+incompatible
+go: downloading github.com/containerd/platforms v0.2.1
+go: downloading github.com/cpuguy83/dockercfg v0.3.2
+go: downloading github.com/docker/go-connections v0.6.0
+go: downloading github.com/moby/go-archive v0.1.0
+go: downloading github.com/moby/patternmatcher v0.6.0
+go: downloading github.com/moby/term v0.5.0
+go: downloading github.com/opencontainers/image-spec v1.1.1
+go: downloading golang.org/x/crypto v0.54.0
+go: downloading github.com/containerd/log v0.1.0
+go: downloading github.com/moby/sys/sequential v0.6.0
+go: downloading github.com/moby/sys/user v0.4.0
+go: downloading github.com/moby/sys/userns v0.1.0
+go: downloading github.com/magiconair/properties v1.8.10
+go: downloading github.com/shirou/gopsutil/v4 v4.25.6
+go: downloading github.com/opencontainers/go-digest v1.0.0
+go: downloading github.com/klauspost/compress v1.19.0
+go: downloading github.com/sirupsen/logrus v1.9.3
+go: downloading github.com/tklauser/go-sysconf v0.3.12
+go: downloading github.com/tklauser/numcpus v0.6.1
+go: downloading github.com/moby/docker-image-spec v1.3.1
+go: downloading github.com/docker/go-units v0.5.0
+go: downloading github.com/morikuni/aec v1.0.0
+go: downloading go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.70.0
+go: downloading github.com/containerd/errdefs/pkg v0.3.0
+go: downloading github.com/distribution/reference v0.6.0
+go: downloading github.com/pkg/errors v0.9.1
+go: downloading github.com/felixge/httpsnoop v1.1.0
+2026/08/21 01:59:46 goose: no migrations to run. current version: 46
+goos: linux
+goarch: amd64
+pkg: github.com/hangar-project/hangar/internal/esi/ratelimit
+cpu: AMD Ryzen 7 5700X3D 8-Core Processor           
+BenchmarkLedgerClusteredThroughput-16        	2026/08/21 01:59:46 goose: no migrations to run. current version: 46
+    2000	     96717 ns/op	     10414 ops/s	      7632 p99_us
+2026/08/21 01:59:46 goose: no migrations to run. current version: 46
+BenchmarkLedgerClusteredTransportFloor-16    	2026/08/21 01:59:46 goose: no migrations to run. current version: 46
+    2000	     32635 ns/op	     30795 ops/s	       838.0 p50_us	      2758 p99_us
+PASS
+ok  	github.com/hangar-project/hangar/internal/esi/ratelimit	0.519s
+TRUNCATE TABLE
+    2000	     96717 ns/op	     10414 ops/s	      7632 p99_us
+    2000	     32635 ns/op	     30795 ops/s	       838.0 p50_us	      2758 p99_us
+
+--- run 3 ---
+go: downloading github.com/jackc/pgx/v5 v5.10.0
+go: downloading github.com/google/uuid v1.6.0
+go: downloading github.com/pressly/goose/v3 v3.26.0
+go: downloading github.com/stretchr/testify v1.11.1
+go: downloading github.com/testcontainers/testcontainers-go/modules/postgres v0.40.0
+go: downloading github.com/prometheus/client_golang v1.23.2
+go: downloading go.opentelemetry.io/otel v1.45.0
+go: downloading go.opentelemetry.io/otel/sdk v1.45.0
+go: downloading go.opentelemetry.io/otel/trace v1.45.0
+go: downloading github.com/testcontainers/testcontainers-go v0.40.0
+go: downloading github.com/spf13/viper v1.21.0
+go: downloading github.com/shopspring/decimal v1.4.0
+go: downloading github.com/beorn7/perks v1.0.1
+go: downloading github.com/cespare/xxhash/v2 v2.3.0
+go: downloading github.com/prometheus/client_model v0.6.2
+go: downloading github.com/prometheus/common v0.66.1
+go: downloading github.com/prometheus/procfs v0.16.1
+go: downloading google.golang.org/protobuf v1.36.11
+go: downloading github.com/fsnotify/fsnotify v1.9.0
+go: downloading github.com/spf13/afero v1.15.0
+go: downloading github.com/sethvargo/go-retry v0.3.0
+go: downloading github.com/sagikazarmark/locafero v0.11.0
+go: downloading go.uber.org/multierr v1.11.0
+go: downloading github.com/go-viper/mapstructure/v2 v2.5.0
+go: downloading github.com/spf13/cast v1.10.0
+go: downloading github.com/spf13/pflag v1.0.10
+go: downloading github.com/jackc/puddle/v2 v2.2.2
+go: downloading github.com/jackc/pgpassfile v1.0.0
+go: downloading github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761
+go: downloading golang.org/x/text v0.40.0
+go: downloading github.com/davecgh/go-spew v1.1.1
+go: downloading go.opentelemetry.io/otel/metric v1.45.0
+go: downloading github.com/pmezard/go-difflib v1.0.0
+go: downloading github.com/go-logr/logr v1.4.4
+go: downloading golang.org/x/sys v0.47.0
+go: downloading github.com/subosito/gotenv v1.6.0
+go: downloading github.com/pelletier/go-toml/v2 v2.4.3
+go: downloading go.yaml.in/yaml/v3 v3.0.5
+go: downloading github.com/mfridman/interpolate v0.0.2
+go: downloading golang.org/x/sync v0.22.0
+go: downloading github.com/sourcegraph/conc v0.3.1-0.20240121214520-5f936abd7ae8
+go: downloading github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
+go: downloading go.yaml.in/yaml/v2 v2.4.2
+go: downloading gopkg.in/yaml.v3 v3.0.1
+go: downloading github.com/go-logr/stdr v1.2.2
+go: downloading go.opentelemetry.io/auto/sdk v1.2.1
+go: downloading github.com/containerd/errdefs v1.0.0
+go: downloading github.com/containerd/platforms v0.2.1
+go: downloading dario.cat/mergo v1.0.2
+go: downloading github.com/cenkalti/backoff/v4 v4.3.0
+go: downloading github.com/cpuguy83/dockercfg v0.3.2
+go: downloading github.com/docker/docker v28.5.1+incompatible
+go: downloading github.com/docker/go-connections v0.6.0
+go: downloading github.com/moby/go-archive v0.1.0
+go: downloading github.com/moby/patternmatcher v0.6.0
+go: downloading github.com/moby/term v0.5.0
+go: downloading github.com/opencontainers/image-spec v1.1.1
+go: downloading golang.org/x/crypto v0.54.0
+go: downloading github.com/containerd/log v0.1.0
+go: downloading github.com/moby/sys/sequential v0.6.0
+go: downloading github.com/moby/sys/user v0.4.0
+go: downloading github.com/moby/sys/userns v0.1.0
+go: downloading github.com/magiconair/properties v1.8.10
+go: downloading github.com/shirou/gopsutil/v4 v4.25.6
+go: downloading github.com/opencontainers/go-digest v1.0.0
+go: downloading github.com/klauspost/compress v1.19.0
+go: downloading github.com/sirupsen/logrus v1.9.3
+go: downloading github.com/tklauser/go-sysconf v0.3.12
+go: downloading github.com/tklauser/numcpus v0.6.1
+go: downloading github.com/moby/docker-image-spec v1.3.1
+go: downloading github.com/morikuni/aec v1.0.0
+go: downloading github.com/docker/go-units v0.5.0
+go: downloading go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.70.0
+go: downloading github.com/containerd/errdefs/pkg v0.3.0
+go: downloading github.com/distribution/reference v0.6.0
+go: downloading github.com/pkg/errors v0.9.1
+go: downloading github.com/felixge/httpsnoop v1.1.0
+2026/08/21 02:00:07 goose: no migrations to run. current version: 46
+goos: linux
+goarch: amd64
+pkg: github.com/hangar-project/hangar/internal/esi/ratelimit
+cpu: AMD Ryzen 7 5700X3D 8-Core Processor           
+BenchmarkLedgerClusteredThroughput-16        	2026/08/21 02:00:07 goose: no migrations to run. current version: 46
+    2000	    105899 ns/op	      9509 ops/s	      8529 p99_us
+2026/08/21 02:00:08 goose: no migrations to run. current version: 46
+BenchmarkLedgerClusteredTransportFloor-16    	2026/08/21 02:00:08 goose: no migrations to run. current version: 46
+    2000	     33833 ns/op	     29699 ops/s	       839.0 p50_us	      2612 p99_us
+PASS
+ok  	github.com/hangar-project/hangar/internal/esi/ratelimit	0.589s
+TRUNCATE TABLE
+    2000	    105899 ns/op	      9509 ops/s	      8529 p99_us
+    2000	     33833 ns/op	     29699 ops/s	       839.0 p50_us	      2612 p99_us
+
+### results

@@ -155,7 +155,7 @@ build-all: web ## Release matrix (SRS §9.2) — CGO_ENABLED=0 is contractual
 	done
 
 # ── quality ──────────────────────────────────────────────────────────────────
-.PHONY: fmt lint test test-integration bench bench-ledger-clustered web-ci
+.PHONY: fmt lint test test-integration bench bench-ledger-clustered bench-ledger-bridge web-ci
 fmt:  ## gofmt + prettier
 	go fmt ./... && cd web && pnpm exec prettier --write .
 
@@ -177,6 +177,28 @@ bench: ## (Phase 4) solo ledger: 1M operations must complete in < 2s
 
 bench-ledger-clustered: ## (Phase 4) clustered ledger: >= 2000 ops/s/replica at p99 < 10ms
 	go test -run=XXX -tags=integration -bench=BenchmarkLedgerClustered ./internal/esi/ratelimit/...
+
+bench-ledger-bridge: ## (Phase 23, D-1) the same benchmark off Docker Desktop's Windows port forwarding
+# ── WHY THERE ARE TWO TARGETS ────────────────────────────────────────────────
+# The plain target above runs go test on the HOST, so testcontainers reaches
+# PostgreSQL through Docker Desktop's forwarded port. On Windows that costs
+# 6.4-8.6 ms of p99 doing nothing — 64-70% of the entire 10 ms budget before
+# the ledger executes a statement — and the benchmark has failed on this host
+# at every commit it has ever been run at.
+#
+# This target runs the identical benchmark inside a container on the same
+# docker network as the database, over the Linux bridge. Same tree, same
+# assertion, no relaxation: p99 6.40-9.63 ms in 9 runs of 11, at 8,459-11,284
+# ops/s against a 2,000 ops/s target. Phase 20.4 established the method by
+# hand; Phase 23 made it a command, because a method that lives in a document
+# is one nobody can commit evidence from.
+#
+# BenchmarkLedgerClusteredTransportFloor runs alongside and measures the two
+# bare round trips one operation costs, so the artefact carries the floor
+# beside the number rather than leaving "it is the environment" as a claim.
+#
+# See docs/gate-evidence/v1.0.0-rc3/bench/SUMMARY.md.
+	bash tools/bench-ledger/run.sh docs/gate-evidence/$(or $(GATE_VERSION),local)/bench $(or $(RUNS),3)
 
 web-ci:
 	@if [ -d web/node_modules ]; then cd web && pnpm run ci; \

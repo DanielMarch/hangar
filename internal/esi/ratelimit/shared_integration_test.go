@@ -5,6 +5,7 @@ package ratelimit_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -357,8 +358,55 @@ func clusterBenchReq(id int) ratelimit.AcquireRequest {
 	}
 }
 
+// benchPool is newMigratedPool with one addition: HANGAR_BENCH_DB_URL, if
+// set, is used instead of starting a container.
+//
+// ── PHASE 23 (D-1): WHY THE BENCHMARK NEEDS THIS AND THE TESTS DO NOT ────
+//
+// `make bench-ledger-clustered` has failed on this Windows host at every
+// commit it has ever been run at, and Phase 20.4 established WHY by
+// measurement rather than by assertion: run the same benchmark against the
+// same tree with Postgres reached over the Linux bridge instead of Docker
+// Desktop's Windows port forwarding and p99 comes in at 6.863-7.763 ms
+// against the 10 ms budget, while the same afternoon through Windows gave
+// 11.223 ms three runs out of three.
+//
+// That method was performed BY HAND and written into
+// docs/PRODUCTION_CALLER_AUDIT.md, which is why it had to be performed by
+// hand again, and why the roadmap's Phase 4 exit criterion has never had a
+// committed passing measurement: testcontainers connects through the host's
+// mapped port, so the benchmark cannot avoid the forwarding it is being
+// distorted by.
+//
+// One environment variable turns "somebody described how to measure this
+// properly" into "there is a command". tools/bench-ledger/run.sh is that
+// command; without the variable, nothing changes for anybody.
+func benchPool(b *testing.B) *pgxpool.Pool {
+	b.Helper()
+	url := os.Getenv("HANGAR_BENCH_DB_URL")
+	if url == "" {
+		return newMigratedPool(b)
+	}
+
+	ctx := context.Background()
+	poolCfg, err := pgxpool.ParseConfig(url)
+	require.NoError(b, err)
+	poolCfg.MaxConns = 50 // as newMigratedPool, and for the same reason
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+	require.NoError(b, err)
+	b.Cleanup(pool.Close)
+	require.Eventually(b, func() bool { return pool.Ping(ctx) == nil }, 30*time.Second, 250*time.Millisecond)
+
+	sqlDB := stdlib.OpenDBFromPool(pool)
+	b.Cleanup(func() { _ = sqlDB.Close() })
+	goose.SetBaseFS(hangardb.Migrations)
+	require.NoError(b, goose.SetDialect("postgres"))
+	require.NoError(b, goose.Up(sqlDB, "migrations"))
+	return pool
+}
+
 func BenchmarkLedgerClusteredThroughput(b *testing.B) {
-	pool := newMigratedPool(b)
+	pool := benchPool(b)
 	ledger := ratelimit.NewLedgerClustered(pool)
 	ctx := context.Background()
 
@@ -618,4 +666,97 @@ func TestResidualIsZeroInBothDirections(t *testing.T) {
 	require.Equal(t, int32(100), after)
 	require.Equal(t, int32(100), int32(ratelimit.ConvergenceTarget(100, 400)),
 		"the reader must clamp with the same function the reconciler clamped with")
+}
+
+// ── PHASE 23 (D-1): THE TRANSPORT FLOOR ──────────────────────────────────
+//
+// BenchmarkLedgerClusteredThroughput has FAILED on this host at every commit
+// it has been run at — p99 10.46/10.20/10.83 ms at rc1, 10.78/10.92/10.98 ms
+// at rc2, 11.63 ms here — against the roadmap's Phase 4 exit criterion of
+// ">= 2000 ops/s/replica at p99 < 10 ms". Three runs at each of three
+// commits say it is the environment rather than a regression, and nobody has
+// ever demonstrated it passing anywhere.
+//
+// "It is the environment" is a claim, though, and it was being made without
+// a measurement. This benchmark is the measurement.
+//
+// It runs the SAME pool, the SAME 32 workers and the SAME operation count as
+// the real benchmark, and does nothing but two trivial round trips per
+// operation — because LedgerClustered.Acquire is exactly one QueryRow and
+// Settle is exactly one Exec, so one measured operation is exactly two
+// round trips. Whatever this reports is the floor the ledger cannot get
+// under on this host no matter how fast its SQL is.
+//
+// Read the two numbers together:
+//
+//	p99(ledger op) − p99(two bare round trips) = what HANGAR's own work costs
+//
+// If that difference is small, the budget is measuring Docker Desktop's
+// loopback and not the ledger, and §1.2's conditions 1.3 and 1.8 are the
+// precedent for amending a criterion with the measurement that forced it.
+//
+// It deliberately asserts NOTHING. A benchmark that fails when the host is
+// slow is the problem this exists to characterise, not a second instance of
+// it; the numbers go in the artefact and a human draws the conclusion.
+func BenchmarkLedgerClusteredTransportFloor(b *testing.B) {
+	pool := benchPool(b)
+	ctx := context.Background()
+
+	// Warm every connection the workers will use, so the first timed
+	// iteration is not paying for a TCP handshake and a startup packet.
+	var warmWG sync.WaitGroup
+	for w := 0; w < clusterBenchWorkers; w++ {
+		warmWG.Add(1)
+		go func() {
+			defer warmWG.Done()
+			var one int
+			_ = pool.QueryRow(ctx, "SELECT 1").Scan(&one)
+		}()
+	}
+	warmWG.Wait()
+
+	perWorker := (b.N + clusterBenchWorkers - 1) / clusterBenchWorkers
+	var mu sync.Mutex
+	var latencies []time.Duration
+	var wg sync.WaitGroup
+
+	start := time.Now()
+	b.ResetTimer()
+	for w := 0; w < clusterBenchWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			local := make([]time.Duration, 0, perWorker)
+			for i := 0; i < perWorker; i++ {
+				opStart := time.Now()
+				// Two round trips: one for Acquire's QueryRow, one for
+				// Settle's Exec. Nothing else — no rows read, no locks
+				// taken, no work for Postgres to do.
+				var one int
+				if err := pool.QueryRow(ctx, "SELECT 1").Scan(&one); err != nil {
+					b.Errorf("round trip 1: %v", err)
+					return
+				}
+				if _, err := pool.Exec(ctx, "SELECT 1"); err != nil {
+					b.Errorf("round trip 2: %v", err)
+					return
+				}
+				local = append(local, time.Since(opStart))
+			}
+			mu.Lock()
+			latencies = append(latencies, local...)
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	b.StopTimer()
+	elapsed := time.Since(start)
+
+	completed := perWorker * clusterBenchWorkers
+	b.ReportMetric(float64(completed)/elapsed.Seconds(), "ops/s")
+	if len(latencies) > 0 {
+		sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
+		b.ReportMetric(float64(latencies[len(latencies)*99/100].Microseconds()), "p99_us")
+		b.ReportMetric(float64(latencies[len(latencies)/2].Microseconds()), "p50_us")
+	}
 }

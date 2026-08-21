@@ -1,0 +1,9 @@
+=== RUN 1 ===
+    shared_integration_test.go:458: p99 acquire/settle latency 11.6692ms exceeds the 10ms budget
+    2000	     92275 ns/op	     10937 ops/s	      2691 p50_us	      6351 p99_us
+=== RUN 2 ===
+    shared_integration_test.go:458: p99 acquire/settle latency 11.59ms exceeds the 10ms budget
+    2000	    106696 ns/op	      9426 ops/s	      2956 p50_us	      7287 p99_us
+=== RUN 3 ===
+    shared_integration_test.go:458: p99 acquire/settle latency 12.2762ms exceeds the 10ms budget
+    2000	    126257 ns/op	      7990 ops/s	      3497 p50_us	      8564 p99_us

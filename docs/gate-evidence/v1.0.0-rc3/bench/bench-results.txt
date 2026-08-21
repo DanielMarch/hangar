@@ -1,0 +1,9 @@
+run 1: exit 0
+    2000	     89201 ns/op	     11284 ops/s	      6399 p99_us
+    2000	     31379 ns/op	     32053 ops/s	       816.0 p50_us	      2318 p99_us
+run 2: exit 0
+    2000	     96717 ns/op	     10414 ops/s	      7632 p99_us
+    2000	     32635 ns/op	     30795 ops/s	       838.0 p50_us	      2758 p99_us
+run 3: exit 0
+    2000	    105899 ns/op	      9509 ops/s	      8529 p99_us
+    2000	     33833 ns/op	     29699 ops/s	       839.0 p50_us	      2612 p99_us
