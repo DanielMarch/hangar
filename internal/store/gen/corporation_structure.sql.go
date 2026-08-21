@@ -42,15 +42,40 @@ func (q *Queries) BackfillSkyhookSystemIDFromSDE(ctx context.Context, corporatio
 
 const backfillSkyhookTypeIDFromSDE = `-- name: BackfillSkyhookTypeIDFromSDE :exec
 UPDATE app.corporation_skyhook sk
-   SET type_id = (SELECT t.type_id FROM sde.type t WHERE t.name = 'Skyhook' LIMIT 1)
+   SET type_id = (
+       SELECT t.type_id FROM sde.type t
+        WHERE t.name IN ('Orbital Skyhook', 'Skyhook')
+        ORDER BY (t.name = 'Orbital Skyhook') DESC, t.type_id
+        LIMIT 1)
  WHERE sk.corporation_id = $1
    AND sk.type_id IS NULL
-   AND EXISTS (SELECT 1 FROM sde.type t WHERE t.name = 'Skyhook')
+   AND EXISTS (SELECT 1 FROM sde.type t WHERE t.name IN ('Orbital Skyhook', 'Skyhook'))
 `
 
 // The skyhook structure type resolved by NAME against sde.type, never a
 // hardcoded numeric constant (Principle 13: no guessing at a
 // plausible-looking id with no verifiable source).
+//
+// ── PHASE 23: THE NAME WAS 'Skyhook' AND CCP CALLS IT 'Orbital Skyhook' ──
+//
+// Measured against build 3475087, the first SDE any installation has ever
+// imported. `sde.type` holds no row named 'Skyhook' at all; the anchorable
+// structure is 81080 'Orbital Skyhook', alongside 'Skyhook Reagent Silo',
+// 'Skyhook Cynosural Disruption' and 'Orbital Skyhook Wreck'.
+//
+// So this backfill resolved nothing, and would have gone on resolving
+// nothing after an import — the failure the name-resolution was chosen to
+// avoid, arriving through the name instead of through the id. Principle 13
+// was followed correctly and the string was still a guess, because nothing
+// had ever compared it to the SDE. That is what running import-sde for the
+// first time bought.
+//
+// Both spellings are accepted. 'Orbital Skyhook' is what build 3475087
+// ships and is tried first; 'Skyhook' stays as a fallback rather than being
+// replaced, because a bare name is CCP's to rename and a lookup that
+// survives one is worth four extra characters. ORDER BY makes the choice
+// deterministic rather than leaving it to whichever row the planner reaches
+// first.
 func (q *Queries) BackfillSkyhookTypeIDFromSDE(ctx context.Context, corporationID int64) error {
 	_, err := q.db.Exec(ctx, backfillSkyhookTypeIDFromSDE, corporationID)
 	return err

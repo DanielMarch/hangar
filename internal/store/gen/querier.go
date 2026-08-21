@@ -66,6 +66,27 @@ type Querier interface {
 	// The skyhook structure type resolved by NAME against sde.type, never a
 	// hardcoded numeric constant (Principle 13: no guessing at a
 	// plausible-looking id with no verifiable source).
+	//
+	// ── PHASE 23: THE NAME WAS 'Skyhook' AND CCP CALLS IT 'Orbital Skyhook' ──
+	//
+	// Measured against build 3475087, the first SDE any installation has ever
+	// imported. `sde.type` holds no row named 'Skyhook' at all; the anchorable
+	// structure is 81080 'Orbital Skyhook', alongside 'Skyhook Reagent Silo',
+	// 'Skyhook Cynosural Disruption' and 'Orbital Skyhook Wreck'.
+	//
+	// So this backfill resolved nothing, and would have gone on resolving
+	// nothing after an import — the failure the name-resolution was chosen to
+	// avoid, arriving through the name instead of through the id. Principle 13
+	// was followed correctly and the string was still a guess, because nothing
+	// had ever compared it to the SDE. That is what running import-sde for the
+	// first time bought.
+	//
+	// Both spellings are accepted. 'Orbital Skyhook' is what build 3475087
+	// ships and is tried first; 'Skyhook' stays as a fallback rather than being
+	// replaced, because a bare name is CCP's to rename and a lookup that
+	// survives one is worth four extra characters. ORDER BY makes the choice
+	// deterministic rather than leaving it to whichever row the planner reaches
+	// first.
 	BackfillSkyhookTypeIDFromSDE(ctx context.Context, corporationID int64) error
 	// Same name-resolved lookup as the skyhook type_id backfill above;
 	// system_id needs no equivalent here (00033's header: the list endpoint
