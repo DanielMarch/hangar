@@ -18,6 +18,116 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// ── PHASE 23 (N-9): ONE ASSEMBLY, BOTH ROLES ─────────────────────────────
+//
+// alertingRole is §4.4's whole pipeline — the two producers and the pump —
+// assembled once and started by BOTH `serve` and `work`. It is the shape
+// cmd/hangar/workers.go took for B-6, for the same reason and against the
+// same defect.
+//
+// ── THE DEFECT THIS CLOSES ───────────────────────────────────────────────
+//
+// wireAlertGeneration, runThresholdEvaluator, runAlertDispatcher and
+// ensureDefaultAlertChannels were called from cmd/hangar/work.go and
+// nowhere else, and docker-compose.yml's only `hangar` service is
+// `command: ["serve"]`. So a stock installation synchronised, provisioned,
+// served and swept — and produced no alert event and delivered no message.
+// §4.4 was entirely absent from it, and `serve` passed nil for Gate 3's two
+// metrics with a comment pointing at this item.
+//
+// 01_ARCHITECTURE.md §2 is as unambiguous here as it was about the workers:
+//
+//	[DECISION] Single-process default. Gate 5 forbids operational
+//	ceremony. `serve` does everything; `work`/`schedule` exist for
+//	administrators who have outgrown one box.
+//
+// ── WHY ONE ASSEMBLY AND NOT FOUR CALLS COPIED INTO serve.go ─────────────
+//
+// Because four calls copied into serve.go is how this happens a fourth
+// time. It is now the THIRD seam wired in one process only to have been a
+// defect — B-25's alert producers, B-6's River workers, and this — and in
+// each case the fix was cheap and the discovery cost a phase. A single
+// assembly means a producer added for one role cannot be missing from the
+// other. TestBothProcessRolesStartTheAlertingRole is the structural guard,
+// alongside workers_test.go's.
+//
+// ── WHY IT COULD NOT BE DONE BEFORE N-10 ─────────────────────────────────
+//
+// Starting a second pump while ClaimPendingAlertDeliveries was a bare
+// SELECT would have turned "alerts are never delivered on a default
+// installation" into "alerts are delivered TWICE on a scaled-out one",
+// which is worse. The claim is a lease as of this phase; see
+// db/queries/alert.sql.
+//
+// ── TWO PUMPS ON ONE OUTBOX IS NOW A SUPPORTED TOPOLOGY ──────────────────
+//
+// An operator co-running `hangar work` — or two `work` replicas, River's
+// normal scale-out — now has two or three dispatchers claiming the same
+// app.alert_delivery table. That is exactly what the lease is for, and
+// TestTwoDispatchersDoNotDoubleSend is the proof.
+type alertingRole struct {
+	// Emitter is the shared producer. Exported because `serve` also hands
+	// it to the API layer (api.Deps.Alerts) for the one administrative
+	// action §4.4 declares a default-enabled domain event for — advancing
+	// the ESI compatibility pin. ONE emitter per process: it holds no
+	// per-event state, and two would be two things to configure.
+	Emitter *alerting.Emitter
+	// Deliveries and DeadLetters are Gate 3's two metrics. Both roles run
+	// the pump now, so both roles register them — `serve` passed nil for
+	// both until this phase, which is why Gate 3's numbers were only ever
+	// visible from a process a default installation does not run.
+	Deliveries  *telemetry.AlertDeliveries
+	DeadLetters telemetry.DeadLetterDepthSource
+
+	dispatcher        *alerting.Dispatcher
+	thresholds        *alerting.Evaluator
+	dispatchInterval  time.Duration
+	thresholdInterval time.Duration
+	logger            *slog.Logger
+}
+
+// buildAlertingRole assembles the pipeline and performs the two pieces of
+// wiring that must happen before anything is started: provisioning the
+// env-configured default channels, and installing the CCP-notification
+// hook.
+//
+// It returns an error only for a genuine failure to provision a configured
+// channel. An installation with NO channels configured is a valid
+// installation and returns a working role that finds nothing to deliver —
+// Principle 7's optional-dependency shape.
+func buildAlertingRole(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, s *store.Store, logger *slog.Logger) (*alertingRole, error) {
+	if err := ensureDefaultAlertChannels(ctx, cfg, pool, logger); err != nil {
+		return nil, err
+	}
+
+	deliveries := telemetry.NewAlertDeliveries(channels.KnownKinds()...)
+	emitter := buildAlertEmitter(cfg, pool)
+	wireAlertGeneration(emitter, logger)
+
+	return &alertingRole{
+		Emitter:           emitter,
+		Deliveries:        deliveries,
+		DeadLetters:       deadLetterDepth{s},
+		dispatcher:        buildAlertDispatcher(cfg, pool, deliveries, logger),
+		thresholds:        buildThresholdEvaluator(cfg, pool, emitter, logger),
+		dispatchInterval:  cfg.Alerting.DispatchInterval,
+		thresholdInterval: cfg.Alerting.ThresholdInterval,
+		logger:            logger,
+	}, nil
+}
+
+// Start runs the pump and the threshold evaluator until ctx is cancelled.
+// Both are plain tickers rather than River jobs, because each pass is a
+// short idempotent sweep of a table — giving one a job row per tick would
+// put more rows through River than it delivers alerts.
+//
+// It returns immediately; the two loops run in their own goroutines and
+// stop with ctx.
+func (r *alertingRole) Start(ctx context.Context) {
+	go runAlertDispatcher(ctx, r.dispatcher, r.dispatchInterval, r.logger)
+	go runThresholdEvaluator(ctx, r.thresholds, r.thresholdInterval, r.logger)
+}
+
 // buildAlertDispatcher assembles Phase 14's outbox pump from configuration
 // (SRS §4.4). It never fails: an installation with no channels configured
 // is a valid installation, and the pump simply finds nothing to claim.
@@ -29,6 +139,7 @@ func buildAlertDispatcher(cfg *config.Config, pool *pgxpool.Pool, deliveries *te
 			Base:            cfg.Alerting.RetryBase,
 			Cap:             cfg.Alerting.RetryCap,
 			DeadLetterAfter: cfg.Alerting.DeadLetterAfter,
+			Lease:           cfg.Alerting.Lease,
 		},
 		ClaimSize: cfg.Alerting.ClaimSize,
 		Observer:  deliveries,

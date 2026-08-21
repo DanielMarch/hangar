@@ -184,16 +184,35 @@ func runServe(ctx context.Context) error {
 		return err
 	}
 
+	// PHASE 23 (N-9): §4.4's pipeline — both producers and the pump — from
+	// the one assembly `work` also uses. Until this phase it ran under
+	// `work` and nowhere else, so a stock installation (whose only hangar
+	// service is `command: ["serve"]`) generated no alert event and
+	// delivered no message. See cmd/hangar/alerting.go for the full
+	// account, and why it had to wait for the claim to become a lease.
+	//
+	// Built before the metrics listener so its two Gate 3 collectors can be
+	// registered on the registry, and before the API deps so both share one
+	// emitter. Started further down, with the other background loops.
+	alerts, err := buildAlertingRole(ctx, cfg, pool, s, logger)
+	if err != nil {
+		return err
+	}
+
 	// Phase 20.1 (B36). On its OWN listener, not on the mux below: the mux
 	// is bound to the published port, and /metrics is unauthenticated.
 	//
 	// PHASE 22: `serve` builds an ESI gateway now, so it contributes the
 	// ledger mode, the gateway counters and the revocation histogram as
-	// well as the replica and divergence gauges. Gate 3's alert-delivery
-	// metrics remain `work`-only, because the outbox pump does — see
-	// docs/PRE_V1_OPEN_ITEMS.md N-9.
+	// well as the replica and divergence gauges.
+	//
+	// PHASE 23 (N-9): and Gate 3's alert-delivery counter and dead-letter
+	// depth, which used to be nil here because the pump was `work`-only.
+	// Two nils and a comment pointing at an open item is what a metric
+	// looks like when the subsystem it measures does not run.
 	stopMetrics := startMetricsListener(hbCtx, cfg.MetricsAddr,
-		buildMetricsRegistry(s, governor1, counters, revocationLatency, nil, nil, cfg.ESI.ErrorLimitMax, logger), logger)
+		buildMetricsRegistry(s, governor1, counters, revocationLatency, alerts.Deliveries, alerts.DeadLetters,
+			cfg.ESI.ErrorLimitMax, logger), logger)
 	defer stopMetrics()
 
 	mux := http.NewServeMux()
@@ -265,12 +284,21 @@ func runServe(ctx context.Context) error {
 	// finds none, and does so forever.
 	go runSubscriptionReconciler(hbCtx, s, logger)
 
+	// PHASE 23 (N-9). Started here rather than at build time so the
+	// CCP-notification hook is installed before the River pool starts —
+	// a sync pass that writes a notification before the hook is set
+	// produces no alert event for it, and that is the whole defect class
+	// this seam keeps falling into.
+	alerts.Start(hbCtx)
+
 	// Phase 20.4 (B25): `serve` is the process that performs the one
 	// administrative action §4.4 declares a default-enabled DOMAIN EVENT
-	// for — advancing the ESI compatibility pin. It produces alert events
-	// into the shared outbox; `work` still owns the pump that delivers
-	// them, and therefore owns Gate 3's delivery metrics.
-	deps := api.Deps{Store: s, Pool: pool, SSO: flow, Urgent: urgent, Alerts: buildAlertEmitter(cfg, pool), Keyring: keyring}
+	// for — advancing the ESI compatibility pin.
+	//
+	// PHASE 23 (N-9): the SAME emitter the pipeline's producers use, rather
+	// than a second one built here. `work` no longer "owns the pump that
+	// delivers them" — both roles run it.
+	deps := api.Deps{Store: s, Pool: pool, SSO: flow, Urgent: urgent, Alerts: alerts.Emitter, Keyring: keyring}
 	api.Version = version
 	hapi := api.NewAPI(mux, deps)
 	v1.RegisterAll(hapi, deps)

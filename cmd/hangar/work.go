@@ -6,7 +6,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/hangar-project/hangar/internal/alerting/channels"
 	"github.com/hangar-project/hangar/internal/crypto"
 	"github.com/hangar-project/hangar/internal/provisioning"
 	"github.com/hangar-project/hangar/internal/store"
@@ -71,18 +70,25 @@ func runWork(ctx context.Context) error {
 	// registered on it.
 	revocationLatency := telemetry.NewRevocationLatency(provisioning.KnownOutcomes()...)
 
-	// Phase 20.4: Gate 3's metrics, and for the same reason — the outbox
-	// PUMP runs here and nowhere else, so this is the only process in which
-	// alert_delivery_total can move or alert_dead_letter_depth means
-	// anything. Registering them on `serve` would export a settled-delivery
-	// counter from a process that settles none.
-	alertDeliveries := telemetry.NewAlertDeliveries(channels.KnownKinds()...)
+	// Phase 20.4: Gate 3's metrics.
+	//
+	// PHASE 23 (N-9): they used to be built HERE, with a comment saying the
+	// pump "runs here and nowhere else, so this is the only process in
+	// which alert_delivery_total can move". That was true and was the
+	// defect — the process a default installation actually runs is `serve`,
+	// so Gate 3's numbers were only ever visible from a process nobody
+	// runs. They are built by buildAlertingRole now, which both roles call,
+	// and both roles register what it returns.
+	alerts, err := buildAlertingRole(ctx, cfg, pool, s, logger)
+	if err != nil {
+		return err
+	}
 
 	// Phase 20.1 (B36). `work` is the process that actually calls ESI, so
 	// it is the one whose esi_ledger_mode reading answers Gate 1.8. It has
 	// no other HTTP listener, which is why the metrics endpoint is its own.
 	stopMetrics := startMetricsListener(ctx, cfg.MetricsAddr,
-		buildMetricsRegistry(s, governor1, counters, revocationLatency, alertDeliveries, deadLetterDepth{s},
+		buildMetricsRegistry(s, governor1, counters, revocationLatency, alerts.Deliveries, alerts.DeadLetters,
 			cfg.ESI.ErrorLimitMax, logger), logger)
 	defer stopMetrics()
 
@@ -132,25 +138,6 @@ func runWork(ctx context.Context) error {
 	}
 	defer func() { _ = riverClient.Stop(context.Background()) }()
 
-	// Phase 14: the alert outbox pump. It runs as a plain ticker alongside
-	// the River pool rather than as a River job, because a delivery pass is
-	// a short, idempotent sweep of a table — giving it a job row per tick
-	// would put more rows through River than it delivers alerts. Channels
-	// come from app.alert_channel; an installation with none configured
-	// runs this loop finding nothing, which is the default and is not an
-	// error (Principle 7's optional-dependency shape).
-	if err := ensureDefaultAlertChannels(ctx, cfg, pool, logger); err != nil {
-		return err
-	}
-	dispatcher := buildAlertDispatcher(cfg, pool, alertDeliveries, logger)
-
-	// Phase 20.4 (B25): the pump finally has producers. The notification
-	// hook fires from the sync handlers this process runs; the threshold
-	// evaluator is its own ticker. See cmd/hangar/alerting.go.
-	emitter := buildAlertEmitter(cfg, pool)
-	wireAlertGeneration(emitter, logger)
-	thresholds := buildThresholdEvaluator(cfg, pool, emitter, logger)
-
 	// Phase 19: §4.9's webhook pump, alongside the alert pump and for the
 	// same reasons — a short idempotent sweep of a table, not worth a River
 	// job row per tick. Without this the outbox is write-only: rbac's
@@ -164,8 +151,9 @@ func runWork(ctx context.Context) error {
 
 	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	go runAlertDispatcher(sigCtx, dispatcher, cfg.Alerting.DispatchInterval, logger)
-	go runThresholdEvaluator(sigCtx, thresholds, cfg.Alerting.ThresholdInterval, logger)
+	// PHASE 23 (N-9): §4.4's producers and pump, from the one assembly
+	// `serve` also starts. See cmd/hangar/alerting.go.
+	alerts.Start(sigCtx)
 	go runWebhookDispatcher(sigCtx, webhooks, cfg.Alerting.DispatchInterval, logger)
 	hb.Run(sigCtx)
 	return nil
