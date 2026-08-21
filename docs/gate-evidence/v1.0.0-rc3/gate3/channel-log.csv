@@ -1,5 +1,5 @@
 channel,kind,behaviour,attempts,messages_accepted,largest_rollup
-healthy,slack_webhook,always accepts,414,414,11
-transient,discord_webhook,fails the first 2 sends, then accepts (retry path),373,371,11
-permanent,smtp,PermanentError on every send (immediate dead-letter),2872,0,0
-always-down,slack_webhook,transient failure on every send (dead-letters the slow way),3136,0,0
+healthy,slack_webhook,always accepts,413,413,11
+transient,discord_webhook,fails the first 2 sends, then accepts (retry path),372,370,11
+permanent,smtp,PermanentError on every send (immediate dead-letter),2870,0,0
+always-down,slack_webhook,transient failure on every send (dead-letters the slow way),3160,0,0

@@ -7,7 +7,7 @@
   },
   "metric_cross_check": {
     "dead_lettered": 7669,
-    "retried": 18062,
+    "retried": 18049,
     "sent": 5785
   },
   "observed": {

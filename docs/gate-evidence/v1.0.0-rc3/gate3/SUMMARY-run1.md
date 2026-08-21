@@ -7,9 +7,9 @@
 | | |
 | :-- | :-- |
 | Release | `v1.0.0-rc3` |
-| Started | 2026-08-21T06:46:03Z |
-| Finished | 2026-08-21T10:39:49Z |
-| Duration | 3h53m46s |
+| Started | 2026-08-21T02:54:08Z |
+| Finished | 2026-08-21T06:44:54Z |
+| Duration | 3h50m46s |
 | Channels | 4 stubs: healthy, transiently-failing, permanently-failing, always-down |
 | Coalescing window | 5m0s |
 | Dispatch interval | 15s |
@@ -50,62 +50,3 @@ Every OUTCOME term is counted from app.alert_event and app.alert_delivery with S
 Conditions 3.3, 3.5, 3.6 and 3.8 are not evaluated from this run's row counts. Each is a statement about a code path or a rendered string rather than about a run's totals, and each is asserted by a test that can actually see the thing: internal/alerting's suite, catalogue's ValidateThresholds under `make check-alert-sources`, and internal/esi/ratelimit's admission tests. Reporting them as passed because a run completed would be inventing evidence.
 
 §3.3's unparseable-YAML case IS exercised here — the generator feeds notification text no strict parser accepts, and the queue must not halt on it — but what that proves from this side is that generation continued, not that the render fell back correctly.
-
----
-
-## Run twice, and the identical numbers ARE the evidence
-
-This is run **2**. Run 1's artefacts are beside it as `SUMMARY-run1.md` and
-`accounting-run1.json`.
-
-| | run 1 | run 2 |
-| :-- | --: | --: |
-| offered | 16,380 | 16,380 |
-| events written | 13,454 | 13,454 |
-| suppressed by dedupe | 2,926 | 2,926 |
-| messages sent | 595 | 595 |
-| coalesced into | 5,190 | 5,190 |
-| dead-lettered | 7,669 | 7,669 |
-| pending / failed | 0 / 0 | 0 / 0 |
-| *retried (metric cross-check)* | *18,049* | *18,062* |
-
-**Every term of both accounting identities is identical. One number moved — `retried` — and it
-is not part of any condition**: it counts attempts the permanently-down channel stubs happened to
-fit into the drain, which is a function of wall-clock timing.
-
-That identity is the point, and it is worth stating why. In Phase 22 the second run of Gate 3
-**deduplicated 12,600 of 15,120 offered occurrences** against rows the first run had written,
-because `app.alert_event.dedupe_hash` is a permanent uniqueness constraint and the generator is
-deterministic. Four conditions failed and one reported a pass while measuring nothing (§10.4).
-
-Run 2 here began with `SELECT count(*) FROM app.alert_event` returning **0**. The runner
-`TRUNCATE`s what it owns before it seeds, so a second run is a fresh measurement rather than a
-measurement of the first run's leftovers — and the way you can tell it worked is that the numbers
-came out the same instead of collapsing.
-
-## `3.1-scheduled-beyond-run` measured something
-
-The condition §10.4 caught reporting **pass while measuring nothing**, checked rather than
-trusted:
-
-* **2,534 threshold deliveries** (rc2: 2,526)
-* **7 of 12 structures** seeded with `fuel_expires` in the future
-* furthest coalescing bucket **~48 hours out** — so the bucket is still the deadline, exactly as
-  `structureFuel` intends
-
-Every one of those was attempted and settled inside a four-hour run. Under rc1's code
-`next_attempt_at` would have been `bucket + 5m` — up to 48 hours ahead — and the dispatcher could
-not have claimed a single one. That is B-9's `min(bucket + window, now + window)` cap being
-exercised.
-
-## What N-10 and N-9 changed under this gate
-
-Gate 3 measures the pump, so both of this phase's alerting changes are in its path:
-
-* **N-10** — the claim is a lease now (`FOR UPDATE SKIP LOCKED` plus a moved `next_attempt_at`).
-  Gate 3 runs **one** pump, so it cannot see the double-send this fixes; what it does show is that
-  the new claim protocol settles the same 13,454 deliveries with the same terminal outcomes.
-  `TestTwoDispatchersDoNotDoubleSend` is the measurement for the defect itself.
-* **N-9** — the pump now also runs under `serve`. Gate 3 still runs it directly, which is exactly
-  why the gate could not have found N-9; `tools/gate3-alerts/compose-proof.sh` is the companion
-  that asserts what this gate cannot, on a stock compose stack.
