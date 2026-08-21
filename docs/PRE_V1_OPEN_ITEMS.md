@@ -1115,11 +1115,19 @@ pulled copy with verdicts identical to the built one. That third run is in
 `release-verify-from-registry/`. It is the only run of the six-check suite that measures what an
 operator actually installs; the other two measure what this machine happened to have.
 
-**Two commits follow the tag, not one.** The brief expected exactly one — Gate 6's. The second is
-this evidence, and the ordering is forced rather than sloppy: `release-verify` writes into
-`docs/gate-evidence/v1.0.0-rc3/`, so had it run before Gate 6 its untracked output would have
-failed §6.2's clean-tree check — the identical trap that this phase already hit with Gate 6's own
-artefacts. Gate 6 has to be sealed before the image work can begin.
+**Four commits follow the tag, not the one the brief expected.** They are, in order: Gate 6's
+artefacts; the image rebuild and its verification; the registry round trip; and this correction,
+which exists because the paragraph you are reading said "two" until the count outgrew it.
+
+The first three are forced rather than sloppy, and by the same mechanism each time. Every one of
+them writes into `docs/gate-evidence/v1.0.0-rc3/`, and §6.2 fails on any untracked path — so Gate 6
+cannot run until the tag exists, and nothing that writes evidence can run until Gate 6 is sealed.
+The release work is therefore strictly downstream of the tag, and the brief's "exactly one
+commit" is achievable only if the image is never rebuilt or never verified.
+
+The fourth is not forced. It is the honest cost of putting a count in a file that the counting
+changes, and it is left visible rather than amended away, because a reader checking
+`git rev-list --count v1.0.0-rc3..HEAD` should get the number this page claims.
 
 #### What a reader should check first to disbelieve this
 
