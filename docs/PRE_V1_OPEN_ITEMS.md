@@ -979,7 +979,7 @@ The gates re-run at rc3, and what each one's subject was:
 | Gate | Runs | Result | Why it was re-run |
 | :-- | :-- | :-- | :-- |
 | 1 ESI Load Stability | 1 at N=1, 1 at N=3 | **PASS**, both | N-5 put the cache key on the request path |
-| 2 Revocation SLO | not re-run | rc2 stands | **Nothing this phase touched it.** No change to `internal/provisioning`, the urgent queue, the revocation triggers or §2.2's measurement path |
+| 2 Revocation SLO | **started, paused by the operator** | rc2 stands; **not measured at rc3** | `internal/provisioning` is untouched, but N-4 added `SetEntitlementRuleEnabled` — a NEW caller of `Urgent.HandleUserChange`. See `gate2/NOT_RE_RUN.md` and `gate2/PAUSED.md` |
 | 3 Alert Delivery Integrity | 2 | **PASS**, identical | N-10 changed the claim protocol and N-9 changed which process runs the pump |
 | 4 Feature Parity | 2 | **PASS**, byte-identical | N-4 built new surface |
 | 5 Deployment Usability | 2 | **PASS**, identical | N-6 is in `migrate up`, and D-2 published the artefacts 5.2 measures |
@@ -1064,7 +1064,8 @@ be the bar, they are met, and the alternative to shipping is another phase of th
 single-machine evidence.
 
 **What changes the answer.** If §8's "release blocks on all seven" is read strictly, one detail
-matters: Gate 1 ran once per replica count rather than twice, and Gate 2 was not re-run at all.
+matters: Gate 1 ran once per replica count rather than twice, and Gate 2 has not been measured at
+rc3 at all.
 Neither is a failing measurement; both are smaller samples than every other gate has. A reader
 who requires every gate to have been run twice at the release commit does not have that, and
 should say so rather than be told it is fine.
@@ -1115,9 +1116,9 @@ pulled copy with verdicts identical to the built one. That third run is in
 `release-verify-from-registry/`. It is the only run of the six-check suite that measures what an
 operator actually installs; the other two measure what this machine happened to have.
 
-**Four commits follow the tag, not the one the brief expected.** They are, in order: Gate 6's
-artefacts; the image rebuild and its verification; the registry round trip; and this correction,
-which exists because the paragraph you are reading said "two" until the count outgrew it.
+**Five commits follow the tag, not the one the brief expected.** They are, in order: Gate 6's
+artefacts; the image rebuild and its verification; the registry round trip; a correction to this
+paragraph, which said "two" until the count outgrew it; and the Gate 2 pause note.
 
 The first three are forced rather than sloppy, and by the same mechanism each time. Every one of
 them writes into `docs/gate-evidence/v1.0.0-rc3/`, and §6.2 fails on any untracked path — so Gate 6
