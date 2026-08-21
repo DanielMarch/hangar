@@ -1,0 +1,6 @@
+migrate	pass	migrate up exited 0 against a fresh PostgreSQL 18
+serve	pass	/healthz answered 200 from the image with no configuration beyond the five required variables
+metrics	pass	146 series exposed, including Gate 3's alert_delivery_total / alert_dead_letter_depth (13) — which serve exported as literal nils before Phase 23
+alert-catalogue	pass	54 alert types with 4 thresholds resolved on the first boot
+locale	pass	exit 1, naming the variable and listing the nine valid locales rather than failing opaquely
+schema-drift	pass	exit 1, naming the missing INDEX and saying migrate up will not restore it — at rc2 this check could only drop a table
