@@ -1,0 +1,27 @@
+{
+  "generated": {
+    "offered": 16380,
+    "events_written": 13454,
+    "suppressed_by_dedupe": 2926,
+    "deliveries_enqueued": 10920
+  },
+  "metric_cross_check": {
+    "dead_lettered": 7669,
+    "retried": 18049,
+    "sent": 5785
+  },
+  "observed": {
+    "events": 13454,
+    "events_without_delivery": 0,
+    "deliveries": 13454,
+    "messages_sent": 595,
+    "coalesced_into": 5190,
+    "dead_lettered": 7669,
+    "pending": 0,
+    "failed": 0,
+    "categories": 3,
+    "domains": 9,
+    "unknown_types_boarded": 42
+  },
+  "settled_before_end_of_run": true
+}
