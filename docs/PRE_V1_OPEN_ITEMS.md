@@ -1075,6 +1075,44 @@ seventeen unservable legacy routes with derived reasons, an alliance worker with
 work on, an unread station-name column CCP does not ship, a unit file verified in a container.
 They are the shape of an honest first release rather than of an unfinished one.
 
+#### The rebuild found one more thing, and it was in the thing being shipped
+
+The release procedure says rebuild the image `--no-cache` from the tagged commit and verify it end
+to end. That step is usually ceremony. This time it was not.
+
+The image already published to `ghcr.io/danielmarch/hangar:v1.0.0-rc3` — pushed earlier in this
+phase, digest `eb14075c` — reports its own identity as:
+
+```
+hangar version dev (commit unknown, built )
+```
+
+It had been built without `--build-arg`, so the three ldflags that stamp version, commit and
+build date were never set. Every functional check passes against that image; it serves, migrates,
+exposes 146 metric series and resolves its alert catalogue. It simply cannot tell an operator
+which commit it is. That is precisely the question an operator asks first when something is
+wrong, and the one an image is uniquely able to answer.
+
+Nothing in the test suite could have caught it. `--version` is stamped at link time by the
+build command, so it is correct in every binary the tests build and wrong only in the artefact
+nobody compiles locally. It is the same class of defect as the two `serve`-only gaps this phase
+found (N-9's alerting pipeline, the nil Gate 3 metrics): a thing that is right everywhere except
+where it ships.
+
+The rebuilt image reports `hangar version v1.0.0-rc3 (commit 4d8a8d7, ...)`.
+
+Worth saying without softening it: `tools/release-verify/run.sh` logs `--version` as its third line
+and always did. The string `built: hangar version dev (commit unknown, built )` was written to
+the transcript, in front of a reader, and the reader was me. The measurement was taken and not
+read. That is a different failure from not measuring, and a worse one, because the fix for not
+measuring is a new check and the fix for this is only attention.
+
+**Two commits follow the tag, not one.** The brief expected exactly one — Gate 6's. The second is
+this evidence, and the ordering is forced rather than sloppy: `release-verify` writes into
+`docs/gate-evidence/v1.0.0-rc3/`, so had it run before Gate 6 its untracked output would have
+failed §6.2's clean-tree check — the identical trap that this phase already hit with Gate 6's own
+artefacts. Gate 6 has to be sealed before the image work can begin.
+
 #### What a reader should check first to disbelieve this
 
 In order of how likely each is to be wrong.

@@ -1,0 +1,100 @@
+image:  hangar:v1.0.0-rc3
+digest: sha256:0da18ad33062c6a44957315f3bc523af89cae2e00c5199019e7be6e71c321a4f
+built:  hangar version v1.0.0-rc3 (commit 4d8a8d7, built 2026-08-21T19:23:42Z)
+
+### a throwaway PostgreSQL 18
+dc1f8cb1de1c022bb46589aca18412081801add8a3eceee5c2c910472698daa7
+f93d707476a28403da3becbbbfadf4e62e8caaa78c57054c3b787e7e56748971
+
+### migrations, from the image
+migrate up: river schema current
+2026/08/21 19:25:18 OK   00001_schemas.sql (3.04ms)
+2026/08/21 19:25:18 OK   00002_platform_vocabulary.sql (10.5ms)
+2026/08/21 19:25:18 OK   00003_platform_reference.sql (23.88ms)
+2026/08/21 19:25:18 OK   00004_platform_identity.sql (60.79ms)
+2026/08/21 19:25:18 OK   00005_platform_rbac.sql (56.73ms)
+2026/08/21 19:25:18 OK   00006_platform_esi_gateway.sql (54.4ms)
+2026/08/21 19:25:18 OK   00007_platform_provisioning.sql (30.76ms)
+2026/08/21 19:25:18 OK   00008_platform_alerting.sql (33.07ms)
+2026/08/21 19:25:18 OK   00009_platform_events.sql (18.19ms)
+2026/08/21 19:25:18 OK   00010_domain_corporation_structure.sql (66.49ms)
+2026/08/21 19:25:18 OK   00011_domain_corporation_projects.sql (12.77ms)
+2026/08/21 19:25:18 OK   00012_domain_history.sql (9.83ms)
+2026/08/21 19:25:18 OK   00013_domain_assets.sql (12.67ms)
+2026/08/21 19:25:18 OK   00014_domain_wallets.sql (24.84ms)
+2026/08/21 19:25:18 OK   00015_domain_contracts.sql (18.25ms)
+2026/08/21 19:25:18 OK   00016_domain_industry_mining.sql (24.83ms)
+2026/08/21 19:25:18 OK   00017_domain_market.sql (21.43ms)
+2026/08/21 19:25:18 OK   00018_domain_killmails.sql (21.84ms)
+2026/08/21 19:25:18 OK   00019_domain_social.sql (20.49ms)
+2026/08/21 19:25:18 OK   00020_domain_character_sheet.sql (38.74ms)
+2026/08/21 19:25:18 OK   00021_domain_fittings.sql (10.9ms)
+2026/08/21 19:25:18 OK   00022_domain_mail.sql (21.06ms)
+2026/08/21 19:25:18 OK   00023_domain_notifications.sql (14.37ms)
+2026/08/21 19:25:18 OK   00024_domain_calendar.sql (14.24ms)
+2026/08/21 19:25:18 OK   00025_domain_planetary.sql (10.45ms)
+2026/08/21 19:25:18 OK   00026_domain_sovereignty.sql (30.84ms)
+2026/08/21 19:25:18 OK   00027_domain_tools.sql (14.78ms)
+2026/08/21 19:25:18 OK   00028_domain_intel.sql (7.71ms)
+2026/08/21 19:25:18 OK   00029_domain_fixups.sql (4.22ms)
+2026/08/21 19:25:18 OK   00030_phase7_character_fixups.sql (30.81ms)
+2026/08/21 19:25:18 OK   00031_phase8_acting_character_history.sql (7.59ms)
+2026/08/21 19:25:18 OK   00032_phase8_mining_extraction_structure_id.sql (3.48ms)
+2026/08/21 19:25:18 OK   00033_phase8_1_skyhook_reagent_fixup.sql (7.25ms)
+2026/08/21 19:25:18 OK   00034_phase9_market_issued_by.sql (2.87ms)
+2026/08/21 19:25:18 OK   00035_phase9_notification_payload.sql (5.88ms)
+2026/08/21 19:25:18 OK   00036_phase9_sde_core_tables.sql (78.91ms)
+2026/08/21 19:25:18 OK   00037_phase11_entitlement_source_fixup.sql (3.31ms)
+2026/08/21 19:25:18 OK   00038_phase12_discord_invalid_budget.sql (4.47ms)
+2026/08/21 19:25:18 OK   00039_phase13_teamspeak_challenge.sql (8.09ms)
+2026/08/21 19:25:18 OK   00040_phase15_1_defect_closure.sql (5.47ms)
+2026/08/21 19:25:18 OK   00041_phase19_outbox_dispatch.sql (7.68ms)
+2026/08/21 19:25:18 OK   00042_phase20_4_ledger_divergence_pair.sql (2.89ms)
+2026/08/21 19:25:18 OK   00043_phase20_4_1_reconcile_residual.sql (3.34ms)
+2026/08/21 19:25:18 OK   00044_phase20_5_webhook_secret_rotation.sql (4.32ms)
+2026/08/21 19:25:18 OK   00045_phase20_6_keyset_covering_indexes.sql (13.8ms)
+2026/08/21 19:25:19 OK   00046_phase20_9_character_skill_summary.sql (5.51ms)
+2026/08/21 19:25:19 goose: successfully migrated database to version: 46
+migrate up: app/sde schema current — tables, columns and indexes verified against the migrations, not just goose's log
+migrate up: seed data applied
+migrate up: 50 alert types seeded, and 4 THRESHOLD types are DEFERRED.
+migrate up:   corporation.structure.fuel_low, corporation.starbase.fuel_low,
+migrate up:   corporation.member.inactive, corporation.contract.expiring
+migrate up: each declares an ESI source route, and app.esi_route is empty until the
+migrate up: catalogue is ingested. They complete automatically on the first ingest —
+migrate up: `serve` does one at startup, or run `hangar admin ingest-catalogue`.
+migrate up: Until then no routing rule can be created for them and they cannot fire.
+[pass] migrate — migrate up exited 0 against a fresh PostgreSQL 18
+
+### serve
+09ca79c9532a461a40aadf5a45de92cddd1e7f6ced9737c020361b2f0f8ad5f4
+[pass] serve — /healthz answered 200 from the image with no configuration beyond the five required variables
+
+### /metrics
+[pass] metrics — 146 series exposed, including Gate 3's alert_delivery_total / alert_dead_letter_depth (13) — which serve exported as literal nils before Phase 23
+
+### 54 alert types with 4 thresholds on the FIRST boot
+[pass] alert-catalogue — 54 alert types with 4 thresholds resolved on the first boot
+
+### an invalid HANGAR_LOCALE is rejected
+Error: config: invalid configuration: HANGAR_LOCALE: invalid value "xx-INVALID" (want one of en, de, fr, ja, ko, ru, zh-CN, af, ro)
+config: invalid configuration: HANGAR_LOCALE: invalid value "xx-INVALID" (want one of en, de, fr, ja, ko, ru, zh-CN, af, ro)
+[pass] locale — exit 1, naming the variable and listing the nine valid locales rather than failing opaquely
+
+### a drifted schema is rejected — by dropping an INDEX, which only Phase 23 can catch
+dropping app.alert_delivery_state_next_attempt_at_idx
+DROP INDEX
+migrate up: river schema current
+2026/08/21 19:25:30 goose: no migrations to run. current version: 46
+Error: migrate: schema is NOT current — 1 object(s) the migrations create are absent — 1 index(es): app.alert_delivery USING btree (state, next_attempt_at) WHERE .... `hangar migrate up` will NOT restore them: goose records those migrations as applied, so re-running is a no-op. Restore from a backup, or re-create the objects from the migration that declares them (db/migrations/) and verify with this check.
+[pass] schema-drift — exit 1, naming the missing INDEX and saying migrate up will not restore it — at rc2 this check could only drop a table
+
+### verdicts
+migrate	pass	migrate up exited 0 against a fresh PostgreSQL 18
+serve	pass	/healthz answered 200 from the image with no configuration beyond the five required variables
+metrics	pass	146 series exposed, including Gate 3's alert_delivery_total / alert_dead_letter_depth (13) — which serve exported as literal nils before Phase 23
+alert-catalogue	pass	54 alert types with 4 thresholds resolved on the first boot
+locale	pass	exit 1, naming the variable and listing the nine valid locales rather than failing opaquely
+schema-drift	pass	exit 1, naming the missing INDEX and saying migrate up will not restore it — at rc2 this check could only drop a table
+
+every check PASSED
